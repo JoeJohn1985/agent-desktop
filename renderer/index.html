@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Copilot Desktop</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+</head>
+<body>
+
+  <!-- Custom Title Bar -->
+  <header class="titlebar" id="titlebar">
+    <div class="titlebar__left">
+      <span class="titlebar__icon">🤖</span>
+      <span class="titlebar__title">Copilot Desktop</span>
+    </div>
+    <div class="titlebar__center">
+      <span class="titlebar__status" id="statusBadge">⚡ Bereit</span>
+    </div>
+    <div class="titlebar__controls">
+      <button class="titlebar__btn" onclick="copilot.window.minimize()">─</button>
+      <button class="titlebar__btn" onclick="copilot.window.maximize()">□</button>
+      <button class="titlebar__btn titlebar__btn--close" onclick="copilot.window.close()">✕</button>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+
+      <!-- Sessions Section -->
+      <div class="sidebar__section">
+        <div class="sidebar__header" onclick="toggleSection('sessions')">
+          <span>📂 Sessions</span>
+          <span class="sidebar__badge" id="sessionCount">0</span>
+        </div>
+        <div class="sidebar__search">
+          <input type="text" id="sessionSearch" placeholder="Suchen…" />
+        </div>
+        <div class="sidebar__content" id="sessionsContent">
+          <div class="sidebar__list" id="sessionList"></div>
+        </div>
+      </div>
+
+      <!-- Skills Section -->
+      <div class="sidebar__section">
+        <div class="sidebar__header" onclick="toggleSection('skills')">
+          <span>🛠️ Skills</span>
+        </div>
+        <div class="sidebar__content" id="skillsContent">
+          <div class="sidebar__list" id="skillList"></div>
+        </div>
+      </div>
+
+      <!-- Status Section -->
+      <div class="sidebar__section">
+        <div class="sidebar__header" onclick="toggleSection('status')">
+          <span>📊 Status</span>
+        </div>
+        <div class="sidebar__content" id="statusContent">
+          <div id="statusPanel" class="status-panel">
+            <p class="status-panel__empty">Keine aktive Session</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="sidebar__footer">
+        <button class="action-btn action-btn--primary" id="btnNewSession" title="Neue Copilot-Session">
+          ✨ Neue Session
+        </button>
+        <button class="action-btn" id="btnRefresh" title="Sessions neu laden">
+          🔄
+        </button>
+      </div>
+    </aside>
+
+    <!-- Resize Handle -->
+    <div class="resize-handle" id="resizeHandle"></div>
+
+    <!-- Terminal -->
+    <main class="terminal-container">
+      <div class="tab-bar" id="tabBar">
+        <!-- Tabs werden dynamisch eingefügt -->
+        <button class="tab-add" id="btnAddTab" title="Neuer Tab">+</button>
+      </div>
+      <div class="terminals" id="terminals"></div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
