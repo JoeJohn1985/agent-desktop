@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('copilot', {
   // Terminal (multi-tab)
   terminal: {
-    create: (command) => ipcRenderer.invoke('terminal:create', command),
+    create: (command, cols, rows) => ipcRenderer.invoke('terminal:create', command, cols, rows),
     write: (tabId, data) => ipcRenderer.send('terminal:input', tabId, data),
     resize: (tabId, cols, rows) => ipcRenderer.send('terminal:resize', tabId, cols, rows),
     close: (tabId) => ipcRenderer.send('terminal:close', tabId),
@@ -15,10 +15,15 @@ contextBridge.exposeInMainWorld('copilot', {
     list: () => ipcRenderer.invoke('sessions:list'),
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
+    delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
   // Config
   config: {
     read: () => ipcRenderer.invoke('config:read'),
+  },
+  // Skills
+  skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
   },
   // Window
   window: {

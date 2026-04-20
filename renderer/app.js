@@ -3,12 +3,7 @@ const { FitAddon } = window.FitAddon;
 const { WebLinksAddon } = window.WebLinksAddon;
 
 // ── Skills Definition ────────────────────────────────────────
-const SKILLS = [
-  { id: 'pdf', name: 'PDF', desc: 'PDF-Dateien lesen und analysieren', icon: '📄' },
-  { id: 'xlsx', name: 'Excel', desc: 'Excel-Dateien verarbeiten', icon: '📊' },
-  { id: 'code-review', name: 'Code Review', desc: 'Code-Änderungen prüfen', icon: '🔍' },
-  { id: 'customize-cloud-agent', name: 'Cloud Agent', desc: 'Copilot Cloud Agent konfigurieren', icon: '☁️' },
-];
+let skills = []; // dynamically loaded from main process
 
 // ── State ────────────────────────────────────────────────────
 let sessions = [];
@@ -19,7 +14,30 @@ let activeSkills = new Set();
 const tabs = new Map(); // tabId → { term, fitAddon, container, label }
 let activeTabId = null;
 
-const TERM_THEME = {
+const TERM_THEME_LIGHT = {
+  background: '#f5f3ef',
+  foreground: '#1a1a1a',
+  cursor: '#0078d4',
+  selectionBackground: '#add6ff',
+  black: '#1a1a1a',
+  red: '#d1383d',
+  green: '#16825d',
+  yellow: '#c08b30',
+  blue: '#0078d4',
+  magenta: '#8b5fc7',
+  cyan: '#1a9ba1',
+  white: '#e5e5e5',
+  brightBlack: '#555555',
+  brightRed: '#e64b4b',
+  brightGreen: '#1ea870',
+  brightYellow: '#d4a04a',
+  brightBlue: '#2b8fdb',
+  brightMagenta: '#a472d9',
+  brightCyan: '#28b3b8',
+  brightWhite: '#f5f3ef',
+};
+
+const TERM_THEME_DARK = {
   background: '#1e1e2e',
   foreground: '#cdd6f4',
   cursor: '#f5e0dc',
@@ -42,19 +60,80 @@ const TERM_THEME = {
   brightWhite: '#a6adc8',
 };
 
+const TERM_THEME_GEBIT = {
+  background: '#EFF1F4',
+  foreground: '#00335E',
+  cursor: '#3B63A0',
+  selectionBackground: '#C8CCD4',
+  black: '#3E4143',
+  red: '#C00000',
+  green: '#006C52',
+  yellow: '#FFC000',
+  blue: '#3B63A0',
+  magenta: '#6B5B95',
+  cyan: '#109FDA',
+  white: '#EFF1F4',
+  brightBlack: '#5F5F5F',
+  brightRed: '#C00000',
+  brightGreen: '#006C52',
+  brightYellow: '#FFC000',
+  brightBlue: '#109FDA',
+  brightMagenta: '#6B5B95',
+  brightCyan: '#109FDA',
+  brightWhite: '#FFFFFF',
+};
+
+const THEMES = ['light', 'dark', 'gebit'];
+
+function getCurrentTheme() {
+  return localStorage.getItem('theme') || 'light';
+}
+
+function getTermTheme() {
+  const theme = getCurrentTheme();
+  if (theme === 'dark') return TERM_THEME_DARK;
+  if (theme === 'gebit') return TERM_THEME_GEBIT;
+  return TERM_THEME_LIGHT;
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+
+  // Update toggle button
+  const btn = document.getElementById('btnThemeToggle');
+  if (btn) {
+    if (theme === 'light') {
+      btn.innerHTML = '<span style="filter:grayscale(1) brightness(0.4)">🌙</span>';
+      btn.title = 'Dunkel-Modus';
+    } else if (theme === 'dark') {
+      btn.innerHTML = '<img src="../assets/gebit-logo-white.svg" style="width:18px;height:18px;vertical-align:middle;" alt="GEBIT">';
+      btn.title = 'GEBIT-Modus';
+    } else {
+      btn.innerHTML = '☀️';
+      btn.title = 'Hell-Modus';
+    }
+  }
+
+  // Update all terminal themes
+  const termTheme = theme === 'dark' ? TERM_THEME_DARK : theme === 'gebit' ? TERM_THEME_GEBIT : TERM_THEME_LIGHT;
+  tabs.forEach(tab => {
+    tab.term.options.theme = termTheme;
+  });
+}
+
 // ── Terminal Tab Management ──────────────────────────────────
 async function createTab(command, label) {
-  const tabId = await copilot.terminal.create(command);
-  const tabLabel = label || (command === 'copilot' ? '🤖 Copilot' : `Terminal ${tabId}`);
+  const tabLabel = label || (command === 'copilot' ? '🤖 Copilot' : `Terminal`);
 
   // Create xterm instance
   const term = new Terminal({
-    fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
+    fontFamily: "'Cascadia Mono', 'Consolas', 'Segoe UI Mono', monospace",
     fontSize: 14,
-    lineHeight: 1.3,
+    lineHeight: 1.4,
     cursorBlink: true,
     cursorStyle: 'bar',
-    theme: TERM_THEME,
+    theme: getTermTheme(),
   });
 
   const fitAddon = new FitAddon();
@@ -64,20 +143,51 @@ async function createTab(command, label) {
   // Create DOM container
   const container = document.createElement('div');
   container.className = 'terminal-instance';
-  container.id = `term-${tabId}`;
   document.getElementById('terminals').appendChild(container);
 
+  // Open terminal in DOM so it gets its real size
   term.open(container);
 
-  // User input → PTY
-  term.onData((data) => copilot.terminal.write(tabId, data));
+  // Make container visible so layout is calculated
+  container.classList.add('terminal-instance--active');
+
+  // Fit to get actual cols/rows from the rendered container
+  fitAddon.fit();
+
+  // Wait one frame for layout to settle, then fit again
+  await new Promise(r => requestAnimationFrame(r));
+  fitAddon.fit();
+
+  const cols = term.cols;
+  const rows = term.rows;
+
+  // NOW spawn the PTY with the correct size
+  const tabId = await copilot.terminal.create(command, cols, rows);
+  container.id = `term-${tabId}`;
+
+  // User input → PTY (and clear status on user input)
+  term.onData((data) => {
+    copilot.terminal.write(tabId, data);
+    const tab = tabs.get(tabId);
+    if (tab && tab.status) {
+      tab.status = null;
+      scheduleStatusRender();
+    }
+  });
 
   // Store tab
-  tabs.set(tabId, { term, fitAddon, container, label: tabLabel });
+  tabs.set(tabId, { term, fitAddon, container, label: tabLabel, status: null });
 
   // Switch to new tab
   switchTab(tabId);
   renderTabs();
+
+  // One more fit pass after everything is settled
+  setTimeout(() => {
+    fitAddon.fit();
+    copilot.terminal.resize(tabId, term.cols, term.rows);
+  }, 500);
+
   updateStatus(`⚡ ${tabLabel}`, 'var(--green)');
 
   return tabId;
@@ -131,20 +241,69 @@ function renderTabs() {
   tabs.forEach((tab, id) => {
     const el = document.createElement('div');
     el.className = `tab ${id === activeTabId ? 'tab--active' : ''}`;
+    const statusBadge = tab.status === 'question' ? '<span class="tab__status" title="Wartet auf Eingabe">❓</span>'
+      : tab.status === 'done' ? '<span class="tab__status" title="Erledigt">✅</span>'
+      : '';
     el.innerHTML = `
-      <span onclick="switchTab(${id})">${escapeHtml(tab.label)}</span>
-      ${tabs.size > 1 ? `<span class="tab__close" onclick="event.stopPropagation();closeTab(${id})">✕</span>` : ''}
+      <span class="tab__label">${escapeHtml(tab.label)}</span>
+      ${statusBadge}
+      ${tabs.size > 1 ? `<span class="tab__close">✕</span>` : ''}
     `;
-    el.addEventListener('click', () => switchTab(id));
+    el.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab__close')) {
+        closeTab(id);
+      } else {
+        switchTab(id);
+      }
+    });
     bar.insertBefore(el, addBtn);
   });
+}
+
+// Strip ANSI escape sequences for pattern matching
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+}
+
+// Debounced tab status rendering to avoid flicker and click issues
+let statusRenderTimer = null;
+function scheduleStatusRender() {
+  if (statusRenderTimer) return;
+  statusRenderTimer = setTimeout(() => {
+    statusRenderTimer = null;
+    renderTabs();
+  }, 500);
+}
+
+// Detect tab status from terminal output
+function detectStatus(tab, rawData) {
+  const clean = stripAnsi(rawData);
+
+  // Copilot CLI ask_user pattern: line that is ONLY a question (short, ends with ?)
+  // Also match explicit (y/n) prompts and selection arrows
+  if (/\(y\/n\)/i.test(clean) || /\(Y\/N\)/i.test(clean) || /^\s*[❯›]\s/m.test(clean)) {
+    if (tab.status !== 'question') { tab.status = 'question'; scheduleStatusRender(); }
+    return;
+  }
+
+  // Done patterns: explicit completion markers from Copilot
+  if (/✅/.test(clean) || /\bTask complete\b/i.test(clean)) {
+    if (tab.status !== 'done') { tab.status = 'done'; scheduleStatusRender(); }
+    return;
+  }
+
+  // User typed something (input sent) → clear status
+  // This is handled by onData from user input side — not here
 }
 
 // Route PTY data to correct terminal
 function initTerminalIPC() {
   copilot.terminal.onData((tabId, data) => {
     const tab = tabs.get(tabId);
-    if (tab) tab.term.write(data);
+    if (tab) {
+      tab.term.write(data);
+      detectStatus(tab, data);
+    }
   });
 
   copilot.terminal.onExit((tabId, code) => {
@@ -156,24 +315,52 @@ function initTerminalIPC() {
     }
   });
 
+  // Debounced fit+resize helper to keep PTY and xterm in sync
+  let fitTimer = null;
+  function debouncedFit() {
+    if (fitTimer) clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      const tab = tabs.get(activeTabId);
+      if (tab) {
+        tab.fitAddon.fit();
+        copilot.terminal.resize(activeTabId, tab.term.cols, tab.term.rows);
+      }
+    }, 100);
+  }
+
   // Resize observer for terminal area
-  const resizeObserver = new ResizeObserver(() => {
-    const tab = tabs.get(activeTabId);
-    if (tab) {
-      tab.fitAddon.fit();
-      copilot.terminal.resize(activeTabId, tab.term.cols, tab.term.rows);
-    }
-  });
+  const resizeObserver = new ResizeObserver(() => debouncedFit());
   resizeObserver.observe(document.getElementById('terminals'));
+
+  // Re-fit on window focus (catches IME/speech-to-text layout shifts)
+  window.addEventListener('focus', () => {
+    setTimeout(() => debouncedFit(), 100);
+  });
+
+  // Periodic sync: check every 3s if PTY size matches xterm
+  setInterval(() => {
+    const tab = tabs.get(activeTabId);
+    if (!tab) return;
+    tab.fitAddon.fit();
+    const { cols, rows } = tab.term;
+    if (cols !== tab._lastCols || rows !== tab._lastRows) {
+      copilot.terminal.resize(activeTabId, cols, rows);
+      tab._lastCols = cols;
+      tab._lastRows = rows;
+    }
+  }, 3000);
 }
 
 // Make functions available from HTML onclick
 window.switchTab = switchTab;
 window.closeTab = closeTab;
+window.resumeSession = resumeSession;
+window.confirmDeleteSession = confirmDeleteSession;
 
 // ── Sessions ─────────────────────────────────────────────────
 async function loadSessions() {
-  sessions = await copilot.sessions.list();
+  const allSessions = await copilot.sessions.list();
+  sessions = allSessions.filter(s => s.name);
   document.getElementById('sessionCount').textContent = sessions.length;
   renderSessions(sessions);
 }
@@ -195,12 +382,16 @@ function renderSessions(list) {
     if (s.checkpointCount > 0) badges.push(`<span class="session-card__badge">🏁 ${s.checkpointCount}</span>`);
 
     return `
-      <div class="session-card ${isActive ? 'session-card--active' : ''}"
-           onclick="resumeSession('${s.id}')" title="${s.cwd}">
-        <div class="session-card__title">${escapeHtml(title)}</div>
-        <div class="session-card__meta">
-          <span>${date}</span>
-          ${badges.join('')}
+      <div class="session-card ${isActive ? 'session-card--active' : ''}" title="${s.cwd}">
+        <div class="session-card__row">
+          <div class="session-card__main" onclick="resumeSession('${s.id}')">
+            <div class="session-card__title">${escapeHtml(title)}</div>
+            <div class="session-card__meta">
+              <span>${date}</span>
+              ${badges.join('')}
+            </div>
+          </div>
+          <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${s.id}','${escapeHtml(title).replace(/'/g, "\\'")}')" title="Session löschen">🗑️</button>
         </div>
       </div>
     `;
@@ -211,18 +402,35 @@ function resumeSession(sessionId) {
   activeSessionId = sessionId;
   renderSessions(filterSessions());
 
-  // Open new tab with plain copilot, then type resume command
   const session = sessions.find(s => s.id === sessionId);
-  const label = '🤖 ' + (session?.summary || sessionId.substring(0, 8));
-  createTab('copilot', label).then(tabId => {
-    // Wait for copilot to start, then send resume command
-    setTimeout(() => {
-      copilot.terminal.write(tabId, `/resume ${sessionId}\r`);
-    }, 2000);
-  });
+  const label = '🤖 ' + (session?.name || session?.summary || sessionId.substring(0, 8));
+  createTab(`copilot --resume ${sessionId}`, label);
 
   // Load status info
   loadSessionStatus(sessionId);
+}
+
+// ── Delete Session ────────────────────────────────────────────
+let pendingDeleteId = null;
+
+function confirmDeleteSession(sessionId, title) {
+  pendingDeleteId = sessionId;
+  document.getElementById('deleteMessage').textContent =
+    `Möchtest du die Session "${title}" wirklich unwiderruflich löschen?`;
+  document.getElementById('deleteOverlay').classList.add('overlay--visible');
+}
+
+async function executeDeleteSession() {
+  if (!pendingDeleteId) return;
+  await copilot.sessions.delete(pendingDeleteId);
+  pendingDeleteId = null;
+  document.getElementById('deleteOverlay').classList.remove('overlay--visible');
+  await loadSessions();
+}
+
+function cancelDeleteSession() {
+  pendingDeleteId = null;
+  document.getElementById('deleteOverlay').classList.remove('overlay--visible');
 }
 
 async function loadSessionStatus(sessionId) {
@@ -253,15 +461,14 @@ async function loadSessionStatus(sessionId) {
 // ── Skills ───────────────────────────────────────────────────
 function renderSkills() {
   const container = document.getElementById('skillList');
-  container.innerHTML = SKILLS.map(s => {
+  container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''}"
-           onclick="toggleSkill('${s.id}')">
+           onclick="toggleSkill('${s.id}')" title="${escapeHtml(s.description)}">
         <span class="skill-card__icon">${s.icon}</span>
         <div class="skill-card__info">
-          <div class="skill-card__name">${s.name}</div>
-          <div class="skill-card__desc">${s.desc}</div>
+          <div class="skill-card__name">${escapeHtml(s.name)}</div>
         </div>
         <div class="skill-card__toggle"></div>
       </div>
@@ -273,6 +480,11 @@ function toggleSkill(skillId) {
   if (activeSkills.has(skillId)) activeSkills.delete(skillId);
   else activeSkills.add(skillId);
   renderSkills();
+
+  // Send /skills command to active terminal tab
+  if (activeTabId != null) {
+    copilot.terminal.write(activeTabId, `/skills ${skillId}\r`);
+  }
 }
 
 // ── Sidebar Resize ───────────────────────────────────────────
@@ -292,8 +504,6 @@ function initResize() {
     if (!isResizing) return;
     const newWidth = Math.min(Math.max(e.clientX, 220), 500);
     sidebar.style.width = newWidth + 'px';
-    const tab = tabs.get(activeTabId);
-    if (tab) tab.fitAddon.fit();
   });
 
   document.addEventListener('mouseup', () => {
@@ -301,8 +511,7 @@ function initResize() {
     isResizing = false;
     handle.classList.remove('dragging');
     document.body.style.cursor = '';
-    const tab = tabs.get(activeTabId);
-    if (tab) tab.fitAddon.fit();
+    // PTY resize is handled by the ResizeObserver on #terminals
   });
 }
 
@@ -320,7 +529,12 @@ function filterSessions() {
 // ── Section Toggle ───────────────────────────────────────────
 window.toggleSection = function(name) {
   const el = document.getElementById(name + 'Content');
-  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+  const chevron = document.getElementById(name + 'Chevron');
+  if (el) {
+    const isHidden = el.style.display === 'none';
+    el.style.display = isHidden ? '' : 'none';
+    if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !isHidden);
+  }
 };
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -359,9 +573,16 @@ function updateStatus(text, color) {
 
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // Apply saved theme
+  applyTheme(getCurrentTheme());
+
   initTerminalIPC();
   initResize();
+
+  // Load skills dynamically
+  skills = await copilot.skills.list();
   renderSkills();
+
   await loadSessions();
 
   // Create first tab with Copilot
@@ -382,8 +603,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     createTab('copilot', '🤖 Copilot');
   });
 
+  // Theme toggle — cycles: light → dark → gebit → light
+  document.getElementById('btnThemeToggle').addEventListener('click', () => {
+    const current = getCurrentTheme();
+    const nextIdx = (THEMES.indexOf(current) + 1) % THEMES.length;
+    applyTheme(THEMES[nextIdx]);
+  });
+
   // Refresh
   document.getElementById('btnRefresh').addEventListener('click', () => {
     loadSessions();
+  });
+
+  // Delete session overlay
+  document.getElementById('btnDeleteConfirm').addEventListener('click', () => executeDeleteSession());
+  document.getElementById('btnDeleteCancel').addEventListener('click', () => cancelDeleteSession());
+  document.getElementById('deleteOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'deleteOverlay') cancelDeleteSession();
   });
 });

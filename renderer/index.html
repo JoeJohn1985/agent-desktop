@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Copilot Desktop</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
@@ -36,7 +37,7 @@
       <!-- Sessions Section -->
       <div class="sidebar__section">
         <div class="sidebar__header" onclick="toggleSection('sessions')">
-          <span>📂 Sessions</span>
+          <span class="sidebar__header-left"><span class="sidebar__chevron" id="sessionsChevron">▾</span> 📂 Sessions</span>
           <span class="sidebar__badge" id="sessionCount">0</span>
         </div>
         <div class="sidebar__search">
@@ -50,7 +51,7 @@
       <!-- Skills Section -->
       <div class="sidebar__section">
         <div class="sidebar__header" onclick="toggleSection('skills')">
-          <span>🛠️ Skills</span>
+          <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
         </div>
         <div class="sidebar__content" id="skillsContent">
           <div class="sidebar__list" id="skillList"></div>
@@ -60,7 +61,7 @@
       <!-- Status Section -->
       <div class="sidebar__section">
         <div class="sidebar__header" onclick="toggleSection('status')">
-          <span>📊 Status</span>
+          <span class="sidebar__header-left"><span class="sidebar__chevron" id="statusChevron">▾</span> 📊 Status</span>
         </div>
         <div class="sidebar__content" id="statusContent">
           <div id="statusPanel" class="status-panel">
@@ -73,6 +74,9 @@
       <div class="sidebar__footer">
         <button class="action-btn action-btn--primary" id="btnNewSession" title="Neue Copilot-Session">
           ✨ Neue Session
+        </button>
+        <button class="action-btn" id="btnThemeToggle" title="Hell/Dunkel umschalten">
+          <span style="filter:grayscale(1) brightness(0.4)">🌙</span>
         </button>
         <button class="action-btn" id="btnRefresh" title="Sessions neu laden">
           🔄
@@ -91,6 +95,18 @@
       </div>
       <div class="terminals" id="terminals"></div>
     </main>
+  </div>
+
+  <!-- Confirm Delete Overlay -->
+  <div class="overlay" id="deleteOverlay">
+    <div class="overlay__dialog">
+      <div class="overlay__title">Session löschen</div>
+      <div class="overlay__message" id="deleteMessage">Möchtest du diese Session wirklich unwiderruflich löschen?</div>
+      <div class="overlay__actions">
+        <button class="action-btn" id="btnDeleteCancel">Abbrechen</button>
+        <button class="action-btn action-btn--danger" id="btnDeleteConfirm">Endgültig löschen</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

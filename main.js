@@ -20,7 +20,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 500,
     title: 'Copilot Desktop',
-    backgroundColor: '#1e1e2e',
+    backgroundColor: '#f5f3ef',
     frame: false,
     titleBarStyle: 'hidden',
     webPreferences: {
@@ -40,22 +40,24 @@ function createWindow() {
 }
 
 // ── PTY (Terminal) ───────────────────────────────────────────
-function spawnTerminal(tabId, command) {
+function spawnTerminal(tabId, command, cols, rows) {
   // Kill existing PTY for this tab if any
   if (ptyProcesses.has(tabId)) {
     ptyProcesses.get(tabId).kill();
     ptyProcesses.delete(tabId);
   }
 
-  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+  const shell = process.platform === 'win32'
+    ? path.join('C:\\Users\\MSchneider\\Copilot\\PowerShell-7.5.5-win-x64', 'pwsh.exe')
+    : 'bash';
   const args = command
     ? (process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command])
     : [];
 
   const ptyProc = pty.spawn(shell, args, {
     name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
+    cols,
+    rows,
     cwd: 'C:\\Users\\MSchneider\\Copilot',
     env: { ...process.env, TERM: 'xterm-256color' },
   });
@@ -91,9 +93,9 @@ ipcMain.on('terminal:resize', (_event, tabId, cols, rows) => {
   if (p) p.resize(cols, rows);
 });
 
-ipcMain.handle('terminal:create', (_event, command) => {
+ipcMain.handle('terminal:create', (_event, command, cols, rows) => {
   const tabId = nextTabId++;
-  spawnTerminal(tabId, command || null);
+  spawnTerminal(tabId, command || null, cols || 80, rows || 24);
   return tabId;
 });
 
@@ -116,9 +118,21 @@ ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
   return readPlan(sessionId);
 });
 
+ipcMain.handle('sessions:delete', async (_event, sessionId) => {
+  const sessionPath = path.join(SESSIONS_DIR, sessionId);
+  if (!fs.existsSync(sessionPath)) return false;
+  fs.rmSync(sessionPath, { recursive: true, force: true });
+  return true;
+});
+
 // Config
 ipcMain.handle('config:read', async () => {
   return readConfig();
+});
+
+// Skills
+ipcMain.handle('skills:list', async () => {
+  return scanSkills();
 });
 
 // Window controls
@@ -160,6 +174,7 @@ function scanSessions() {
 
       sessions.push({
         id: ws.id || entry.name,
+        name: ws.name || null,
         summary: ws.summary || null,
         cwd: ws.cwd || '',
         createdAt: ws.created_at || '',
@@ -194,6 +209,82 @@ function readConfig() {
   try {
     return JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
   } catch { return {}; }
+}
+
+// ── Skills Scanner ────────────────────────────────────────────
+function scanSkills() {
+  const skills = [];
+
+  // 1) Builtin skills from the installed Copilot CLI package
+  const pkgBase = path.join(process.env.LOCALAPPDATA || '', 'copilot', 'pkg', 'universal');
+  if (fs.existsSync(pkgBase)) {
+    // Find the latest version directory
+    const versions = fs.readdirSync(pkgBase, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name)
+      .sort((a, b) => {
+        const pa = a.split('.').map(Number);
+        const pb = b.split('.').map(Number);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+          if ((pa[i] || 0) !== (pb[i] || 0)) return (pb[i] || 0) - (pa[i] || 0);
+        }
+        return 0;
+      });
+
+    const latestVersion = versions[0];
+    if (latestVersion) {
+      const skillsDir = path.join(pkgBase, latestVersion, 'builtin-skills');
+      if (fs.existsSync(skillsDir)) {
+        for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const skillMd = path.join(skillsDir, entry.name, 'SKILL.md');
+          if (!fs.existsSync(skillMd)) continue;
+
+          try {
+            const raw = fs.readFileSync(skillMd, 'utf-8');
+            const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+            if (frontmatter) {
+              const meta = yaml.parse(frontmatter[1]);
+              skills.push({
+                id: meta.name || entry.name,
+                name: meta.name || entry.name,
+                description: meta.description || '',
+                source: 'builtin',
+                icon: '🧩',
+              });
+            }
+          } catch { /* skip broken skill */ }
+        }
+      }
+    }
+  }
+
+  // 2) User skills from ~/.copilot/skills/
+  const userSkillsDir = path.join(COPILOT_DIR, 'skills');
+  if (fs.existsSync(userSkillsDir)) {
+    for (const entry of fs.readdirSync(userSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillMd = path.join(userSkillsDir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      try {
+        const raw = fs.readFileSync(skillMd, 'utf-8');
+        const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        if (frontmatter) {
+          const meta = yaml.parse(frontmatter[1]);
+          skills.push({
+            id: meta.name || entry.name,
+            name: meta.name || entry.name,
+            description: meta.description || '',
+            source: 'user',
+            icon: '⚡',
+          });
+        }
+      } catch { /* skip broken skill */ }
+    }
+  }
+
+  return skills;
 }
 
 // ── App Lifecycle ────────────────────────────────────────────
