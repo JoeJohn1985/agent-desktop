@@ -2,15 +2,29 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const pty = require('node-pty');
+const { spawn } = require('child_process');
 const yaml = require('yaml');
+
+// ── PTY (optional, for interactive terminal) ─────────────────
+let pty;
+try {
+  pty = require('@homebridge/node-pty-prebuilt-multiarch');
+} catch (e) {
+  try {
+    pty = require('node-pty');
+  } catch (e2) {
+    console.warn('node-pty not available – terminal features disabled.');
+  }
+}
 
 // ── Globals ──────────────────────────────────────────────────
 let mainWindow = null;
-const ptyProcesses = new Map(); // tabId → pty process
+const copilotProcesses = new Map(); // tabId → child process
+const terminalProcesses = new Map(); // tabId → pty process
 let nextTabId = 1;
 const COPILOT_DIR = path.join(os.homedir(), '.copilot');
 const SESSIONS_DIR = path.join(COPILOT_DIR, 'session-state');
+const COPILOT_BIN = 'copilot'; // assumes copilot is in PATH
 
 // ── Window ───────────────────────────────────────────────────
 function createWindow() {
@@ -27,6 +41,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
 
@@ -34,46 +49,92 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    ptyProcesses.forEach(p => p.kill());
-    ptyProcesses.clear();
+    copilotProcesses.forEach(p => p.kill());
+    copilotProcesses.clear();
+    terminalProcesses.forEach(p => p.kill());
+    terminalProcesses.clear();
   });
 }
 
-// ── PTY (Terminal) ───────────────────────────────────────────
-function spawnTerminal(tabId, command, cols, rows) {
-  // Kill existing PTY for this tab if any
-  if (ptyProcesses.has(tabId)) {
-    ptyProcesses.get(tabId).kill();
-    ptyProcesses.delete(tabId);
+// ── Copilot Process (JSONL) ──────────────────────────────────
+function spawnCopilot(tabId, prompt, options = {}) {
+  // Kill existing process for this tab
+  if (copilotProcesses.has(tabId)) {
+    copilotProcesses.get(tabId).kill();
+    copilotProcesses.delete(tabId);
   }
 
-  const shell = process.platform === 'win32'
-    ? path.join('C:\\Users\\MSchneider\\Copilot\\PowerShell-7.5.5-win-x64', 'pwsh.exe')
-    : 'bash';
-  const args = command
-    ? (process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command])
-    : [];
+  const args = [
+    '-p', prompt,
+    '--output-format', 'json',
+    '--stream', 'on',
+    '-s',
+    '--allow-all-tools',
+  ];
 
-  const ptyProc = pty.spawn(shell, args, {
-    name: 'xterm-256color',
-    cols,
-    rows,
-    cwd: 'C:\\Users\\MSchneider\\Copilot',
-    env: { ...process.env, TERM: 'xterm-256color' },
+  if (options.sessionId) {
+    args.push('--resume=' + options.sessionId);
+  }
+  if (options.model) {
+    args.push('--model', options.model);
+  }
+  if (options.effort) {
+    args.push('--reasoning-effort', options.effort);
+  }
+
+  const proc = spawn(COPILOT_BIN, args, {
+    cwd: options.cwd || 'C:\\Users\\MSchneider\\Copilot',
+    env: { ...process.env, NO_COLOR: '1' },
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  ptyProcesses.set(tabId, ptyProc);
+  copilotProcesses.set(tabId, proc);
 
-  ptyProc.onData((data) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:data', tabId, data);
+  // Buffer for incomplete JSONL lines
+  let buffer = '';
+
+  proc.stdout.on('data', (chunk) => {
+    buffer += chunk.toString('utf-8');
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete last line in buffer
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('copilot:event', tabId, event);
+        }
+      } catch (e) {
+        // Skip malformed JSON lines
+      }
     }
   });
 
-  ptyProc.onExit(({ exitCode }) => {
-    ptyProcesses.delete(tabId);
+  proc.stderr.on('data', (chunk) => {
+    const text = chunk.toString('utf-8');
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
+      mainWindow.webContents.send('copilot:event', tabId, {
+        type: 'error',
+        data: { message: text },
+      });
+    }
+  });
+
+  proc.on('close', (code) => {
+    // Flush remaining buffer
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('copilot:event', tabId, event);
+        }
+      } catch { /* ignore */ }
+    }
+    copilotProcesses.delete(tabId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('copilot:done', tabId, code);
     }
   });
 
@@ -82,27 +143,20 @@ function spawnTerminal(tabId, command, cols, rows) {
 
 // ── IPC Handlers ─────────────────────────────────────────────
 
-// Terminal
-ipcMain.on('terminal:input', (_event, tabId, data) => {
-  const p = ptyProcesses.get(tabId);
-  if (p) p.write(data);
-});
-
-ipcMain.on('terminal:resize', (_event, tabId, cols, rows) => {
-  const p = ptyProcesses.get(tabId);
-  if (p) p.resize(cols, rows);
-});
-
-ipcMain.handle('terminal:create', (_event, command, cols, rows) => {
-  const tabId = nextTabId++;
-  spawnTerminal(tabId, command || null, cols || 80, rows || 24);
+// Copilot Chat
+ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
+  spawnCopilot(tabId, prompt, options || {});
   return tabId;
 });
 
-ipcMain.on('terminal:close', (_event, tabId) => {
-  const p = ptyProcesses.get(tabId);
+ipcMain.handle('copilot:newTab', () => {
+  return nextTabId++;
+});
+
+ipcMain.on('copilot:stop', (_event, tabId) => {
+  const p = copilotProcesses.get(tabId);
   if (p) p.kill();
-  ptyProcesses.delete(tabId);
+  copilotProcesses.delete(tabId);
 });
 
 // Sessions
@@ -123,6 +177,49 @@ ipcMain.handle('sessions:delete', async (_event, sessionId) => {
   if (!fs.existsSync(sessionPath)) return false;
   fs.rmSync(sessionPath, { recursive: true, force: true });
   return true;
+});
+
+ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
+  const wsPath = path.join(SESSIONS_DIR, sessionId, 'workspace.yaml');
+  if (!fs.existsSync(wsPath)) return false;
+  try {
+    const raw = fs.readFileSync(wsPath, 'utf-8');
+    const ws = yaml.parse(raw);
+    ws.name = newName;
+    fs.writeFileSync(wsPath, yaml.stringify(ws), 'utf-8');
+    return true;
+  } catch { return false; }
+});
+
+// Todos (per session)
+ipcMain.handle('todos:list', async (_event, sessionId) => {
+  return readTodos(sessionId);
+});
+
+ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
+  const todos = readTodos(sessionId);
+  todo.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  todo.status = todo.status || 'open';
+  todo.createdAt = new Date().toISOString();
+  todos.push(todo);
+  writeTodos(sessionId, todos);
+  return todos;
+});
+
+ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
+  const todos = readTodos(sessionId);
+  const idx = todos.findIndex(t => t.id === todoId);
+  if (idx === -1) return todos;
+  Object.assign(todos[idx], updates, { updatedAt: new Date().toISOString() });
+  writeTodos(sessionId, todos);
+  return todos;
+});
+
+ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
+  let todos = readTodos(sessionId);
+  todos = todos.filter(t => t.id !== todoId);
+  writeTodos(sessionId, todos);
+  return todos;
 });
 
 // Config
@@ -193,8 +290,22 @@ function scanSessions() {
 
 function readCheckpoints(sessionId) {
   const indexPath = path.join(SESSIONS_DIR, sessionId, 'checkpoints', 'index.md');
-  if (!fs.existsSync(indexPath)) return '';
-  return fs.readFileSync(indexPath, 'utf-8');
+  if (!fs.existsSync(indexPath)) return [];
+  try {
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    const checkpoints = [];
+    for (const line of content.split('\n')) {
+      const match = line.match(/^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/);
+      if (match) {
+        checkpoints.push({
+          number: parseInt(match[1]),
+          title: match[2].trim(),
+          file: match[3].trim(),
+        });
+      }
+    }
+    return checkpoints;
+  } catch { return []; }
 }
 
 function readPlan(sessionId) {
@@ -209,6 +320,21 @@ function readConfig() {
   try {
     return JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
   } catch { return {}; }
+}
+
+// ── Todos (per session) ──────────────────────────────────────
+function readTodos(sessionId) {
+  const todosPath = path.join(SESSIONS_DIR, sessionId, 'todos.json');
+  if (!fs.existsSync(todosPath)) return [];
+  try {
+    return JSON.parse(fs.readFileSync(todosPath, 'utf-8'));
+  } catch { return []; }
+}
+
+function writeTodos(sessionId, todos) {
+  const sessionPath = path.join(SESSIONS_DIR, sessionId);
+  if (!fs.existsSync(sessionPath)) return;
+  fs.writeFileSync(path.join(sessionPath, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
 }
 
 // ── Skills Scanner ────────────────────────────────────────────
@@ -287,12 +413,83 @@ function scanSkills() {
   return skills;
 }
 
+// ── Terminal (PTY) IPC ────────────────────────────────────────
+
+ipcMain.handle('terminal:available', () => !!pty);
+
+ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
+  if (!pty) {
+    return { success: false, error: 'node-pty ist nicht installiert. Bitte "npm install" und ggf. "npx electron-rebuild" ausführen.' };
+  }
+
+  // Kill existing terminal for this tab
+  if (terminalProcesses.has(tabId)) {
+    terminalProcesses.get(tabId).kill();
+    terminalProcesses.delete(tabId);
+  }
+
+  const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+  const ptyProcess = pty.spawn(shell, [], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    cwd: 'C:\\Users\\MSchneider\\Copilot',
+    env: { ...process.env, TERM: 'xterm-256color' },
+  });
+
+  terminalProcesses.set(tabId, ptyProcess);
+
+  ptyProcess.onData((data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:data', tabId, data);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode }) => {
+    terminalProcesses.delete(tabId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
+    }
+  });
+
+  // Start copilot interactively in the PTY
+  const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
+  ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
+
+  // Send slash command after copilot has started
+  if (slashCommand) {
+    setTimeout(() => {
+      ptyProcess.write(`${slashCommand}\r`);
+    }, 3000);
+  }
+
+  return { success: true };
+});
+
+ipcMain.on('terminal:input', (_event, tabId, data) => {
+  const p = terminalProcesses.get(tabId);
+  if (p) p.write(data);
+});
+
+ipcMain.on('terminal:resize', (_event, tabId, cols, rows) => {
+  const p = terminalProcesses.get(tabId);
+  if (p) p.resize(cols, rows);
+});
+
+ipcMain.on('terminal:close', (_event, tabId) => {
+  const p = terminalProcesses.get(tabId);
+  if (p) p.kill();
+  terminalProcesses.delete(tabId);
+});
+
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  ptyProcesses.forEach(p => p.kill());
-  ptyProcesses.clear();
+  copilotProcesses.forEach(p => p.kill());
+  copilotProcesses.clear();
+  terminalProcesses.forEach(p => p.kill());
+  terminalProcesses.clear();
   app.quit();
 });
 

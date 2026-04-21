@@ -1,7 +1,7 @@
 {
   "name": "copilot-desktop",
-  "version": "1.0.0",
-  "description": "Desktop-App für GitHub Copilot CLI mit Session-Browser und Skill-Auswahl",
+  "version": "2.0.0",
+  "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -10,14 +10,14 @@
   "author": "MSchneider",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^35.0.0",
-    "electron-rebuild": "^3.2.9"
+    "electron": "^35.0.0"
   },
   "dependencies": {
-    "@xterm/xterm": "^5.5.0",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
-    "node-pty": "^1.0.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.2",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
     "yaml": "^2.7.0"
   }
 }
