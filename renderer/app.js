@@ -59,8 +59,58 @@ function applyTheme(theme) {
   }
 }
 
+// ── Session Restore ─────────────────────────────────────────
+function saveOpenTabs() {
+  const openTabs = [];
+  tabs.forEach((tab, id) => {
+    if (tab.sessionId) {
+      openTabs.push({ sessionId: tab.sessionId, label: tab.label });
+    }
+  });
+  localStorage.setItem('openTabs', JSON.stringify(openTabs));
+}
+
+async function restoreOpenTabs() {
+  const saved = localStorage.getItem('openTabs');
+  if (!saved) return false;
+  try {
+    const openTabs = JSON.parse(saved);
+    if (!openTabs.length) return false;
+    for (const t of openTabs) {
+      const tabId = await createTab(t.label || '🤖 Copilot');
+      const tab = tabs.get(tabId);
+      if (tab) {
+        tab.sessionId = t.sessionId;
+        activeSessionId = t.sessionId;
+        loadTodos(t.sessionId);
+      }
+    }
+    return true;
+  } catch { return false; }
+}
+
+// ── Settings ────────────────────────────────────────────────
+function getSettings() {
+  try {
+    return JSON.parse(localStorage.getItem('settings') || '{}');
+  } catch { return {}; }
+}
+
+function saveSetting(key, value) {
+  const s = getSettings();
+  s[key] = value;
+  localStorage.setItem('settings', JSON.stringify(s));
+}
+
+function applyChatFontSize(size) {
+  document.querySelectorAll('.stream-output').forEach(el => {
+    el.style.fontSize = size + 'px';
+  });
+}
+
 // ── Notification Sound ──────────────────────────────────────
 function playNotificationSound() {
+  if (getSettings().soundEnabled === false) return;
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
@@ -87,6 +137,8 @@ async function createTab(label) {
   streamEl.id = `stream-${tabId}`;
   document.getElementById('streamArea').appendChild(streamEl);
   initAutoScroll(streamEl);
+  const savedFontSize = getSettings().chatFontSize;
+  if (savedFontSize) streamEl.style.fontSize = savedFontSize + 'px';
 
   // Status line element — shows thinking/loading indicators
   const statusEl = document.createElement('div');
@@ -234,6 +286,7 @@ function renderTabs() {
 
     bar.insertBefore(el, addBtn);
   });
+  saveOpenTabs();
 }
 
 function startTabRename(tabId, tabEl, labelSpan) {
@@ -535,6 +588,14 @@ function initCopilotIPC() {
           updateStatusbar('sbInstructions', `📜 ${instrCount} Instructions`);
           tab.context.instructions = instrCount;
         }
+        // Extract working directory
+        const cwdMatch = tc.match(/Current working directory:\s*(.+)/i);
+        if (cwdMatch) {
+          const cwd = cwdMatch[1].trim();
+          tab.context.cwd = cwd;
+          const short = cwd.replace(/C:\\Users\\MSchneider\\/gi, '~\\');
+          updateStatusbar('sbCwd', `📁 ${short}`);
+        }
         break;
       }
 
@@ -542,6 +603,7 @@ function initCopilotIPC() {
         // Store sessionId for resume
         if (event.sessionId) {
           tab.sessionId = event.sessionId;
+          saveOpenTabs();
           // Show todos panel for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
@@ -721,12 +783,13 @@ function renderSessions(list) {
     return;
   }
 
+  const openSessionIds = new Set([...tabs.values()].map(t => t.sessionId).filter(Boolean));
   container.innerHTML = list.map(s => {
     const isActive = s.id === activeSessionId;
     const date = s.updatedAt ? formatDate(s.updatedAt) : '–';
     const title = s.name || s.summary || shortenPath(s.cwd) || s.id.substring(0, 8);
     const badges = [];
-    if (s.isActive) badges.push('<span class="session-card__badge session-card__badge--active">● Live</span>');
+    if (openSessionIds.has(s.id)) badges.push('<span class="session-card__badge session-card__badge--active">● Live</span>');
     // Plan badge removed
 
     return `
@@ -1161,8 +1224,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadSessions();
 
-  // Create first tab
-  await createTab('🤖 Copilot');
+  // Restore previous tabs or create a new one
+  const restored = await restoreOpenTabs();
+  if (!restored) {
+    await createTab('🤖 Copilot');
+  }
 
   // Input handling
   const chatInput = document.getElementById('chatInput');
@@ -1267,6 +1333,50 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.target.id === 'deleteOverlay') cancelDeleteSession();
   });
 
+  // ── Settings Dialog ──────────────────────────────────
+  const settingsOverlay = document.getElementById('settingsOverlay');
+  const settTheme = document.getElementById('settTheme');
+  const settFontSize = document.getElementById('settFontSize');
+  const settFontSizeVal = document.getElementById('settFontSizeVal');
+  const settSound = document.getElementById('settSound');
+
+  // Load saved settings
+  const savedSettings = getSettings();
+  settTheme.value = getCurrentTheme();
+  const fontSize = savedSettings.chatFontSize || 16;
+  settFontSize.value = fontSize;
+  settFontSizeVal.textContent = fontSize + 'px';
+  applyChatFontSize(fontSize);
+  settSound.checked = savedSettings.soundEnabled !== false;
+
+  document.getElementById('btnSettings').addEventListener('click', () => {
+    settTheme.value = getCurrentTheme();
+    settingsOverlay.classList.add('overlay--visible');
+  });
+
+  document.getElementById('btnSettingsClose').addEventListener('click', () => {
+    settingsOverlay.classList.remove('overlay--visible');
+  });
+
+  settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) settingsOverlay.classList.remove('overlay--visible');
+  });
+
+  settTheme.addEventListener('change', () => {
+    applyTheme(settTheme.value);
+  });
+
+  settFontSize.addEventListener('input', () => {
+    const size = parseInt(settFontSize.value);
+    settFontSizeVal.textContent = size + 'px';
+    saveSetting('chatFontSize', size);
+    applyChatFontSize(size);
+  });
+
+  settSound.addEventListener('change', () => {
+    saveSetting('soundEnabled', settSound.checked);
+  });
+
   // Terminal minimize button — hides panel, keeps PTY alive
   document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
 
@@ -1290,6 +1400,98 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => tab.terminal.fitAddon.fit(), 100);
     }
   });
+
+  // ── Chat Search ────────────────────────────────────────
+  const searchBar = document.getElementById('chatSearchBar');
+  const searchInput = document.getElementById('chatSearchInput');
+  const searchCount = document.getElementById('chatSearchCount');
+  let searchMarks = [];
+  let searchActiveIdx = -1;
+
+  function clearSearchHighlights() {
+    searchMarks.forEach(m => {
+      const parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+    searchMarks = [];
+    searchActiveIdx = -1;
+    searchCount.textContent = '';
+  }
+
+  function highlightSearch(query) {
+    clearSearchHighlights();
+    if (!query || !activeTabId) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab) return;
+
+    const walker = document.createTreeWalker(tab.streamEl, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    const lowerQ = query.toLowerCase();
+    for (const node of textNodes) {
+      const text = node.textContent;
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(lowerQ);
+      if (idx === -1) continue;
+
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      while (idx !== -1) {
+        frag.appendChild(document.createTextNode(text.substring(lastIdx, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'chat-search-highlight';
+        mark.textContent = text.substring(idx, idx + query.length);
+        frag.appendChild(mark);
+        searchMarks.push(mark);
+        lastIdx = idx + query.length;
+        idx = lower.indexOf(lowerQ, lastIdx);
+      }
+      frag.appendChild(document.createTextNode(text.substring(lastIdx)));
+      node.parentNode.replaceChild(frag, node);
+    }
+
+    searchCount.textContent = searchMarks.length ? `${searchMarks.length} Treffer` : 'Keine Treffer';
+    if (searchMarks.length > 0) jumpToMatch(0);
+  }
+
+  function jumpToMatch(idx) {
+    if (searchMarks.length === 0) return;
+    if (searchActiveIdx >= 0 && searchActiveIdx < searchMarks.length) {
+      searchMarks[searchActiveIdx].classList.remove('chat-search-highlight--active');
+    }
+    searchActiveIdx = ((idx % searchMarks.length) + searchMarks.length) % searchMarks.length;
+    const mark = searchMarks[searchActiveIdx];
+    mark.classList.add('chat-search-highlight--active');
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    searchCount.textContent = `${searchActiveIdx + 1}/${searchMarks.length}`;
+  }
+
+  function openSearch() {
+    searchBar.classList.add('chat-search--visible');
+    searchInput.focus();
+    searchInput.select();
+  }
+
+  function closeSearch() {
+    searchBar.classList.remove('chat-search--visible');
+    clearSearchHighlights();
+    searchInput.value = '';
+  }
+
+  searchInput.addEventListener('input', () => highlightSearch(searchInput.value));
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) jumpToMatch(searchActiveIdx - 1);
+      else jumpToMatch(searchActiveIdx + 1);
+    }
+    if (e.key === 'Escape') closeSearch();
+  });
+  document.getElementById('chatSearchPrev').addEventListener('click', () => jumpToMatch(searchActiveIdx - 1));
+  document.getElementById('chatSearchNext').addEventListener('click', () => jumpToMatch(searchActiveIdx + 1));
+  document.getElementById('chatSearchClose').addEventListener('click', () => closeSearch());
 
   // ── Keyboard Shortcuts ───────────────────────────────
   document.addEventListener('keydown', (e) => {
@@ -1320,11 +1522,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       exportChat();
     }
-    // Escape — stop processing
-    if (e.key === 'Escape' && activeTabId != null) {
-      const tab = tabs.get(activeTabId);
-      if (tab && tab.isProcessing) {
-        copilot.chat.stop(activeTabId);
+    // Ctrl+F — search in chat
+    if (e.ctrlKey && e.key === 'f') {
+      e.preventDefault();
+      openSearch();
+    }
+    // Escape — stop processing or close search
+    if (e.key === 'Escape') {
+      if (searchBar.classList.contains('chat-search--visible')) {
+        closeSearch();
+      } else if (activeTabId != null) {
+        const tab = tabs.get(activeTabId);
+        if (tab && tab.isProcessing) {
+          copilot.chat.stop(activeTabId);
+        }
       }
     }
   });

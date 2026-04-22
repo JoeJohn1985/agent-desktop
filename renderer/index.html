@@ -79,6 +79,9 @@
         <button class="action-btn" id="btnThemeToggle" data-tooltip="Theme wechseln">
           <span style="filter:grayscale(1) brightness(0.4)">🌙</span>
         </button>
+        <button class="action-btn" id="btnSettings" data-tooltip="Einstellungen">
+          ⚙️
+        </button>
         <button class="action-btn" id="btnRefresh" title="Sessions neu laden">
           🔄
         </button>
@@ -95,6 +98,14 @@
         <button class="tab-add" id="btnAddTab" title="Neuer Tab">+</button>
       </div>
       <div class="stream-area" id="streamArea">
+        <!-- Search Bar -->
+        <div class="chat-search" id="chatSearchBar">
+          <input type="text" class="chat-search__input" id="chatSearchInput" placeholder="Suchen…" />
+          <span class="chat-search__count" id="chatSearchCount"></span>
+          <button class="chat-search__btn" id="chatSearchPrev" title="Vorheriger">▲</button>
+          <button class="chat-search__btn" id="chatSearchNext" title="Nächster">▼</button>
+          <button class="chat-search__btn" id="chatSearchClose" title="Schließen">✕</button>
+        </div>
         <!-- Stream-Container pro Tab -->
         <button class="scroll-bottom-btn" id="btnScrollBottom" title="Ans Ende scrollen">↓ Neue Nachrichten</button>
         <div class="drop-overlay" id="dropOverlay">
@@ -121,6 +132,8 @@
         <span class="session-statusbar__item" id="sbSkills" title="Skills">🛠️ –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item" id="sbInstructions" title="Instructions">📜 –</span>
+        <span class="session-statusbar__sep">·</span>
+        <span class="session-statusbar__item" id="sbCwd" title="Arbeitsverzeichnis">📁 –</span>
       </div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" title="Terminal öffnen">⚡</button>
@@ -139,6 +152,40 @@
       <div class="overlay__actions">
         <button class="action-btn" id="btnDeleteCancel">Abbrechen</button>
         <button class="action-btn action-btn--danger" id="btnDeleteConfirm">Endgültig löschen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Overlay -->
+  <div class="overlay" id="settingsOverlay">
+    <div class="overlay__dialog overlay__dialog--settings">
+      <div class="overlay__title">⚙️ Einstellungen</div>
+      <div class="settings">
+        <div class="settings__group">
+          <label class="settings__label">Theme</label>
+          <select class="settings__select" id="settTheme">
+            <option value="light">☀️ Hell</option>
+            <option value="dark">🌙 Dunkel</option>
+            <option value="gebit">🏢 GEBIT</option>
+          </select>
+        </div>
+        <div class="settings__group">
+          <label class="settings__label">Schriftgröße Chat</label>
+          <div class="settings__range-row">
+            <input type="range" class="settings__range" id="settFontSize" min="12" max="22" step="1" />
+            <span class="settings__range-value" id="settFontSizeVal">16px</span>
+          </div>
+        </div>
+        <div class="settings__group">
+          <label class="settings__label">Benachrichtigungston</label>
+          <label class="settings__toggle">
+            <input type="checkbox" id="settSound" checked />
+            <span class="settings__toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="overlay__actions">
+        <button class="action-btn action-btn--primary" id="btnSettingsClose">Schließen</button>
       </div>
     </div>
   </div>
