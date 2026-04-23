@@ -43,7 +43,6 @@ contextBridge.exposeInMainWorld('copilot', {
     openCwd: () => ipcRenderer.invoke('copilot:openCwd'),
     getVersions: () => ipcRenderer.invoke('copilot:getVersions'),
     getInstructions: () => ipcRenderer.invoke('copilot:getInstructions'),
-    startDictation: () => ipcRenderer.invoke('copilot:startDictation'),
     onEvent: (cb) => ipcRenderer.on('copilot:event', (_e, tabId, event) => cb(tabId, event)),
     onDone: (cb) => ipcRenderer.on('copilot:done', (_e, tabId, code) => cb(tabId, code)),
   },

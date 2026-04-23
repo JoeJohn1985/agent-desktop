@@ -1597,13 +1597,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export chat
   document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
 
-  // ── Speech-to-Text (Windows Dictation via Win+H) ────────
-  document.getElementById('btnVoice').addEventListener('click', () => {
-    document.getElementById('chatInput').focus();
-    // Short delay to ensure input has focus before triggering Win+H
-    setTimeout(() => copilot.chat.startDictation(), 150);
-  });
-
   // Refresh
   // Todos
   document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());

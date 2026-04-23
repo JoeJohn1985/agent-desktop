@@ -276,55 +276,6 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
   }
 });
 
-ipcMain.handle('copilot:startDictation', () => {
-  const { exec } = require('child_process');
-  exec(`powershell -NoProfile -Command "Add-Type @\\\"
-using System;
-using System.Runtime.InteropServices;
-using System.Threading;
-public class DictationHelper {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT {
-        public uint type;
-        public INPUTUNION u;
-    }
-    [StructLayout(LayoutKind.Explicit)]
-    public struct INPUTUNION {
-        [FieldOffset(0)] public KEYBDINPUT ki;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-    [DllImport(\\\"user32.dll\\\", SetLastError = true)]
-    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    public static void SendWinH() {
-        INPUT[] inputs = new INPUT[4];
-        // Win key down
-        inputs[0].type = 1;
-        inputs[0].u.ki.wVk = 0x5B;
-        // H key down
-        inputs[1].type = 1;
-        inputs[1].u.ki.wVk = 0x48;
-        // H key up
-        inputs[2].type = 1;
-        inputs[2].u.ki.wVk = 0x48;
-        inputs[2].u.ki.dwFlags = 2;
-        // Win key up
-        inputs[3].type = 1;
-        inputs[3].u.ki.wVk = 0x5B;
-        inputs[3].u.ki.dwFlags = 2;
-        SendInput(4, inputs, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
-    }
-}
-\\\"@; [DictationHelper]::SendWinH()"`);
-});
-
 // Instructions — update shell exceptions
 const INSTRUCTIONS_PATH = path.join(COPILOT_CWD, 'copilot-instructions.md');
 
