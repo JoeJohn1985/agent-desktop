@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // ── Markdown + Syntax Highlighting ──────────────────────────
 let markdownRender = (text) => text; // fallback: plain text
@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('copilot', {
     newTab: () => ipcRenderer.invoke('copilot:newTab'),
     send: (tabId, prompt, options) => ipcRenderer.invoke('copilot:send', tabId, prompt, options),
     stop: (tabId) => ipcRenderer.send('copilot:stop', tabId),
+    getCwd: () => ipcRenderer.invoke('copilot:getCwd'),
+    openCwd: () => ipcRenderer.invoke('copilot:openCwd'),
+    getVersions: () => ipcRenderer.invoke('copilot:getVersions'),
+    getInstructions: () => ipcRenderer.invoke('copilot:getInstructions'),
+    startDictation: () => ipcRenderer.invoke('copilot:startDictation'),
     onEvent: (cb) => ipcRenderer.on('copilot:event', (_e, tabId, event) => cb(tabId, event)),
     onDone: (cb) => ipcRenderer.on('copilot:done', (_e, tabId, code) => cb(tabId, code)),
   },
@@ -48,6 +53,7 @@ contextBridge.exposeInMainWorld('copilot', {
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
     rename: (id, name) => ipcRenderer.invoke('sessions:rename', id, name),
+    create: (name) => ipcRenderer.invoke('sessions:create', name),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
   // Todos (per session)
@@ -56,10 +62,24 @@ contextBridge.exposeInMainWorld('copilot', {
     add: (sessionId, todo) => ipcRenderer.invoke('todos:add', sessionId, todo),
     update: (sessionId, todoId, updates) => ipcRenderer.invoke('todos:update', sessionId, todoId, updates),
     delete: (sessionId, todoId) => ipcRenderer.invoke('todos:delete', sessionId, todoId),
+    reorder: (sessionId, orderedIds) => ipcRenderer.invoke('todos:reorder', sessionId, orderedIds),
+  },
+  // Images
+  images: {
+    list: () => ipcRenderer.invoke('images:list'),
+    open: (filePath) => ipcRenderer.invoke('images:open', filePath),
+    delete: (filePath) => ipcRenderer.invoke('images:delete', filePath),
+    openFolder: () => ipcRenderer.invoke('images:openFolder'),
+    onChanged: (cb) => ipcRenderer.on('images:changed', cb),
   },
   // Config
   config: {
     read: () => ipcRenderer.invoke('config:read'),
+  },
+  // Instructions
+  instructions: {
+    getShellExceptions: () => ipcRenderer.invoke('instructions:getShellExceptions'),
+    setShellExceptions: (exceptions) => ipcRenderer.invoke('instructions:setShellExceptions', exceptions),
   },
   // Skills
   skills: {
@@ -80,5 +100,10 @@ contextBridge.exposeInMainWorld('copilot', {
     minimize: () => ipcRenderer.send('window:minimize'),
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
+  },
+  // File utilities
+  files: {
+    getPath: (file) => webUtils.getPathForFile(file),
+    processDropped: (filePath) => ipcRenderer.invoke('files:processDropped', filePath),
   },
 });
