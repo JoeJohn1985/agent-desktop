@@ -46,13 +46,47 @@ If not yet authenticated, the script will guide you to run `gh auth login`.
 <details>
 <summary>Click to expand</summary>
 
-1. Install [Node.js 18+](https://nodejs.org/)
-2. Install [GitHub CLI](https://cli.github.com/) and authenticate: `gh auth login`
-3. Install the Copilot extension: `gh extension install github/gh-copilot`
-4. Install dependencies: `npm install`
-5. Start the app: `npm start`
+**Step 1 — Install Node.js 18+**
+Download and install from [nodejs.org](https://nodejs.org/) (LTS recommended).
+Verify: `node --version` should print `v18.x` or higher.
 
-> If `npm install` fails due to native module compilation errors, [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) may be required (needs administrator rights).
+**Step 2 — Install GitHub CLI**
+Download from [cli.github.com](https://cli.github.com/) or via winget:
+```powershell
+winget install GitHub.cli --scope user
+```
+Verify: `gh --version`
+
+**Step 3 — Authenticate with GitHub**
+```powershell
+gh auth login
+```
+Follow the prompts (browser-based login). Make sure your account has a GitHub Copilot license.
+
+**Step 4 — Install the Copilot CLI extension**
+```powershell
+gh extension install github/gh-copilot
+```
+Verify: `gh copilot --version`
+
+**Step 5 — Clone and install the app**
+```powershell
+git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
+cd github-copilot-desktop
+npm install
+```
+`npm install` uses prebuilt native binaries — no compiler required in most cases.
+
+> **Troubleshooting:** If `npm install` fails with a native module error, try:
+> ```powershell
+> npm install --ignore-scripts
+> ```
+> If that doesn't help, [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) may be required (needs administrator rights). Install the "Desktop development with C++" workload, then run `npm run rebuild`.
+
+**Step 6 — Start the app**
+```powershell
+npm start
+```
 
 </details>
 
