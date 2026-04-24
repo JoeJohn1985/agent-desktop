@@ -560,6 +560,23 @@ function writeTodos(sessionId, todos) {
   fs.writeFileSync(path.join(sessionPath, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
 }
 
+// ── Skill Icon Mapping ─────────────────────────────────────---
+const SKILL_ICON_MAP = {
+  'task-router': '🧠',
+  'code-review': '🔍',
+  'quality-audit': '🧪',
+  'security-audit': '🛡️',
+  'customize-cloud-agent': '☁️',
+};
+function builtinSkillIcon(name) {
+  return SKILL_ICON_MAP[(name || '').toLowerCase()] || '🧩';
+}
+function userSkillIcon(name) {
+  const mapped = SKILL_ICON_MAP[(name || '').toLowerCase()];
+  if (mapped) return mapped;
+  const m = (name||'').match(/([\p{Emoji}])/u);
+  return m ? m[1] : '🧩';
+}
 // ── Skills Scanner ────────────────────────────────────────────
 function scanSkills() {
   const skills = [];
@@ -599,7 +616,7 @@ function scanSkills() {
                 name: meta.name || entry.name,
                 description: meta.description || '',
                 source: 'builtin',
-                icon: '🧩',
+                icon: meta.icon || builtinSkillIcon(meta.name || entry.name),
               });
             }
           } catch { /* skip broken skill */ }
@@ -626,7 +643,7 @@ function scanSkills() {
             name: meta.name || entry.name,
             description: meta.description || '',
             source: 'user',
-            icon: '⚡',
+            icon: meta.icon || userSkillIcon(meta.name || entry.name),
           });
         }
       } catch { /* skip broken skill */ }

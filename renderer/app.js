@@ -487,6 +487,35 @@ function sendMessage() {
   inputEl.textContent = text;
   tab.streamEl.insertBefore(inputEl, tab.statusEl);
 
+  // Build skill instructions prefix for active skills
+  let skillPrefix = '';
+  const activeSkillInfos = [];
+  if (activeSkills.size > 0) {
+    for (const id of activeSkills) {
+      const s = skills.find(sk => sk.id === id);
+      if (s) {
+        activeSkillInfos.push({ name: s.name, icon: s.icon || '🧩' });
+      }
+    }
+    if (activeSkillInfos.length > 0) {
+      const skillDescs = [...activeSkills].map(id => {
+        const s = skills.find(sk => sk.id === id);
+        return s ? `- **${s.name}**: ${s.description}` : null;
+      }).filter(Boolean);
+      skillPrefix = `Verwende folgende Skills für diese Aufgabe:\n${skillDescs.join('\n')}\n\n`;
+    }
+  }
+
+  // Show skill indicator tags below user message
+  if (activeSkillInfos.length > 0) {
+    const skillBar = document.createElement('div');
+    skillBar.className = 'stream-input__skills';
+    skillBar.innerHTML = activeSkillInfos.map(si =>
+      `<span class="stream-input__skill-tag">${si.icon} ${escapeHtml(si.name)}</span>`
+    ).join('');
+    tab.streamEl.insertBefore(skillBar, tab.statusEl);
+  }
+
   // Show thinking indicator
   tab.statusEl.textContent = '● Thinking…';
   tab.statusEl.style.display = 'block';
@@ -497,7 +526,8 @@ function sendMessage() {
   const settings = getSettings();
   const autoApprove = settings.autoApproveTools !== false; // default: true
   const mergedTools = new Set([...tab.allowedTools, ...getAllowedTools()]);
-  copilot.chat.send(activeTabId, text, {
+
+  copilot.chat.send(activeTabId, skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove,
     allowedTools: [...mergedTools],
@@ -1125,6 +1155,7 @@ function renderSkills() {
 function toggleSkill(skillId) {
   if (activeSkills.has(skillId)) activeSkills.delete(skillId);
   else activeSkills.add(skillId);
+  saveSetting('activeSkills', [...activeSkills]);
   renderSkills();
 }
 
@@ -1505,6 +1536,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load skills dynamically
   skills = await copilot.skills.list();
+  // Restore active skills from settings
+  const savedActiveSkills = getSettings().activeSkills || [];
+  activeSkills = new Set(savedActiveSkills);
   renderSkills();
 
   // Show version in statusbar
