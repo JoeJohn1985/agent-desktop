@@ -70,6 +70,9 @@ async function restoreOpenTabs() {
         tab.sessionId = t.sessionId;
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
+        // Display session context for restored tabs
+        const session = sessions.find(s => s.id === t.sessionId);
+        if (session) displaySessionContext(tab, session);
       }
     }
     return true;
@@ -1097,18 +1100,82 @@ function renderSessions(list) {
   }).join('');
 }
 
-function resumeSession(sessionId) {
+async function resumeSession(sessionId) {
   const session = sessions.find(s => s.id === sessionId);
   const label = '🤖 ' + (session?.name || session?.summary || sessionId.substring(0, 8));
-  createTab(label).then(tabId => {
-    const tab = tabs.get(tabId);
-    if (tab) {
-      tab.sessionId = sessionId;
-      activeSessionId = sessionId;
-      loadTodos(sessionId);
-      renderSessions(filterSessions());
+  const tabId = await createTab(label);
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  // Immediately set sessionId so the next prompt resumes this session
+  tab.sessionId = sessionId;
+  activeSessionId = sessionId;
+  loadTodos(sessionId);
+  saveOpenTabs();
+  renderSessions(filterSessions());
+
+  // Load and display session context (checkpoints, plan) as history overview
+  await displaySessionContext(tab, session);
+}
+
+async function displaySessionContext(tab, session) {
+  if (!session) return;
+
+  const sessionId = session.id;
+  const contextEl = document.createElement('div');
+  contextEl.className = 'stream-session-context';
+
+  // Header
+  const title = session.name || session.summary || sessionId.substring(0, 8);
+  let html = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
+
+  // Metadata
+  const meta = [];
+  if (session.updatedAt) {
+    const d = new Date(session.updatedAt);
+    meta.push(`Letzte Aktivität: ${d.toLocaleString('de-DE')}`);
+  }
+  if (session.checkpointCount > 0) {
+    meta.push(`${session.checkpointCount} Checkpoint(s)`);
+  }
+  if (meta.length) {
+    html += `<div class="stream-session-context__meta">${escapeHtml(meta.join(' · '))}</div>`;
+  }
+
+  // Load checkpoints
+  try {
+    const checkpoints = await copilot.sessions.readCheckpoints(sessionId);
+    if (checkpoints && checkpoints.length > 0) {
+      html += '<div class="stream-session-context__section">';
+      html += '<div class="stream-session-context__label">🔖 Checkpoints</div>';
+      html += '<ul class="stream-session-context__list">';
+      // Show last 5 checkpoints
+      const recent = checkpoints.slice(-5);
+      for (const cp of recent) {
+        html += `<li>${escapeHtml(cp.title)}</li>`;
+      }
+      if (checkpoints.length > 5) {
+        html += `<li class="stream-session-context__more">… und ${checkpoints.length - 5} weitere</li>`;
+      }
+      html += '</ul></div>';
     }
-  });
+  } catch { /* checkpoints not available */ }
+
+  // Load plan
+  try {
+    const plan = await copilot.sessions.readPlan(sessionId);
+    if (plan) {
+      html += '<div class="stream-session-context__section">';
+      html += '<div class="stream-session-context__label">📝 Plan</div>';
+      html += `<div class="stream-session-context__plan markdown-body">${window.markdown.render(plan)}</div>`;
+      html += '</div>';
+    }
+  } catch { /* plan not available */ }
+
+  html += '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
+
+  contextEl.innerHTML = html;
+  tab.streamEl.insertBefore(contextEl, tab.statusEl);
 }
 
 // ── Delete Session ────────────────────────────────────────────
