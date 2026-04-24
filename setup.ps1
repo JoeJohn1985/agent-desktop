@@ -54,9 +54,24 @@ if ($copilotCheck) {
     Write-OK "Copilot CLI extension installed."
 }
 
-# ── 4. npm install ───────────────────────────────────────────
+# ── 4. Python (required for native module compilation) ───────
+Write-Step "Checking Python..."
+$pythonVersion = python --version 2>$null
+if (-not $pythonVersion) {
+    $pythonVersion = python3 --version 2>$null
+}
+if ($pythonVersion) {
+    Write-OK "Python already installed: $pythonVersion"
+} else {
+    Write-Warn "Python not found. Installing (user scope)..."
+    winget install Python.Python.3.12 --scope user --silent --accept-package-agreements --accept-source-agreements
+    Write-OK "Python installed. Please restart this script."
+    exit 0
+}
+
+# ── 5. npm install ───────────────────────────────────────────
 Write-Step "Installing Node.js dependencies..."
-Write-Host "  (Using prebuilt native binaries — no compiler required)" -ForegroundColor DarkGray
+Write-Host "  (Native modules will be compiled using Python)" -ForegroundColor DarkGray
 $npmResult = npm install 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Warn "npm install encountered issues. If native module compilation failed,"
@@ -67,7 +82,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Dependencies installed successfully."
 
-# ── 5. Auth check ────────────────────────────────────────────
+# ── 6. Auth check ────────────────────────────────────────────
 Write-Step "Checking GitHub authentication..."
 $authStatus = gh auth status 2>&1
 if ($LASTEXITCODE -eq 0) {
