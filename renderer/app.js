@@ -1324,6 +1324,95 @@ function updateStatusbar(id, text) {
   if (el) el.textContent = text;
 }
 
+// ── Context Widget ───────────────────────────────────────────
+let contextPopupVisible = false;
+
+function formatTokenCount(n) {
+  return n.toLocaleString('de-DE');
+}
+
+async function refreshContext() {
+  const tab = activeTabId != null ? tabs.get(activeTabId) : null;
+  if (!tab || !tab.sessionId) {
+    showContextPopup({ error: 'Keine aktive Session' });
+    return;
+  }
+
+  const infoEl = document.getElementById('contextInfo');
+  const barFill = document.getElementById('contextBarFill');
+  if (infoEl) {
+    infoEl.textContent = '⏳ Kontext wird abgefragt…';
+    infoEl.classList.add('context-popup__info--loading');
+  }
+  if (barFill) {
+    barFill.style.width = '0%';
+    barFill.className = 'context-popup__bar-fill';
+  }
+
+  try {
+    const result = await copilot.context.fetch(tab.sessionId);
+    if (result.success) {
+      showContextPopup(result);
+    } else {
+      showContextPopup({ error: result.error || 'Fehler beim Abruf' });
+    }
+  } catch (e) {
+    showContextPopup({ error: 'Fehler: ' + (e.message || e) });
+  }
+}
+
+function showContextPopup(data) {
+  const popup = document.getElementById('contextPopup');
+  const barFill = document.getElementById('contextBarFill');
+  const infoEl = document.getElementById('contextInfo');
+  if (!popup || !barFill || !infoEl) return;
+
+  infoEl.classList.remove('context-popup__info--loading');
+
+  if (data.error) {
+    barFill.style.width = '0%';
+    barFill.className = 'context-popup__bar-fill';
+    infoEl.textContent = `⚠️ ${data.error}`;
+    return;
+  }
+
+  const pct = data.percent;
+  barFill.style.width = pct + '%';
+  barFill.className = 'context-popup__bar-fill';
+  if (pct > 80) barFill.classList.add('context-popup__bar-fill--red');
+  else if (pct > 50) barFill.classList.add('context-popup__bar-fill--yellow');
+
+  infoEl.textContent = `${formatTokenCount(data.used)} / ${formatTokenCount(data.total)} Tokens (${pct}%)`;
+
+  // Update statusbar item
+  const sbEl = document.getElementById('sbContext');
+  if (sbEl) {
+    sbEl.textContent = `📊 ${pct}%`;
+    sbEl.classList.add('session-statusbar__item--active');
+  }
+}
+
+function toggleContextPopup() {
+  const popup = document.getElementById('contextPopup');
+  if (!popup) return;
+  contextPopupVisible = !contextPopupVisible;
+  popup.classList.toggle('context-popup--visible', contextPopupVisible);
+  if (contextPopupVisible) {
+    refreshContext();
+  }
+}
+
+// Close context popup on outside click
+document.addEventListener('click', (e) => {
+  if (!contextPopupVisible) return;
+  const popup = document.getElementById('contextPopup');
+  const sbContext = document.getElementById('sbContext');
+  if (popup && !popup.contains(e.target) && sbContext && !sbContext.contains(e.target)) {
+    contextPopupVisible = false;
+    popup.classList.remove('context-popup--visible');
+  }
+});
+
 function toolIcon(name) {
   const icons = {
     view: '📄', edit: '✏️', create: '📝', grep: '🔍', glob: '📂',
@@ -1701,6 +1790,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Export chat
   document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
+
+  // Context widget
+  document.getElementById('sbContext').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleContextPopup();
+  });
 
   // Refresh
   // Todos

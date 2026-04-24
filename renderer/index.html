@@ -142,6 +142,16 @@
         <span class="session-statusbar__item" id="sbInstructions" data-tooltip="Instructions">📜 –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item session-statusbar__item--clickable" id="sbCwd" data-tooltip="Arbeitsverzeichnis öffnen" onclick="openCwd()">📁 –</span>
+        <span class="session-statusbar__sep">·</span>
+        <span class="session-statusbar__item session-statusbar__item--clickable" id="sbContext" data-tooltip="Kontextauslastung anzeigen">📊 Kontext</span>
+        <!-- Context Popup -->
+        <div class="context-popup" id="contextPopup">
+          <div class="context-popup__header">📊 Kontextfenster</div>
+          <div class="context-popup__bar">
+            <div class="context-popup__bar-fill" id="contextBarFill"></div>
+          </div>
+          <div class="context-popup__info" id="contextInfo">Klicke um Kontext abzufragen…</div>
+        </div>
       </div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>

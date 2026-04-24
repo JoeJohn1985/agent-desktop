@@ -84,6 +84,10 @@ contextBridge.exposeInMainWorld('copilot', {
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
   },
+  // Context (silent /context query)
+  context: {
+    fetch: (sessionId) => ipcRenderer.invoke('context:fetch', sessionId),
+  },
   // Terminal (interactive PTY for slash commands)
   terminal: {
     available: () => ipcRenderer.invoke('terminal:available'),

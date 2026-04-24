@@ -653,6 +653,68 @@ function scanSkills() {
   return skills;
 }
 
+// ── Context Fetch (silent /context via PTY) ──────────────────
+
+ipcMain.handle('context:fetch', (_event, sessionId) => {
+  return new Promise((resolve) => {
+    if (!pty || !sessionId) {
+      return resolve({ success: false, error: 'PTY oder Session nicht verfügbar' });
+    }
+
+    let output = '';
+    let resolved = false;
+
+    const done = (result) => {
+      if (resolved) return;
+      resolved = true;
+      try { proc.kill(); } catch (_) {}
+      resolve(result);
+    };
+
+    const proc = pty.spawn(
+      process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash'),
+      [],
+      {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 10,
+        cwd: COPILOT_CWD,
+        env: { ...process.env, TERM: 'xterm-256color' },
+      }
+    );
+
+    proc.onData((data) => {
+      output += data;
+      // Look for context output pattern: "X / Y tokens" or percentage
+      const plain = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      const match = plain.match(/(\d[\d,.]*)\s*\/\s*(\d[\d,.]*)\s*tokens?\s*(?:used\s*)?\((\d+(?:\.\d+)?)%\)/i);
+      if (match) {
+        done({
+          success: true,
+          used: parseInt(match[1].replace(/[,.\s]/g, ''), 10),
+          total: parseInt(match[2].replace(/[,.\s]/g, ''), 10),
+          percent: parseFloat(match[3]),
+        });
+      }
+    });
+
+    proc.onExit(() => {
+      done({ success: false, error: 'Prozess beendet ohne Kontext-Daten' });
+    });
+
+    // Start copilot with session resume
+    proc.write(`copilot --resume=${sessionId}\r`);
+    // Send /context after copilot starts
+    setTimeout(() => {
+      if (!resolved) proc.write(`/context\r`);
+    }, 3000);
+    // Timeout after 12 seconds
+    setTimeout(() => {
+      done({ success: false, error: 'Zeitüberschreitung' });
+    }, 12000);
+  });
+});
+
 // ── Terminal (PTY) IPC ────────────────────────────────────────
 
 ipcMain.handle('terminal:available', () => !!pty);

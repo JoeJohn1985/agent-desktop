@@ -1266,8 +1266,9 @@ mark.chat-search-highlight--active {
   background: var(--bg-secondary, var(--bg-overlay));
   border-top: 1px solid var(--border);
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
+  position: relative;
 }
 
 .session-statusbar__item {
@@ -1670,4 +1671,60 @@ mark.chat-search-highlight--active {
 .terminal-tab-body {
   width: 100%;
   height: 100%;
+}
+
+/* ── Context Popup ─────────────────────────────────────── */
+.context-popup {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 12px;
+  min-width: 280px;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  z-index: 200;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.context-popup--visible {
+  display: block;
+}
+.context-popup__header {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.context-popup__bar {
+  height: 10px;
+  background: var(--bg-hover);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.context-popup__bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 5px;
+  transition: width 0.4s ease, background-color 0.4s ease;
+  background-color: var(--green);
+}
+.context-popup__bar-fill--yellow {
+  background-color: var(--yellow);
+}
+.context-popup__bar-fill--red {
+  background-color: var(--red);
+}
+.context-popup__info {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.context-popup__info--loading {
+  opacity: 0.6;
+  font-style: italic;
+}
+#sbContext.session-statusbar__item--active {
+  color: var(--text-primary);
 }
