@@ -21,31 +21,40 @@ The app dynamically loads skills from your local Copilot installation (`~/.copil
 
 ## Requirements
 
-- **GitHub Copilot CLI** — installed, authenticated and licensed  
-  → [Setup Guide](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line)
-- **Node.js 18+** → [nodejs.org](https://nodejs.org/)
-- **Windows Build Tools** (needed for native modules) — install once via PowerShell (Admin):
-  ```powershell
-  npm install --global windows-build-tools
-  ```
-  Or install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload.
 - **Windows 11** (other platforms and versions not tested)
+- **GitHub Copilot** license (individual or business)
 
 ## Getting Started
 
-```bash
-# 1. Clone the repository
+### Option A — Automated Setup (recommended)
+
+```powershell
 git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
 cd github-copilot-desktop
-
-# 2. Install dependencies and rebuild native modules
-npm install
-
-# 3. Start the app
-npm start
+.\setup.ps1
 ```
 
-> **Note:** `npm install` automatically rebuilds native modules for your Electron version via the `postinstall` script. If you encounter issues, run `npm run rebuild` manually.
+The setup script automatically installs:
+- Node.js (via winget)
+- Windows Build Tools (native module compilation)
+- GitHub CLI + Copilot extension
+- All npm dependencies (with native module rebuild)
+
+If not yet authenticated, the script will prompt you to run `gh auth login`.
+
+### Option B — Manual Setup
+
+<details>
+<summary>Click to expand</summary>
+
+1. Install [Node.js 18+](https://nodejs.org/)
+2. Install [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++" workload
+3. Install [GitHub CLI](https://cli.github.com/) and authenticate: `gh auth login`
+4. Install the Copilot extension: `gh extension install github/gh-copilot`
+5. Install dependencies: `npm install`
+6. Start the app: `npm start`
+
+</details>
 
 ## Project Structure
 
