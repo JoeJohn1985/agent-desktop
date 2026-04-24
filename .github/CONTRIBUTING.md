@@ -48,3 +48,25 @@ See [README.md](../README.md) for setup instructions.
 ## Questions?
 
 Open an issue or start a discussion on GitHub.
+
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`):
+
+| Change type | Version bump | Example |
+|---|---|---|
+| Bugfix, small improvement | `PATCH` | `0.9.0` → `0.9.1` |
+| New feature (backwards-compatible) | `MINOR` | `0.9.0` → `0.10.0` |
+| Breaking change or planned release | `MAJOR` | `0.9.0` → `1.0.0` |
+
+**Until `1.0.0`:** The project is in pre-release (`0.x.x`). Breaking changes may appear in MINOR bumps.
+
+**Who bumps the version?**
+The maintainer/Copilot agent assesses each change and proposes a version bump before pushing. Contributors do not need to change the version themselves — mention it in your PR description if you think it warrants a bump.
+
+**Road to `1.0.0`** requires:
+- [ ] Code Review
+- [ ] QA / Testing
+- [ ] Security Audit
+- [ ] Full Documentation
+
