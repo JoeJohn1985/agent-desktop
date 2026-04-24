@@ -751,10 +751,14 @@ function initCopilotIPC() {
 
       case 'session.tools_updated': {
         const modelName = event.data.model || '?';
-        tab.context.model = modelName;
-        tab.statusEl.textContent = `● Modell: ${modelName}`;
-        tab.statusEl.style.display = 'block';
-        updateStatusbar('sbModel', `🧠 ${modelName}`);
+        // Only set the model on first update — sub-agents send their own model
+        // info later but we always want to show the main agent's model.
+        if (!tab.context.model) {
+          tab.context.model = modelName;
+          tab.statusEl.textContent = `● Modell: ${modelName}`;
+          tab.statusEl.style.display = 'block';
+          updateStatusbar('sbModel', `🧠 ${modelName}`);
+        }
         break;
       }
 
