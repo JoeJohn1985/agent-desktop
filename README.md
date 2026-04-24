@@ -21,19 +21,31 @@ The app dynamically loads skills from your local Copilot installation (`~/.copil
 
 ## Requirements
 
-- [GitHub Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) installed and authenticated
-- [Node.js](https://nodejs.org/) 18+
-- Windows (currently tested on Windows 10/11)
+- **GitHub Copilot CLI** — installed, authenticated and licensed  
+  → [Setup Guide](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line)
+- **Node.js 18+** → [nodejs.org](https://nodejs.org/)
+- **Windows Build Tools** (needed for native modules) — install once via PowerShell (Admin):
+  ```powershell
+  npm install --global windows-build-tools
+  ```
+  Or install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload.
+- **Windows 10/11** (other platforms not tested)
 
 ## Getting Started
 
 ```bash
-# Install dependencies
+# 1. Clone the repository
+git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
+cd github-copilot-desktop
+
+# 2. Install dependencies and rebuild native modules
 npm install
 
-# Start the app
+# 3. Start the app
 npm start
 ```
+
+> **Note:** `npm install` automatically rebuilds native modules for your Electron version via the `postinstall` script. If you encounter issues, run `npm run rebuild` manually.
 
 ## Project Structure
 

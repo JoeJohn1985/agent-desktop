@@ -5,11 +5,14 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "rebuild": "electron-rebuild",
+    "postinstall": "electron-rebuild"
   },
   "author": "MSchneider",
   "license": "MIT",
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "electron": "^35.0.0"
   },
   "dependencies": {
