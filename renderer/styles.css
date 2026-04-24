@@ -981,7 +981,7 @@ mark.chat-search-highlight--active {
   font-size: 16px;
   max-width: 80%;
   width: fit-content;
-  text-align: right;
+  text-align: left;
   white-space: pre-wrap;
   word-wrap: break-word;
   text-shadow: 0 1px 1px rgba(0,0,0,0.2);
