@@ -34,13 +34,12 @@ cd github-copilot-desktop
 .\setup.ps1
 ```
 
-The setup script automatically installs:
-- Node.js (via winget)
-- Windows Build Tools (native module compilation)
-- GitHub CLI + Copilot extension
-- All npm dependencies (with native module rebuild)
+The setup script automatically installs everything **without administrator rights**:
+- Node.js (via winget, user scope)
+- GitHub CLI + Copilot extension (via winget, user scope)
+- All npm dependencies (using prebuilt native binaries — no compiler needed)
 
-If not yet authenticated, the script will prompt you to run `gh auth login`.
+If not yet authenticated, the script will guide you to run `gh auth login`.
 
 ### Option B — Manual Setup
 
@@ -48,11 +47,12 @@ If not yet authenticated, the script will prompt you to run `gh auth login`.
 <summary>Click to expand</summary>
 
 1. Install [Node.js 18+](https://nodejs.org/)
-2. Install [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++" workload
-3. Install [GitHub CLI](https://cli.github.com/) and authenticate: `gh auth login`
-4. Install the Copilot extension: `gh extension install github/gh-copilot`
-5. Install dependencies: `npm install`
-6. Start the app: `npm start`
+2. Install [GitHub CLI](https://cli.github.com/) and authenticate: `gh auth login`
+3. Install the Copilot extension: `gh extension install github/gh-copilot`
+4. Install dependencies: `npm install`
+5. Start the app: `npm start`
+
+> If `npm install` fails due to native module compilation errors, [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) may be required (needs administrator rights).
 
 </details>
 
