@@ -77,12 +77,6 @@ npm install
 ```
 `npm install` uses prebuilt native binaries — no compiler required in most cases.
 
-> **Troubleshooting:** If `npm install` fails with a native module error, try:
-> ```powershell
-> npm install --ignore-scripts
-> ```
-> If that doesn't help, [Windows Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) may be required (needs administrator rights). Install the "Desktop development with C++" workload, then run `npm run rebuild`.
-
 **Step 6 — Start the app**
 ```powershell
 npm start

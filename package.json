@@ -6,8 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "rebuild": "electron-rebuild",
-    "postinstall": "electron-rebuild"
+    "rebuild": "electron-rebuild"
   },
   "author": "MSchneider",
   "license": "MIT",
