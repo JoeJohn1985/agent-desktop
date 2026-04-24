@@ -29,7 +29,7 @@ The app dynamically loads skills from your local Copilot installation (`~/.copil
   npm install --global windows-build-tools
   ```
   Or install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload.
-- **Windows 10/11** (other platforms not tested)
+- **Windows 11** (other platforms and versions not tested)
 
 ## Getting Started
 
