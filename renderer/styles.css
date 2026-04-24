@@ -135,7 +135,15 @@ body {
   font-size: 17px; font-weight: 600;
 }
 .titlebar__icon { font-size: 20px; }
-.titlebar__center { font-size: 16px; }
+.titlebar__center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+  pointer-events: none;
+}
 .titlebar__status {
   background: var(--accent-subtle);
   padding: 3px 12px;

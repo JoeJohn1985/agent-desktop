@@ -17,6 +17,9 @@
       <span class="titlebar__icon">🤖</span>
       <span class="titlebar__title">Copilot Desktop</span>
     </div>
+    <div class="titlebar__center">
+      <span id="sbVersion" data-tooltip="App / CLI Version">🏷️ –</span>
+    </div>
     <div class="titlebar__controls">
       <button class="titlebar__btn" onclick="copilot.window.minimize()" data-tooltip="Minimieren">─</button>
       <button class="titlebar__btn" onclick="copilot.window.maximize()" data-tooltip="Maximieren">□</button>
@@ -139,8 +142,6 @@
         <span class="session-statusbar__item" id="sbInstructions" data-tooltip="Instructions">📜 –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item session-statusbar__item--clickable" id="sbCwd" data-tooltip="Arbeitsverzeichnis öffnen" onclick="openCwd()">📁 –</span>
-        <span class="session-statusbar__sep">·</span>
-        <span class="session-statusbar__item" id="sbVersion" data-tooltip="App / CLI Version">🏷️ –</span>
       </div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
