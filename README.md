@@ -17,13 +17,7 @@
 
 ## Skills
 
-| Icon | Skill | Description |
-|------|-------|-------------|
-| 🧠 | task-router | Automatic complexity classification and sub-agent delegation |
-| 🔍 | code-review | Systematic code review following best practices |
-| 🧪 | quality-audit | Comprehensive quality assurance analysis |
-| 🛡️ | security-audit | Security vulnerability analysis |
-| ☁️ | customize-cloud-agent | Copilot cloud agent environment customization |
+The app dynamically loads skills from your local Copilot installation (`~/.copilot/skills/`). Skills can be toggled on/off per session — active skills are automatically injected into prompts and shown as tags below each message.
 
 ## Requirements
 
