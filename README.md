@@ -36,8 +36,9 @@ cd github-copilot-desktop
 
 The setup script automatically installs everything **without administrator rights**:
 - Node.js (via winget, user scope)
+- Python 3.12 (via winget, user scope — required for native module compilation)
 - GitHub CLI + Copilot extension (via winget, user scope)
-- All npm dependencies (using prebuilt native binaries — no compiler needed)
+- All npm dependencies (native modules compiled via Python/node-gyp)
 
 If not yet authenticated, the script will guide you to run `gh auth login`.
 
@@ -50,26 +51,34 @@ If not yet authenticated, the script will guide you to run `gh auth login`.
 Download and install from [nodejs.org](https://nodejs.org/) (LTS recommended).
 Verify: `node --version` should print `v18.x` or higher.
 
-**Step 2 — Install GitHub CLI**
+**Step 2 — Install Python 3.12+**
+Required for native module compilation (node-gyp).
+Download from [python.org](https://www.python.org/) or via winget:
+```powershell
+winget install Python.Python.3.12 --scope user
+```
+Verify: `python --version`
+
+**Step 3 — Install GitHub CLI**
 Download from [cli.github.com](https://cli.github.com/) or via winget:
 ```powershell
 winget install GitHub.cli --scope user
 ```
 Verify: `gh --version`
 
-**Step 3 — Authenticate with GitHub**
+**Step 4 — Authenticate with GitHub**
 ```powershell
 gh auth login
 ```
 Follow the prompts (browser-based login). Make sure your account has a GitHub Copilot license.
 
-**Step 4 — Install the Copilot CLI extension**
+**Step 5 — Install the Copilot CLI extension**
 ```powershell
 gh extension install github/gh-copilot
 ```
 Verify: `gh copilot --version`
 
-**Step 5 — Clone and install the app**
+**Step 6 — Clone and install the app**
 ```powershell
 git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
 cd github-copilot-desktop
@@ -77,7 +86,7 @@ npm install
 ```
 `npm install` uses prebuilt native binaries — no compiler required in most cases.
 
-**Step 6 — Start the app**
+**Step 7 — Start the app**
 ```powershell
 npm start
 ```
