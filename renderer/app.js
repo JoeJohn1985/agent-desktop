@@ -516,11 +516,6 @@ function sendMessage() {
     tab.streamEl.insertBefore(skillBar, tab.statusEl);
   }
 
-  // Track task-router skill status for this request
-  tab._taskRouterActive = activeSkills.has('task-router');
-  tab._taskRouterUsed = false;
-  tab._turnResponseContent = '';
-
   // Show thinking indicator
   tab.statusEl.textContent = '● Thinking…';
   tab.statusEl.style.display = 'block';
@@ -632,8 +627,6 @@ function initCopilotIPC() {
           if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
           tab._responseEl.innerHTML = window.markdown.render(event.data.content);
         }
-        // Accumulate response content for task-router detection
-        tab._turnResponseContent += event.data.content || tab._responseRaw || '';
         tab._responseEl = null;
         tab._responseRaw = '';
 
@@ -828,22 +821,6 @@ function initCopilotIPC() {
         setTabStatus(tabId, 'done');
       }
     }
-
-    // ── Task-Router Usage Badge ──────────────────────────
-    if (tab._taskRouterActive) {
-      const content = tab._turnResponseContent || '';
-      const used = /Task-Router Klassifizierung|[┌┐└┘│].*Klassifizierung|Gesamt:\s*\d|Modell:\s*\S|Tier\s*\d/i.test(content);
-      tab._taskRouterUsed = used;
-      const badge = document.createElement('div');
-      badge.className = used
-        ? 'task-router-badge task-router-badge--used'
-        : 'task-router-badge task-router-badge--skipped';
-      badge.textContent = used
-        ? '🧠 Task-Router ✓'
-        : '⚠️ Task-Router nicht verwendet';
-      tab.streamEl.insertBefore(badge, tab.statusEl);
-    }
-    tab._turnResponseContent = '';
 
     scrollToBottom(tab.streamEl);
 
