@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('copilot', {
   },
   // Context (silent /context query)
   context: {
-    fetch: (tabId) => ipcRenderer.invoke('context:fetch', tabId),
+    fetch: (tabId, sessionId) => ipcRenderer.invoke('context:fetch', tabId, sessionId),
   },
   // Terminal (interactive PTY for slash commands)
   terminal: {

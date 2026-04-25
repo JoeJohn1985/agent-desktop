@@ -1338,12 +1338,6 @@ async function refreshContext() {
     return;
   }
 
-  // Require an active terminal for context fetch
-  if (!tab.terminal || !tab.terminal.alive) {
-    showContextPopup({ error: 'Kein aktives Terminal – bitte zuerst Terminal öffnen (⌨️)' });
-    return;
-  }
-
   const infoEl = document.getElementById('contextInfo');
   const barFill = document.getElementById('contextBarFill');
   if (infoEl) {
@@ -1356,7 +1350,7 @@ async function refreshContext() {
   }
 
   try {
-    const result = await copilot.context.fetch(activeTabId);
+    const result = await copilot.context.fetch(activeTabId, tab.sessionId);
     if (result.success) {
       showContextPopup(result);
     } else {

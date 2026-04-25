@@ -658,36 +658,71 @@ function scanSkills() {
 // Track active context fetches to suppress terminal output
 const contextFetches = new Map(); // tabId → { buffer, resolve, resolved }
 
-ipcMain.handle('context:fetch', (_event, tabId) => {
+ipcMain.handle('context:fetch', (_event, tabId, sessionId) => {
   return new Promise((resolve) => {
-    const proc = terminalProcesses.get(tabId);
-    if (!proc) {
-      return resolve({ success: false, error: 'Kein aktives Terminal – bitte zuerst Terminal öffnen' });
+    if (!pty) {
+      return resolve({ success: false, error: 'node-pty nicht verfügbar' });
+    }
+    if (!sessionId) {
+      return resolve({ success: false, error: 'Keine aktive Session' });
     }
 
-    // Prevent concurrent fetches on the same tab
+    // Prevent concurrent fetches
     if (contextFetches.has(tabId)) {
       return resolve({ success: false, error: 'Kontext-Abfrage läuft bereits' });
     }
 
-    const state = { buffer: '', resolved: false, resolve };
+    let buffer = '';
+    let resolved = false;
 
     const done = (result) => {
-      if (state.resolved) return;
-      state.resolved = true;
+      if (resolved) return;
+      resolved = true;
       contextFetches.delete(tabId);
+      try { proc.kill(); } catch (_) {}
       resolve(result);
     };
 
-    contextFetches.set(tabId, { state, done });
+    // Spawn copilot directly in interactive mode — status line with token info
+    // appears immediately on startup without needing to send /context
+    const proc = pty.spawn(COPILOT_BIN, [`--resume=${sessionId}`], {
+      name: 'xterm-256color',
+      cols: 220,
+      rows: 24,
+      cwd: COPILOT_CWD,
+      env: { ...process.env, TERM: 'xterm-256color', NO_COLOR: '0' },
+    });
 
-    // Inject /context into the existing copilot process
-    proc.write('/context\r');
+    contextFetches.set(tabId, { done });
 
-    // Timeout after 5 seconds (process is already running)
+    proc.onData((data) => {
+      buffer += data;
+      // Strip ANSI escape codes for parsing
+      const plain = buffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
+      // Match formats: "68k/200k tokens (34%)" or "68,000 / 200,000 tokens (34%)"
+      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
+      if (match) {
+        const parseTokens = (s) => {
+          const n = parseFloat(s.replace(',', '.'));
+          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
+        };
+        done({
+          success: true,
+          used: parseTokens(match[1]),
+          total: parseTokens(match[2]),
+          percent: parseFloat(match[3]),
+        });
+      }
+    });
+
+    proc.onExit(() => {
+      done({ success: false, error: 'Prozess beendet ohne Kontext-Daten' });
+    });
+
+    // Timeout after 20 seconds
     setTimeout(() => {
-      done({ success: false, error: 'Zeitüberschreitung' });
-    }, 5000);
+      done({ success: false, error: 'Zeitüberschreitung – Copilot zu langsam gestartet' });
+    }, 20000);
   });
 });
 
