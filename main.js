@@ -685,14 +685,18 @@ ipcMain.handle('context:fetch', (_event, sessionId) => {
 
     proc.onData((data) => {
       output += data;
-      // Look for context output pattern: "X / Y tokens" or percentage
-      const plain = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      const match = plain.match(/(\d[\d,.]*)\s*\/\s*(\d[\d,.]*)\s*tokens?\s*(?:used\s*)?\((\d+(?:\.\d+)?)%\)/i);
+      // Look for context output pattern: "68k/200k tokens (34%)" or "68,000 / 200,000 tokens (34%)"
+      const plain = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
+      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
       if (match) {
+        const parseTokens = (s) => {
+          const n = parseFloat(s.replace(',', '.'));
+          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
+        };
         done({
           success: true,
-          used: parseInt(match[1].replace(/[,.\s]/g, ''), 10),
-          total: parseInt(match[2].replace(/[,.\s]/g, ''), 10),
+          used: parseTokens(match[1]),
+          total: parseTokens(match[2]),
           percent: parseFloat(match[3]),
         });
       }
