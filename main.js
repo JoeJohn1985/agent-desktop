@@ -656,18 +656,13 @@ function scanSkills() {
 // ── Context Fetch (silent /context via existing PTY) ─────────
 
 // Track active context fetches to suppress terminal output
-const contextFetches = new Map(); // tabId → { buffer, resolve, resolved }
+const contextFetches = new Map(); // tabId → active
 
 ipcMain.handle('context:fetch', (_event, tabId, sessionId) => {
   return new Promise((resolve) => {
-    if (!pty) {
-      return resolve({ success: false, error: 'node-pty nicht verfügbar' });
-    }
     if (!sessionId) {
       return resolve({ success: false, error: 'Keine aktive Session' });
     }
-
-    // Prevent concurrent fetches
     if (contextFetches.has(tabId)) {
       return resolve({ success: false, error: 'Kontext-Abfrage läuft bereits' });
     }
@@ -683,24 +678,58 @@ ipcMain.handle('context:fetch', (_event, tabId, sessionId) => {
       resolve(result);
     };
 
-    // Spawn copilot directly in interactive mode — status line with token info
-    // appears immediately on startup without needing to send /context
-    const proc = pty.spawn(COPILOT_BIN, [`--resume=${sessionId}`], {
-      name: 'xterm-256color',
-      cols: 220,
-      rows: 24,
+    // Use JSON mode: copilot treats /context as a slash command and outputs
+    // the result as structured JSON events
+    const proc = spawn(COPILOT_BIN, [
+      '-p', '/context',
+      '--output-format', 'json',
+      '--stream', 'on',
+      '-s',
+      `--resume=${sessionId}`,
+    ], {
       cwd: COPILOT_CWD,
-      env: { ...process.env, TERM: 'xterm-256color', NO_COLOR: '0' },
+      env: { ...process.env, NO_COLOR: '1' },
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    contextFetches.set(tabId, { done });
+    contextFetches.set(tabId, true);
 
-    proc.onData((data) => {
-      buffer += data;
-      // Strip ANSI escape codes for parsing
-      const plain = buffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
-      // Match formats: "68k/200k tokens (34%)" or "68,000 / 200,000 tokens (34%)"
-      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
+    proc.stdout.on('data', (chunk) => {
+      buffer += chunk.toString('utf-8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        console.log('[context:fetch] stdout line:', line.substring(0, 200));
+        try {
+          const event = JSON.parse(line);
+          // Look for assistant message with token info
+          const content = event.data?.content || event.data?.delta || '';
+          if (content) {
+            const match = content.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
+            if (match) {
+              const parseTokens = (s) => {
+                const n = parseFloat(s.replace(',', '.'));
+                return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
+              };
+              done({
+                success: true,
+                used: parseTokens(match[1]),
+                total: parseTokens(match[2]),
+                percent: parseFloat(match[3]),
+              });
+              return;
+            }
+          }
+        } catch (_) {}
+      }
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      const text = chunk.toString('utf-8');
+      console.log('[context:fetch] stderr:', text.substring(0, 200));
+      const match = text.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
       if (match) {
         const parseTokens = (s) => {
           const n = parseFloat(s.replace(',', '.'));
@@ -715,14 +744,30 @@ ipcMain.handle('context:fetch', (_event, tabId, sessionId) => {
       }
     });
 
-    proc.onExit(() => {
-      done({ success: false, error: 'Prozess beendet ohne Kontext-Daten' });
+    proc.on('close', () => {
+      // If we collected all stdout, do a final parse of the raw buffer
+      const allText = buffer;
+      const match = allText.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
+      if (match) {
+        const parseTokens = (s) => {
+          const n = parseFloat(s.replace(',', '.'));
+          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
+        };
+        done({
+          success: true,
+          used: parseTokens(match[1]),
+          total: parseTokens(match[2]),
+          percent: parseFloat(match[3]),
+        });
+      } else {
+        done({ success: false, error: 'Keine Token-Daten in der Antwort' });
+      }
     });
 
-    // Timeout after 20 seconds
+    // Timeout after 30 seconds
     setTimeout(() => {
-      done({ success: false, error: 'Zeitüberschreitung – Copilot zu langsam gestartet' });
-    }, 20000);
+      done({ success: false, error: 'Zeitüberschreitung' });
+    }, 30000);
   });
 });
 
@@ -753,26 +798,6 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   terminalProcesses.set(tabId, ptyProcess);
 
   ptyProcess.onData((data) => {
-    // If a silent context fetch is active, intercept output
-    const ctxFetch = contextFetches.get(tabId);
-    if (ctxFetch) {
-      ctxFetch.state.buffer += data;
-      const plain = ctxFetch.state.buffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
-      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
-      if (match) {
-        const parseTokens = (s) => {
-          const n = parseFloat(s.replace(',', '.'));
-          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
-        };
-        ctxFetch.done({
-          success: true,
-          used: parseTokens(match[1]),
-          total: parseTokens(match[2]),
-          percent: parseFloat(match[3]),
-        });
-      }
-      return; // suppress terminal output during context fetch
-    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:data', tabId, data);
     }
