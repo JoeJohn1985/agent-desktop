@@ -130,6 +130,10 @@ function spawnCopilot(tabId, prompt, options = {}) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
+        // Debug: log all event types to find token/usage data
+        if (event.type) {
+          console.log(`[copilot:event] type=${event.type}`, JSON.stringify(event.data || {}).substring(0, 300));
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('copilot:event', tabId, event);
         }
