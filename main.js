@@ -130,9 +130,18 @@ function spawnCopilot(tabId, prompt, options = {}) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
-        // Debug: log all event types to find token/usage data
-        if (event.type) {
-          console.log(`[copilot:event] type=${event.type}`, JSON.stringify(event.data || {}).substring(0, 300));
+        // Log token data from assistant.message events
+        if (event.type === 'assistant.message' && event.data) {
+          const d = event.data;
+          const tokenInfo = {};
+          for (const k of Object.keys(d)) {
+            if (k.toLowerCase().includes('token') || k.toLowerCase().includes('usage') || k.toLowerCase().includes('request') || k.toLowerCase().includes('context')) {
+              tokenInfo[k] = d[k];
+            }
+          }
+          if (Object.keys(tokenInfo).length > 0) {
+            console.log('[copilot:tokens]', JSON.stringify(tokenInfo));
+          }
         }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('copilot:event', tabId, event);
