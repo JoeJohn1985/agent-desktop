@@ -653,69 +653,41 @@ function scanSkills() {
   return skills;
 }
 
-// ── Context Fetch (silent /context via PTY) ──────────────────
+// ── Context Fetch (silent /context via existing PTY) ─────────
 
-ipcMain.handle('context:fetch', (_event, sessionId) => {
+// Track active context fetches to suppress terminal output
+const contextFetches = new Map(); // tabId → { buffer, resolve, resolved }
+
+ipcMain.handle('context:fetch', (_event, tabId) => {
   return new Promise((resolve) => {
-    if (!pty || !sessionId) {
-      return resolve({ success: false, error: 'PTY oder Session nicht verfügbar' });
+    const proc = terminalProcesses.get(tabId);
+    if (!proc) {
+      return resolve({ success: false, error: 'Kein aktives Terminal – bitte zuerst Terminal öffnen' });
     }
 
-    let output = '';
-    let resolved = false;
+    // Prevent concurrent fetches on the same tab
+    if (contextFetches.has(tabId)) {
+      return resolve({ success: false, error: 'Kontext-Abfrage läuft bereits' });
+    }
+
+    const state = { buffer: '', resolved: false, resolve };
 
     const done = (result) => {
-      if (resolved) return;
-      resolved = true;
-      try { proc.kill(); } catch (_) {}
+      if (state.resolved) return;
+      state.resolved = true;
+      contextFetches.delete(tabId);
       resolve(result);
     };
 
-    const proc = pty.spawn(
-      process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash'),
-      [],
-      {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 10,
-        cwd: COPILOT_CWD,
-        env: { ...process.env, TERM: 'xterm-256color' },
-      }
-    );
+    contextFetches.set(tabId, { state, done });
 
-    proc.onData((data) => {
-      output += data;
-      // Look for context output pattern: "68k/200k tokens (34%)" or "68,000 / 200,000 tokens (34%)"
-      const plain = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
-      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
-      if (match) {
-        const parseTokens = (s) => {
-          const n = parseFloat(s.replace(',', '.'));
-          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
-        };
-        done({
-          success: true,
-          used: parseTokens(match[1]),
-          total: parseTokens(match[2]),
-          percent: parseFloat(match[3]),
-        });
-      }
-    });
+    // Inject /context into the existing copilot process
+    proc.write('/context\r');
 
-    proc.onExit(() => {
-      done({ success: false, error: 'Prozess beendet ohne Kontext-Daten' });
-    });
-
-    // Start copilot with session resume
-    proc.write(`copilot --resume=${sessionId}\r`);
-    // Send /context after copilot starts
-    setTimeout(() => {
-      if (!resolved) proc.write(`/context\r`);
-    }, 3000);
-    // Timeout after 12 seconds
+    // Timeout after 5 seconds (process is already running)
     setTimeout(() => {
       done({ success: false, error: 'Zeitüberschreitung' });
-    }, 12000);
+    }, 5000);
   });
 });
 
@@ -746,6 +718,26 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   terminalProcesses.set(tabId, ptyProcess);
 
   ptyProcess.onData((data) => {
+    // If a silent context fetch is active, intercept output
+    const ctxFetch = contextFetches.get(tabId);
+    if (ctxFetch) {
+      ctxFetch.state.buffer += data;
+      const plain = ctxFetch.state.buffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
+      const match = plain.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
+      if (match) {
+        const parseTokens = (s) => {
+          const n = parseFloat(s.replace(',', '.'));
+          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
+        };
+        ctxFetch.done({
+          success: true,
+          used: parseTokens(match[1]),
+          total: parseTokens(match[2]),
+          percent: parseFloat(match[3]),
+        });
+      }
+      return; // suppress terminal output during context fetch
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:data', tabId, data);
     }
