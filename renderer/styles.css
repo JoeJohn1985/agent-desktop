@@ -1255,13 +1255,55 @@ mark.chat-search-highlight--active {
   font-style: italic;
 }
 
-/* ── Session Statusbar ───────────────────────────────── */
+/* ── Session Info Bar (under tabs, session-specific) ──── */
+/* Session Actions (slash command buttons, under tabs) */
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 12px;
+  background: var(--bg-secondary, var(--bg-overlay));
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: visible;
+  position: relative;
+}
+
+.session-actions__btn {
+  background: var(--bg-tertiary, #313244);
+  border: 1px solid var(--border, #45475a);
+  color: var(--text-secondary, #a6adc8);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.session-actions__btn:hover {
+  background: var(--bg-hover, #45475a);
+  color: var(--text-primary, #cdd6f4);
+  border-color: var(--text-secondary, #a6adc8);
+}
+
+.session-actions__btn:active {
+  transform: scale(0.97);
+}
+
+.session-actions__btn--loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Session Statusbar (info items, under input bar) */
 .session-statusbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 16px;
-  font-size: 15px;
+  padding: 3px 16px;
+  font-size: 11px;
   color: var(--text-muted);
   background: var(--bg-secondary, var(--bg-overlay));
   border-top: 1px solid var(--border);
@@ -1276,18 +1318,18 @@ mark.chat-search-highlight--active {
   align-items: center;
   gap: 3px;
 }
+
 .session-statusbar__item--clickable {
   cursor: pointer;
-  border-radius: 3px;
-  padding: 1px 4px;
-  transition: background 0.15s ease;
+  transition: color 0.15s;
 }
 .session-statusbar__item--clickable:hover {
-  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .session-statusbar__sep {
-  opacity: 0.3;
+  color: var(--border, #45475a);
+  font-size: 10px;
 }
 
 /* ── Chat Input Bar ───────────────────────────────────── */
@@ -1673,58 +1715,31 @@ mark.chat-search-highlight--active {
   height: 100%;
 }
 
-/* ── Context Popup ─────────────────────────────────────── */
+/* Context Modal */
 .context-popup {
-  display: none;
   position: absolute;
-  bottom: calc(100% + 6px);
-  right: 12px;
-  min-width: 280px;
-  padding: 12px 16px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
-  z-index: 200;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-.context-popup--visible {
-  display: block;
-}
-.context-popup__header {
-  font-weight: 600;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-.context-popup__bar {
-  height: 10px;
-  background: var(--bg-hover);
-  border-radius: 5px;
-  overflow: hidden;
-  margin-bottom: 8px;
-}
-.context-popup__bar-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: 5px;
-  transition: width 0.4s ease, background-color 0.4s ease;
-  background-color: var(--green);
-}
-.context-popup__bar-fill--yellow {
-  background-color: var(--yellow);
-}
-.context-popup__bar-fill--red {
-  background-color: var(--red);
-}
-.context-popup__info {
-  color: var(--text-muted);
+  top: calc(100% + 8px);
+  right: 0;
+  width: 300px;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-color, #45475a);
+  border-radius: 10px;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
   font-size: 12px;
+  z-index: 2000;
+  overflow: hidden;
 }
-.context-popup__info--loading {
-  opacity: 0.6;
-  font-style: italic;
+
+.context-popup__body {
+  padding: 14px;
+  color: var(--text-primary, #cdd6f4);
+  line-height: 1.5;
 }
-#sbContext.session-statusbar__item--active {
-  color: var(--text-primary);
+
+.context-popup__loading {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-secondary, #a6adc8);
+  font-size: 13px;
 }

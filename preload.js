@@ -84,14 +84,15 @@ contextBridge.exposeInMainWorld('copilot', {
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
   },
-  // Context (silent /context query)
-  context: {
-    fetch: (tabId, sessionId) => ipcRenderer.invoke('context:fetch', tabId, sessionId),
-  },
   // Terminal (interactive PTY for slash commands)
   terminal: {
     available: () => ipcRenderer.invoke('terminal:available'),
     spawn: (tabId, sessionId, slashCommand) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand),
+    spawnBackground: (tabId, sessionId) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId),
+    getBuffer: (tabId) => ipcRenderer.invoke('terminal:get-buffer', tabId),
+    sendCommand: (tabId, command) => ipcRenderer.invoke('terminal:send-command', tabId, command),
+    fetchContext: (tabId) => ipcRenderer.invoke('terminal:fetch-context', tabId),
+    sendSlash: (tabId, command) => ipcRenderer.invoke('terminal:send-slash', tabId, command),
     input: (tabId, data) => ipcRenderer.send('terminal:input', tabId, data),
     resize: (tabId, cols, rows) => ipcRenderer.send('terminal:resize', tabId, cols, rows),
     close: (tabId) => ipcRenderer.send('terminal:close', tabId),

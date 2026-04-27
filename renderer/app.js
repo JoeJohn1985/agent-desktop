@@ -70,6 +70,10 @@ async function restoreOpenTabs() {
         tab.sessionId = t.sessionId;
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
+        // Start background terminal for restored tab
+        if (t.sessionId) {
+          copilot.terminal.spawnBackground(tabId, t.sessionId);
+        }
         // Display session context for restored tabs
         const session = sessions.find(s => s.id === t.sessionId);
         if (session) displaySessionContext(tab, session);
@@ -302,6 +306,17 @@ function switchTab(tabId) {
   }
 
   renderTabs();
+  
+  // Update context button for this tab
+  const ctxBtn = document.getElementById('btnSlashContext');
+  if (activeTab && activeTab.contextPercent != null) {
+    const pct = activeTab.contextPercent;
+    const color = pct > 80 ? '#f38ba8' : pct > 60 ? '#f9e2af' : '#a6e3a1';
+    ctxBtn.innerHTML = `📊 <span style="color:${color}">${pct}%</span>`;
+  } else {
+    ctxBtn.textContent = '📊 Kontext';
+  }
+  
   document.getElementById('chatInput')?.focus();
 }
 
@@ -788,6 +803,8 @@ function initCopilotIPC() {
         if (event.sessionId) {
           tab.sessionId = event.sessionId;
           saveOpenTabs();
+          // Start background terminal for this session
+          copilot.terminal.spawnBackground(tabId, event.sessionId);
           // Show todos panel for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
@@ -1072,6 +1089,7 @@ function openImagesFolder() {
 }
 
 // ── Sessions ─────────────────────────────────────────────────
+
 async function loadSessions() {
   const allSessions = await copilot.sessions.list();
   sessions = allSessions.filter(s => s.name);
@@ -1113,6 +1131,8 @@ async function resumeSession(sessionId) {
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // Start background terminal for instant /context access
+  copilot.terminal.spawnBackground(tabId, sessionId);
   activeSessionId = sessionId;
   loadTodos(sessionId);
   saveOpenTabs();
@@ -1324,94 +1344,7 @@ function updateStatusbar(id, text) {
   if (el) el.textContent = text;
 }
 
-// ── Context Widget ───────────────────────────────────────────
-let contextPopupVisible = false;
-
-function formatTokenCount(n) {
-  return n.toLocaleString('de-DE');
-}
-
-async function refreshContext() {
-  const tab = activeTabId != null ? tabs.get(activeTabId) : null;
-  if (!tab || !tab.sessionId) {
-    showContextPopup({ error: 'Keine aktive Session' });
-    return;
-  }
-
-  const infoEl = document.getElementById('contextInfo');
-  const barFill = document.getElementById('contextBarFill');
-  if (infoEl) {
-    infoEl.textContent = '⏳ Kontext wird abgefragt…';
-    infoEl.classList.add('context-popup__info--loading');
-  }
-  if (barFill) {
-    barFill.style.width = '0%';
-    barFill.className = 'context-popup__bar-fill';
-  }
-
-  try {
-    const result = await copilot.context.fetch(activeTabId, tab.sessionId);
-    if (result.success) {
-      showContextPopup(result);
-    } else {
-      showContextPopup({ error: result.error || 'Fehler beim Abruf' });
-    }
-  } catch (e) {
-    showContextPopup({ error: 'Fehler: ' + (e.message || e) });
-  }
-}
-
-function showContextPopup(data) {
-  const popup = document.getElementById('contextPopup');
-  const barFill = document.getElementById('contextBarFill');
-  const infoEl = document.getElementById('contextInfo');
-  if (!popup || !barFill || !infoEl) return;
-
-  infoEl.classList.remove('context-popup__info--loading');
-
-  if (data.error) {
-    barFill.style.width = '0%';
-    barFill.className = 'context-popup__bar-fill';
-    infoEl.textContent = `⚠️ ${data.error}`;
-    return;
-  }
-
-  const pct = data.percent;
-  barFill.style.width = pct + '%';
-  barFill.className = 'context-popup__bar-fill';
-  if (pct > 80) barFill.classList.add('context-popup__bar-fill--red');
-  else if (pct > 50) barFill.classList.add('context-popup__bar-fill--yellow');
-
-  infoEl.textContent = `${formatTokenCount(data.used)} / ${formatTokenCount(data.total)} Tokens (${pct}%)`;
-
-  // Update statusbar item
-  const sbEl = document.getElementById('sbContext');
-  if (sbEl) {
-    sbEl.textContent = `📊 ${pct}%`;
-    sbEl.classList.add('session-statusbar__item--active');
-  }
-}
-
-function toggleContextPopup() {
-  const popup = document.getElementById('contextPopup');
-  if (!popup) return;
-  contextPopupVisible = !contextPopupVisible;
-  popup.classList.toggle('context-popup--visible', contextPopupVisible);
-  if (contextPopupVisible) {
-    refreshContext();
-  }
-}
-
-// Close context popup on outside click
-document.addEventListener('click', (e) => {
-  if (!contextPopupVisible) return;
-  const popup = document.getElementById('contextPopup');
-  const sbContext = document.getElementById('sbContext');
-  if (popup && !popup.contains(e.target) && sbContext && !sbContext.contains(e.target)) {
-    contextPopupVisible = false;
-    popup.classList.remove('context-popup--visible');
-  }
-});
+// ── Context Widget (opens terminal with /context) ────────────
 
 function toolIcon(name) {
   const icons = {
@@ -1457,13 +1390,17 @@ async function openTerminal(tabId, sessionId, slashCommand) {
     return;
   }
 
-  // If this tab already has a terminal, just show it
+  // If this tab already has a terminal, just show it and send slash command
   if (tab.terminal && tab.terminal.alive) {
     const panel = document.getElementById('terminalPanel');
     panel.classList.add('terminal-panel--open');
     tab.terminal.bodyEl.style.display = '';
     requestAnimationFrame(() => tab.terminal.fitAddon.fit());
     tab.terminal.instance.focus();
+    // Send slash command if provided
+    if (slashCommand) {
+      copilot.terminal.sendCommand(tabId, slashCommand);
+    }
     return;
   }
 
@@ -1549,10 +1486,20 @@ async function openTerminal(tabId, sessionId, slashCommand) {
     copilot.terminal.resize(tabId, cols, rows);
   });
 
-  // Spawn PTY
+  // Spawn PTY (reuses background PTY if available)
   const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand);
   if (!result.success) {
     instance.writeln(`\r\n\x1b[31m⚠️ ${result.error}\x1b[0m`);
+  }
+
+  // If reusing background PTY, replay buffered output
+  if (result.reused) {
+    const buffer = await copilot.terminal.getBuffer(tabId);
+    if (buffer && buffer.length > 0) {
+      for (const chunk of buffer) {
+        instance.write(chunk);
+      }
+    }
   }
 
   // Re-fit and sync terminal size after spawn
@@ -1791,10 +1738,157 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export chat
   document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
 
-  // Context widget
-  document.getElementById('sbContext').addEventListener('click', (e) => {
+  // Context widget — fetch context from background PTY and show in popup
+  const sbContextBtn = document.getElementById('btnSlashContext');
+  const contextPopup = document.getElementById('contextPopup');
+  const contextPopupBody = document.getElementById('contextPopupBody');
+  
+  // Close popup when clicking outside
+  document.addEventListener('click', (e) => {
+    if (contextPopup.style.display !== 'none' && !contextPopup.contains(e.target) && e.target !== sbContextBtn) {
+      contextPopup.style.display = 'none';
+    }
+  });
+  
+  sbContextBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    toggleContextPopup();
+    
+    // Toggle: if already visible, close
+    if (contextPopup.style.display !== 'none') {
+      contextPopup.style.display = 'none';
+      return;
+    }
+    
+    if (activeTabId == null) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab || !tab.sessionId) {
+      showNotification('Keine aktive Session', 'warning');
+      return;
+    }
+    
+    // Show popup with loading state
+    contextPopup.style.display = '';
+    contextPopupBody.innerHTML = '<div class="context-popup__loading">⏳ Lade Kontext…</div>';
+    
+    // Fetch context from background PTY
+    const result = await copilot.terminal.fetchContext(activeTabId);
+    if (!result.success) {
+      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${result.error}</div>`;
+      return;
+    }
+    
+    // Build formatted context display
+    if (result.percent != null) {
+      const color = result.percent > 80 ? '#f38ba8' : result.percent > 60 ? '#f9e2af' : '#a6e3a1';
+      let html = `<div style="margin-bottom:12px;">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
+          <span style="font-size:20px;font-weight:700;color:${color};">${result.percent}%</span>
+          <span style="color:var(--text-secondary,#a6adc8);font-size:11px;">${result.usedTokens || '?'} / ${result.totalTokens || '?'} Tokens</span>
+        </div>
+        <div style="background:var(--bg-tertiary,#313244);border-radius:4px;height:8px;overflow:hidden;">
+          <div style="width:${result.percent}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
+        </div>
+      </div>`;
+      
+      if (result.categories) {
+        html += '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
+        for (const cat of result.categories) {
+          const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
+            <span style="color:var(--text-secondary,#a6adc8);">${cat.name}</span>
+            <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
+          </div>
+          <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
+            <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
+          </div>`;
+        }
+        html += '</div>';
+      }
+      
+      contextPopupBody.innerHTML = html;
+    } else {
+      contextPopupBody.textContent = result.raw;
+    }
+
+    // Update statusbar button with percentage (per-tab)
+    if (result.percent != null) {
+      const tab = tabs.get(activeTabId);
+      if (tab) tab.contextPercent = result.percent;
+      const color = result.percent > 80 ? '#f38ba8' : result.percent > 60 ? '#f9e2af' : '#a6e3a1';
+      sbContextBtn.innerHTML = `📊 <span style="color:${color}">${result.percent}%</span>`;
+    }
+  });
+
+  // Compact button — send /compact and show popup
+  const compactBtn = document.getElementById('btnSlashCompact');
+  const compactPopup = document.getElementById('compactPopup');
+  const compactPopupBody = document.getElementById('compactPopupBody');
+  
+  // Close compact popup when clicking outside
+  document.addEventListener('click', (e) => {
+    if (compactPopup.style.display !== 'none' && !compactPopup.contains(e.target) && e.target !== compactBtn) {
+      compactPopup.style.display = 'none';
+    }
+  });
+  
+  compactBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    
+    if (compactPopup.style.display !== 'none') {
+      compactPopup.style.display = 'none';
+      return;
+    }
+    
+    if (activeTabId == null) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab || !tab.sessionId) {
+      showNotification('Keine aktive Session', 'warning');
+      return;
+    }
+    
+    compactPopup.style.display = '';
+    compactPopupBody.innerHTML = '<div class="context-popup__loading">🗜️ Komprimiere Kontext…</div>';
+    compactBtn.classList.add('session-actions__btn--loading');
+    
+    const result = await copilot.terminal.sendSlash(activeTabId, '/compact');
+    compactBtn.classList.remove('session-actions__btn--loading');
+    
+    if (!result.success) {
+      compactPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${result.error}</div>`;
+      return;
+    }
+    
+    // Show the compact result
+    compactPopupBody.innerHTML = `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escapeHtml(result.output)}</div>`;
+    
+    showNotification('Kontext komprimiert ✓', 'success');
+  });
+
+  // Clear button — send /clear and show notification
+  document.getElementById('btnSlashClear').addEventListener('click', async () => {
+    if (activeTabId == null) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab || !tab.sessionId) {
+      showNotification('Keine aktive Session', 'warning');
+      return;
+    }
+    
+    const btn = document.getElementById('btnSlashClear');
+    btn.classList.add('session-actions__btn--loading');
+    
+    const result = await copilot.terminal.sendSlash(activeTabId, '/clear');
+    btn.classList.remove('session-actions__btn--loading');
+    
+    if (result.success) {
+      showNotification('Chat-Kontext geleert ✓', 'success');
+      // Reset the context button and stored value
+      const ctxBtn = document.getElementById('btnSlashContext');
+      ctxBtn.textContent = '📊 Kontext';
+      const tab = tabs.get(activeTabId);
+      if (tab) tab.contextPercent = null;
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
   });
 
   // Refresh
@@ -1955,9 +2049,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Terminal minimize button — hides panel, keeps PTY alive
   document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
-
-  // Terminal close button — kills PTY
-  document.getElementById('btnTerminalClose').addEventListener('click', () => closeTerminal());
 
   // Scroll-to-bottom button
   document.getElementById('btnScrollBottom').addEventListener('click', () => {

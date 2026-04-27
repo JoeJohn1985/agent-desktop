@@ -21,6 +21,8 @@ try {
 let mainWindow = null;
 const copilotProcesses = new Map(); // tabId → child process
 const terminalProcesses = new Map(); // tabId → pty process
+const terminalBuffers = new Map(); // tabId → string[]
+const terminalReady = new Map(); // tabId → boolean (Copilot TUI is ready for commands)
 let nextTabId = 1;
 const COPILOT_DIR = path.join(os.homedir(), '.copilot');
 const SESSIONS_DIR = path.join(COPILOT_DIR, 'session-state');
@@ -130,19 +132,6 @@ function spawnCopilot(tabId, prompt, options = {}) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
-        // Log token data from assistant.message events
-        if (event.type === 'assistant.message' && event.data) {
-          const d = event.data;
-          const tokenInfo = {};
-          for (const k of Object.keys(d)) {
-            if (k.toLowerCase().includes('token') || k.toLowerCase().includes('usage') || k.toLowerCase().includes('request') || k.toLowerCase().includes('context')) {
-              tokenInfo[k] = d[k];
-            }
-          }
-          if (Object.keys(tokenInfo).length > 0) {
-            console.log('[copilot:tokens]', JSON.stringify(tokenInfo));
-          }
-        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('copilot:event', tabId, event);
         }
@@ -666,139 +655,309 @@ function scanSkills() {
   return skills;
 }
 
-// ── Context Fetch (silent /context via existing PTY) ─────────
-
-// Track active context fetches to suppress terminal output
-const contextFetches = new Map(); // tabId → active
-
-ipcMain.handle('context:fetch', (_event, tabId, sessionId) => {
-  return new Promise((resolve) => {
-    if (!sessionId) {
-      return resolve({ success: false, error: 'Keine aktive Session' });
-    }
-    if (contextFetches.has(tabId)) {
-      return resolve({ success: false, error: 'Kontext-Abfrage läuft bereits' });
-    }
-
-    let buffer = '';
-    let resolved = false;
-
-    const done = (result) => {
-      if (resolved) return;
-      resolved = true;
-      contextFetches.delete(tabId);
-      try { proc.kill(); } catch (_) {}
-      resolve(result);
-    };
-
-    // Use JSON mode: copilot treats /context as a slash command and outputs
-    // the result as structured JSON events
-    const proc = spawn(COPILOT_BIN, [
-      '-p', '/context',
-      '--output-format', 'json',
-      '--stream', 'on',
-      '-s',
-      `--resume=${sessionId}`,
-    ], {
-      cwd: COPILOT_CWD,
-      env: { ...process.env, NO_COLOR: '1' },
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    contextFetches.set(tabId, true);
-
-    proc.stdout.on('data', (chunk) => {
-      buffer += chunk.toString('utf-8');
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        console.log('[context:fetch] stdout line:', line.substring(0, 200));
-        try {
-          const event = JSON.parse(line);
-          // Look for assistant message with token info
-          const content = event.data?.content || event.data?.delta || '';
-          if (content) {
-            const match = content.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
-            if (match) {
-              const parseTokens = (s) => {
-                const n = parseFloat(s.replace(',', '.'));
-                return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
-              };
-              done({
-                success: true,
-                used: parseTokens(match[1]),
-                total: parseTokens(match[2]),
-                percent: parseFloat(match[3]),
-              });
-              return;
-            }
-          }
-        } catch (_) {}
-      }
-    });
-
-    proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString('utf-8');
-      console.log('[context:fetch] stderr:', text.substring(0, 200));
-      const match = text.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
-      if (match) {
-        const parseTokens = (s) => {
-          const n = parseFloat(s.replace(',', '.'));
-          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
-        };
-        done({
-          success: true,
-          used: parseTokens(match[1]),
-          total: parseTokens(match[2]),
-          percent: parseFloat(match[3]),
-        });
-      }
-    });
-
-    proc.on('close', () => {
-      // If we collected all stdout, do a final parse of the raw buffer
-      const allText = buffer;
-      const match = allText.match(/(\d+(?:[.,]\d+)?k?)\s*\/\s*(\d+(?:[.,]\d+)?k?)\s*tokens?\s*\((\d+(?:\.\d+)?)%\)/i);
-      if (match) {
-        const parseTokens = (s) => {
-          const n = parseFloat(s.replace(',', '.'));
-          return s.toLowerCase().endsWith('k') ? Math.round(n * 1000) : Math.round(n);
-        };
-        done({
-          success: true,
-          used: parseTokens(match[1]),
-          total: parseTokens(match[2]),
-          percent: parseFloat(match[3]),
-        });
-      } else {
-        done({ success: false, error: 'Keine Token-Daten in der Antwort' });
-      }
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      done({ success: false, error: 'Zeitüberschreitung' });
-    }, 30000);
-  });
-});
-
 // ── Terminal (PTY) IPC ────────────────────────────────────────
 
 ipcMain.handle('terminal:available', () => !!pty);
+
+ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
+  // Spawn PTY in background without frontend — buffers output for later replay
+  console.log('[bg-terminal] spawn request tabId:', tabId, 'sessionId:', sessionId);
+  if (terminalProcesses.has(tabId)) { console.log('[bg-terminal] already running'); return { success: true, alreadyRunning: true }; }
+  if (!pty) return { success: false, error: 'node-pty not available' };
+
+  const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+  const ptyProcess = pty.spawn(shell, [], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    cwd: 'C:\\Users\\MSchneider\\Copilot',
+    env: { ...process.env, TERM: 'xterm-256color' },
+  });
+
+  terminalProcesses.set(tabId, ptyProcess);
+  terminalBuffers.set(tabId, []);
+
+  // Buffer output AND forward to renderer (in case xterm is already mounted)
+  ptyProcess.onData((data) => {
+    const buf = terminalBuffers.get(tabId);
+    if (buf) buf.push(data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:data', tabId, data);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode }) => {
+    terminalProcesses.delete(tabId);
+    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
+    }
+  });
+
+  // Start copilot
+  const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
+  ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
+
+  // Auto-confirm resume prompt and track when TUI is ready
+  terminalReady.set(tabId, false);
+  let allData = '';
+  let confirmed = false;
+  const readyListener = ptyProcess.onData((data) => {
+    allData += data;
+    // Auto-confirm "session already in use" warning (once!)
+    if (!confirmed && (allData.includes('already be in use') || allData.includes('conflict'))) {
+      confirmed = true;
+      console.log('[bg-terminal] Auto-confirming resume for tab', tabId);
+      setTimeout(() => ptyProcess.write('1'), 500);
+    }
+    // Detect when Copilot TUI is fully loaded
+    if (!terminalReady.get(tabId) && (allData.includes('/ commands') || allData.includes('? help'))) {
+      console.log('[bg-terminal] TUI ready for tab', tabId);
+      terminalReady.set(tabId, true);
+      readyListener.dispose();
+    }
+  });
+  // Fallback: assume ready after 20s
+  setTimeout(() => {
+    if (!terminalReady.get(tabId)) {
+      console.log('[bg-terminal] Fallback: assuming ready for tab', tabId);
+      terminalReady.set(tabId, true);
+    }
+    readyListener.dispose();
+  }, 20000);
+
+  return { success: true };
+});
+
+ipcMain.handle('terminal:get-buffer', (_event, tabId) => {
+  return terminalBuffers.get(tabId) || [];
+});
+
+ipcMain.handle('terminal:send-command', (_event, tabId, command) => {
+  const p = terminalProcesses.get(tabId);
+  if (!p) return { success: false, error: 'No terminal process' };
+  p.write(`\x1b[200~${command}\x1b[201~`);
+  setTimeout(() => p.write('\r'), 100);
+  return { success: true };
+});
+
+// Parse context data from stripped output
+function parseContextOutput(text) {
+  const result = { raw: text };
+  
+  try {
+    // Extract "Model · UsedK/TotalK tokens (Percent%)"
+    // Example: "Claude Opus 4.6 · 136k/200k tokens (68%)"
+    const headerMatch = text.match(/([A-Za-z\s.]+\d[\w.]*)\s*[·]\s*([\d.]+k)\/([\d.]+k)\s*tokens?\s*\((\d+)%\)/i);
+    if (headerMatch) {
+      result.model = headerMatch[1].trim();
+      result.usedTokens = headerMatch[2];
+      result.totalTokens = headerMatch[3];
+      result.percent = parseInt(headerMatch[4]);
+    }
+    
+    // Extract categories: "Category: Xk (Y%)"
+    const categories = [];
+    const catRegex = /(System\/Tools|Messages|Free Space|Buffer):\s*([\d.]+k)\s*\((\d+)%\)/gi;
+    let match;
+    while ((match = catRegex.exec(text)) !== null) {
+      categories.push({ name: match[1], tokens: match[2], percent: parseInt(match[3]) });
+    }
+    if (categories.length) result.categories = categories;
+  } catch (e) {
+    console.log('[parseContextOutput] Parse error, returning raw:', e.message);
+  }
+  
+  return result;
+}
+
+ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
+  return new Promise((resolve) => {
+    const p = terminalProcesses.get(tabId);
+    console.log('[fetch-context] tabId:', tabId, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
+    if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
+    
+    // Wait for TUI to be ready before sending /context
+    const waitForReady = () => {
+      if (terminalReady.get(tabId)) {
+        sendContextCommand();
+      } else {
+        console.log('[fetch-context] Waiting for TUI to be ready...');
+        let waited = 0;
+        const readyCheck = setInterval(() => {
+          waited += 500;
+          if (terminalReady.get(tabId)) {
+            clearInterval(readyCheck);
+            sendContextCommand();
+          } else if (waited > 20000) {
+            clearInterval(readyCheck);
+            resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
+          }
+        }, 500);
+      }
+    };
+    
+    const sendContextCommand = () => {
+      const chunks = [];
+      let lastDataTime = Date.now();
+    
+    const onData = p.onData((data) => {
+      chunks.push(data);
+      lastDataTime = Date.now();
+    });
+    
+    // Send /context via bracketed paste (TUI needs this for slash commands)
+    p.write(`\x1b[200~/context\x1b[201~`);
+    setTimeout(() => p.write('\r'), 500);
+    
+    // Wait until output settles (3s quiet), then return
+    const checkInterval = setInterval(() => {
+      if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
+        clearInterval(checkInterval);
+        onData.dispose();
+        
+        const raw = chunks.join('');
+        // Strip ANSI escape sequences and control characters
+        const stripped = raw
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+          .replace(/\x1b\][^\x07]*\x07/g, '')
+          .replace(/\x1b[()][0-9A-Z]/g, '')
+          .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
+          .replace(/\r/g, '');
+        
+        console.log('[fetch-context] done, stripped length:', stripped.length);
+        console.log('[fetch-context] OUTPUT:', stripped.substring(0, 500));
+        resolve({ success: true, ...parseContextOutput(stripped) });
+      }
+    }, 500);
+    
+    // Timeout after 15s
+    setTimeout(() => {
+      clearInterval(checkInterval);
+      onData.dispose();
+      if (chunks.length === 0) {
+        resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
+      } else {
+        const raw = chunks.join('');
+        const stripped = raw
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+          .replace(/\x1b\][^\x07]*\x07/g, '')
+          .replace(/\x1b[()][0-9A-Z]/g, '')
+          .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
+          .replace(/\r/g, '');
+        resolve({ success: true, ...parseContextOutput(stripped), timedOut: true });
+      }
+    }, 15000);
+    }; // end sendContextCommand
+    
+    waitForReady();
+  });
+});
+
+// Generic slash command handler — sends any slash command to background PTY
+ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
+  return new Promise((resolve) => {
+    const p = terminalProcesses.get(tabId);
+    console.log('[send-slash] tabId:', tabId, 'command:', command, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
+    if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
+    
+    const waitForReady = () => {
+      if (terminalReady.get(tabId)) {
+        sendCommand();
+      } else {
+        let waited = 0;
+        const readyCheck = setInterval(() => {
+          waited += 500;
+          if (terminalReady.get(tabId)) {
+            clearInterval(readyCheck);
+            sendCommand();
+          } else if (waited > 20000) {
+            clearInterval(readyCheck);
+            resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
+          }
+        }, 500);
+      }
+    };
+    
+    const sendCommand = () => {
+      const chunks = [];
+      let lastDataTime = Date.now();
+      
+      const onData = p.onData((data) => {
+        chunks.push(data);
+        lastDataTime = Date.now();
+      });
+      
+      // Send command via bracketed paste
+      p.write(`\x1b[200~${command}\x1b[201~`);
+      setTimeout(() => p.write('\r'), 500);
+      
+      // Wait until output settles (3s quiet)
+      const checkInterval = setInterval(() => {
+        if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
+          clearInterval(checkInterval);
+          onData.dispose();
+          
+          const raw = chunks.join('');
+          const stripped = raw
+            .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+            .replace(/\x1b\][^\x07]*\x07/g, '')
+            .replace(/\x1b[()][0-9A-Z]/g, '')
+            .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
+            .replace(/\r/g, '');
+          
+          console.log('[send-slash] done, command:', command, 'stripped length:', stripped.length);
+          resolve({ success: true, output: stripped });
+        }
+      }, 500);
+      
+      // Timeout after 15s
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        onData.dispose();
+        if (chunks.length === 0) {
+          resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
+        } else {
+          const raw = chunks.join('');
+          const stripped = raw
+            .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+            .replace(/\x1b\][^\x07]*\x07/g, '')
+            .replace(/\x1b[()][0-9A-Z]/g, '')
+            .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
+            .replace(/\r/g, '');
+          resolve({ success: true, output: stripped, timedOut: true });
+        }
+      }, 15000);
+    };
+    
+    waitForReady();
+  });
+});
 
 ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   if (!pty) {
     return { success: false, error: 'node-pty ist nicht installiert. Bitte "npm install" und ggf. "npx electron-rebuild" ausführen.' };
   }
 
-  // Kill existing terminal for this tab
+  // If a background PTY already exists, reuse it
   if (terminalProcesses.has(tabId)) {
-    terminalProcesses.get(tabId).kill();
-    terminalProcesses.delete(tabId);
+    console.log('[terminal:spawn] Reusing existing PTY for tab', tabId, 'slashCommand:', slashCommand);
+    // Send slash command if requested (PTY is already ready)
+    if (slashCommand) {
+      const p = terminalProcesses.get(tabId);
+      // Type each character individually (more reliable than bracketed paste)
+      for (const ch of slashCommand) {
+        p.write(ch);
+      }
+      setTimeout(() => {
+        console.log('[terminal:spawn] Sending Enter for slash command');
+        p.write('\r');
+      }, 500);
+    }
+    return { success: true, reused: true };
   }
 
+  // No background PTY — spawn fresh (fallback)
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
   const ptyProcess = pty.spawn(shell, [], {
     name: 'xterm-256color',
@@ -818,20 +977,35 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
 
   ptyProcess.onExit(({ exitCode }) => {
     terminalProcesses.delete(tabId);
+    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:exit', tabId, exitCode);
     }
   });
 
-  // Start copilot interactively in the PTY
   const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
   ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
 
-  // Send slash command after copilot has started
+  // Slash command with timing (fallback for non-background case)
   if (slashCommand) {
+    let lastDataTime = Date.now();
+    let slashSent = false;
+    const onData = ptyProcess.onData(() => { lastDataTime = Date.now(); });
+    const checkInterval = setInterval(() => {
+      if (!slashSent && Date.now() - lastDataTime > 5000) {
+        slashSent = true;
+        console.log('[terminal:slash] PTY quiet for 5s — sending:', slashCommand);
+        ptyProcess.write(`\x1b[200~${slashCommand}\x1b[201~`);
+        setTimeout(() => ptyProcess.write('\r'), 100);
+        clearInterval(checkInterval);
+        onData.dispose();
+      }
+    }, 500);
     setTimeout(() => {
-      ptyProcess.write(`${slashCommand}\r`);
-    }, 3000);
+      if (!slashSent) console.log('[terminal:slash] Fallback timeout — command not sent');
+      clearInterval(checkInterval);
+      onData.dispose();
+    }, 30000);
   }
 
   return { success: true };
@@ -851,6 +1025,7 @@ ipcMain.on('terminal:close', (_event, tabId) => {
   const p = terminalProcesses.get(tabId);
   if (p) p.kill();
   terminalProcesses.delete(tabId);
+  terminalBuffers.delete(tabId); terminalReady.delete(tabId);
 });
 
 // ── App Lifecycle ────────────────────────────────────────────

@@ -105,6 +105,24 @@
         <!-- Tabs werden dynamisch eingefügt -->
         <button class="tab-add" id="btnAddTab" data-tooltip="Neuer Tab (Ctrl+T)">+</button>
       </div>
+      <!-- Session Actions (slash command buttons, under tabs) -->
+      <div class="session-actions" id="sessionActions">
+        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Kontext</button>
+        <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
+        <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
+        <!-- Context Popup -->
+        <div id="contextPopup" class="context-popup" style="display:none;">
+          <div class="context-popup__body" id="contextPopupBody">
+            <div class="context-popup__loading">⏳ Lade Kontext…</div>
+          </div>
+        </div>
+        <!-- Compact Popup -->
+        <div id="compactPopup" class="context-popup" style="display:none;">
+          <div class="context-popup__body" id="compactPopupBody">
+            <div class="context-popup__loading">⏳ Komprimiere…</div>
+          </div>
+        </div>
+      </div>
       <div class="stream-area" id="streamArea">
         <!-- Search Bar -->
         <div class="chat-search" id="chatSearchBar">
@@ -127,11 +145,17 @@
           <span class="terminal-panel__title">⚡ Terminal</span>
           <div class="terminal-panel__actions">
             <button class="terminal-panel__btn" id="btnTerminalMinimize" data-tooltip="Terminal einklappen">▾</button>
-            <button class="terminal-panel__btn" id="btnTerminalClose" data-tooltip="Terminal beenden">✕</button>
           </div>
         </div>
         <div class="terminal-panel__body" id="terminalBody"></div>
       </div>
+      <div class="chat-input-bar">
+        <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
+        <button class="chat-terminal-btn" id="btnExportChat" data-tooltip="Chat als Markdown exportieren">📥</button>
+        <textarea class="chat-input" id="chatInput" placeholder="Nachricht eingeben…" rows="1"></textarea>
+        <button class="chat-send" id="btnSend" data-tooltip="Senden (Enter)">➤</button>
+      </div>
+      <!-- Session Info Bar (under input, session-wide info) -->
       <div class="session-statusbar" id="sessionStatusbar">
         <span class="session-statusbar__item" id="sbModel" data-tooltip="Modell">🧠 –</span>
         <span class="session-statusbar__sep">·</span>
@@ -142,22 +166,6 @@
         <span class="session-statusbar__item" id="sbInstructions" data-tooltip="Instructions">📜 –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item session-statusbar__item--clickable" id="sbCwd" data-tooltip="Arbeitsverzeichnis öffnen" onclick="openCwd()">📁 –</span>
-        <span class="session-statusbar__sep">·</span>
-        <span class="session-statusbar__item session-statusbar__item--clickable" id="sbContext" data-tooltip="Kontextauslastung anzeigen">📊 Kontext</span>
-        <!-- Context Popup -->
-        <div class="context-popup" id="contextPopup">
-          <div class="context-popup__header">📊 Kontextfenster</div>
-          <div class="context-popup__bar">
-            <div class="context-popup__bar-fill" id="contextBarFill"></div>
-          </div>
-          <div class="context-popup__info" id="contextInfo">Klicke um Kontext abzufragen…</div>
-        </div>
-      </div>
-      <div class="chat-input-bar">
-        <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
-        <button class="chat-terminal-btn" id="btnExportChat" data-tooltip="Chat als Markdown exportieren">📥</button>
-        <textarea class="chat-input" id="chatInput" placeholder="Nachricht eingeben…" rows="1"></textarea>
-        <button class="chat-send" id="btnSend" data-tooltip="Senden (Enter)">➤</button>
       </div>
     </main>
   </div>
