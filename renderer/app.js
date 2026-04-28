@@ -1833,7 +1833,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         for (const cat of result.categories) {
           const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
           html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
-            <span style="color:var(--text-secondary,#a6adc8);">${cat.name}</span>
+            <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
             <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
           </div>
           <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
@@ -1843,7 +1843,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         html += '</div>';
       }
       
-      contextPopupBody.innerHTML = html;
+      contextPopupBody.innerHTML = DOMPurify.sanitize(html);
     } else {
       contextPopupBody.textContent = result.raw;
     }
@@ -1936,7 +1936,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         for (const cat of result.categories) {
           const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
           html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
-            <span style="color:var(--text-secondary,#a6adc8);">${cat.name}</span>
+            <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
             <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
           </div>
           <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
