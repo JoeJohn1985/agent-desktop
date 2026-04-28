@@ -258,7 +258,7 @@ function renderTagList(containerId, items, removeFnName) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = items.map((item, i) =>
-    `<span class="sett-tag">${escapeHtml(item)} <span class="sett-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
+    `<span class="settings__tool-tag">${escapeHtml(item)} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
   ).join('');
 }
 
@@ -383,7 +383,7 @@ function closeTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
-  copilot.chat.stop(tabId).catch(e => console.warn('[chat] Stop fehlgeschlagen:', e.message));
+  try { copilot.chat.stop(tabId); } catch (_) {}
   tab.streamEl.remove();
 
   // Clean up terminal if present
@@ -2436,7 +2436,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else if (activeTabId != null) {
         const tab = tabs.get(activeTabId);
         if (tab && tab.isProcessing) {
-          copilot.chat.stop(activeTabId).catch(e2 => console.warn('[chat] Stop fehlgeschlagen:', e2.message));
+          try { copilot.chat.stop(activeTabId); } catch (_) {}
         }
       }
     }
