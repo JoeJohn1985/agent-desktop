@@ -105,6 +105,11 @@ copilot-desktop/
 └── package.json
 ```
 
+## Documentation
+
+- 📐 **[Technische Architektur](docs/ARCHITECTURE.md)** — Architektur-Diagramm, IPC-Channels, Datenflüsse, Persistenz, Security
+- 📘 **[Benutzerhandbuch](docs/USER-GUIDE.md)** — UI-Übersicht, Features, Erste Schritte, Tastenkombinationen
+
 ## License
 
 MIT

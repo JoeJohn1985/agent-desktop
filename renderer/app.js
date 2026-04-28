@@ -18,18 +18,21 @@ const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
 
-// ── Auto-Scroll ────────────────────────────────────────────
-let autoScrollEnabled = true;
-
+// ── Auto-Scroll (per-tab) ──────────────────────────────────
 function scrollToBottom(streamEl) {
-  if (!streamEl || !autoScrollEnabled) return;
+  if (!streamEl) return;
+  // Check per-tab autoScroll flag (default true)
+  const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
+  if (tabEntry && tabEntry[1].autoScrollEnabled === false) return;
   streamEl.scrollTop = streamEl.scrollHeight;
 }
 
 function initAutoScroll(streamEl) {
   streamEl.addEventListener('scroll', () => {
     const atBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 60;
-    autoScrollEnabled = atBottom;
+    // Store per-tab
+    const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
+    if (tabEntry) tabEntry[1].autoScrollEnabled = atBottom;
     const btn = document.getElementById('btnScrollBottom');
     if (btn) btn.style.display = atBottom ? 'none' : 'flex';
   });
@@ -217,10 +220,13 @@ function applyChatFontSize(size) {
 }
 
 // ── Notification Sound ──────────────────────────────────────
+let _audioCtx = null;
 function playNotificationSound() {
   if (getSettings().soundEnabled === false) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -232,6 +238,20 @@ function playNotificationSound() {
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.3);
   } catch (e) { /* Audio not available */ }
+}
+
+// ── Toast Notifications ─────────────────────────────────────
+function showNotification(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `toast toast--${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  // Trigger animation
+  requestAnimationFrame(() => toast.classList.add('toast--visible'));
+  setTimeout(() => {
+    toast.classList.remove('toast--visible');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 // ── Tab Management ──────────────────────────────────────────
@@ -429,7 +449,10 @@ function startTabRename(tabId, tabEl, labelSpan) {
   input.focus();
   input.select();
 
+  let committed = false;
   const commit = async () => {
+    if (committed) return;
+    committed = true;
     const newName = input.value.trim();
     input.remove();
     labelSpan.style.display = '';
@@ -941,10 +964,10 @@ function renderTodos() {
       <div class="todo-item ${doneClass}" data-id="${t.id}" draggable="true">
         <span class="todo-item__grip">⠿</span>
         <label class="todo-item__check">
-          <input type="checkbox" ${checked} onchange="toggleTodo('${t.id}')" />
+          <input type="checkbox" ${checked} onchange="toggleTodo('${escapeAttr(t.id)}')" />
         </label>
         <span class="todo-item__text" data-tooltip="${escapeHtml(t.text)}">${escapeHtml(t.text)}</span>
-        <button class="todo-item__delete" onclick="deleteTodo('${t.id}')" data-tooltip="Löschen">✕</button>
+        <button class="todo-item__delete" onclick="deleteTodo('${escapeAttr(t.id)}')" data-tooltip="Löschen">✕</button>
       </div>
     `;
   }).join('');
@@ -1112,10 +1135,10 @@ function renderSessions(list) {
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" data-tooltip="${s.cwd}">
         <div class="session-card__row">
-          <div class="session-card__main" onclick="resumeSession('${s.id}')">
+          <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
             <div class="session-card__title">${escapeHtml(title)}</div>
           </div>
-          <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${s.id}','${escapeHtml(title).replace(/'/g, "\\'")}')" data-tooltip="Session löschen">🗑️</button>
+          <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
         </div>
       </div>
     `;
@@ -1330,6 +1353,10 @@ function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function updateStatus(text, color) {
@@ -1771,9 +1798,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     contextPopupBody.innerHTML = '<div class="context-popup__loading">⏳ Lade Kontext…</div>';
     
     // Fetch context from background PTY
-    const result = await copilot.terminal.fetchContext(activeTabId);
+    let result;
+    try {
+      result = await copilot.terminal.fetchContext(activeTabId);
+    } catch (err) {
+      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(err.message || 'Unbekannter Fehler')}</div>`;
+      return;
+    }
     if (!result.success) {
-      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${result.error}</div>`;
+      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
       return;
     }
     
@@ -1850,11 +1883,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     compactPopupBody.innerHTML = '<div class="context-popup__loading">🗜️ Komprimiere Kontext…</div>';
     compactBtn.classList.add('session-actions__btn--loading');
     
-    const result = await copilot.terminal.sendSlash(activeTabId, '/compact');
+    let result;
+    try {
+      result = await copilot.terminal.sendSlash(activeTabId, '/compact');
+    } catch (err) {
+      result = { success: false, error: err.message || 'Unbekannter Fehler' };
+    }
     compactBtn.classList.remove('session-actions__btn--loading');
     
     if (!result.success) {
-      compactPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${result.error}</div>`;
+      compactPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
       return;
     }
     
@@ -1876,7 +1914,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btn = document.getElementById('btnSlashClear');
     btn.classList.add('session-actions__btn--loading');
     
-    const result = await copilot.terminal.sendSlash(activeTabId, '/clear');
+    let result;
+    try {
+      result = await copilot.terminal.sendSlash(activeTabId, '/clear');
+    } catch (err) {
+      result = { success: false, error: err.message || 'Unbekannter Fehler' };
+    }
     btn.classList.remove('session-actions__btn--loading');
     
     if (result.success) {
@@ -1896,6 +1939,48 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());
   document.getElementById('todoInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
+  });
+
+  // Sync Todos → send next 5 open todos as chat prompt
+  document.getElementById('btnSyncTodos').addEventListener('click', async () => {
+    if (activeTabId == null) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab || !tab.sessionId) {
+      showNotification('Keine aktive Session', 'warning');
+      return;
+    }
+    if (tab.isProcessing) {
+      showNotification('Chat ist noch beschäftigt', 'warning');
+      return;
+    }
+
+    // Get first 5 open todos
+    const openTodos = currentTodos.filter(t => t.status === 'open').slice(0, 5);
+    if (openTodos.length === 0) {
+      showNotification('Keine offenen Todos', 'info');
+      return;
+    }
+
+    // Build prompt
+    const todoList = openTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
+    const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
+
+    // Mark todos as done
+    try {
+      for (const todo of openTodos) {
+        await copilot.todos.update(tab.sessionId, todo.id, { status: 'done' });
+      }
+      await loadTodos(tab.sessionId);
+    } catch (err) {
+      showNotification(`Fehler: ${err.message}`, 'error');
+      return;
+    }
+
+    // Send as chat message
+    document.getElementById('chatInput').value = prompt;
+    sendMessage();
+
+    showNotification(`${openTodos.length} Todos gesendet ✓`, 'success');
   });
 
   // Delete session overlay

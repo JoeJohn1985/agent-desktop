@@ -24,7 +24,12 @@ try {
     gfm: true,
   });
 
-  markdownRender = (text) => marked.parse(text);
+  // DOMPurify for XSS prevention
+  const DOMPurify = require('dompurify');
+  markdownRender = (text) => DOMPurify.sanitize(marked.parse(text), {
+    ADD_TAGS: ['pre', 'code'],
+    ADD_ATTR: ['class'],
+  });
 } catch (e) {
   console.warn('Markdown/highlight.js not available:', e.message);
 }
@@ -43,8 +48,16 @@ contextBridge.exposeInMainWorld('copilot', {
     openCwd: () => ipcRenderer.invoke('copilot:openCwd'),
     getVersions: () => ipcRenderer.invoke('copilot:getVersions'),
     getInstructions: () => ipcRenderer.invoke('copilot:getInstructions'),
-    onEvent: (cb) => ipcRenderer.on('copilot:event', (_e, tabId, event) => cb(tabId, event)),
-    onDone: (cb) => ipcRenderer.on('copilot:done', (_e, tabId, code) => cb(tabId, code)),
+    onEvent: (cb) => {
+      const handler = (_e, tabId, event) => cb(tabId, event);
+      ipcRenderer.on('copilot:event', handler);
+      return () => ipcRenderer.removeListener('copilot:event', handler);
+    },
+    onDone: (cb) => {
+      const handler = (_e, tabId, code) => cb(tabId, code);
+      ipcRenderer.on('copilot:done', handler);
+      return () => ipcRenderer.removeListener('copilot:done', handler);
+    },
   },
   // Sessions
   sessions: {
@@ -69,7 +82,10 @@ contextBridge.exposeInMainWorld('copilot', {
     open: (filePath) => ipcRenderer.invoke('images:open', filePath),
     delete: (filePath) => ipcRenderer.invoke('images:delete', filePath),
     openFolder: () => ipcRenderer.invoke('images:openFolder'),
-    onChanged: (cb) => ipcRenderer.on('images:changed', cb),
+    onChanged: (cb) => {
+      ipcRenderer.on('images:changed', cb);
+      return () => ipcRenderer.removeListener('images:changed', cb);
+    },
   },
   // Config
   config: {
@@ -96,8 +112,16 @@ contextBridge.exposeInMainWorld('copilot', {
     input: (tabId, data) => ipcRenderer.send('terminal:input', tabId, data),
     resize: (tabId, cols, rows) => ipcRenderer.send('terminal:resize', tabId, cols, rows),
     close: (tabId) => ipcRenderer.send('terminal:close', tabId),
-    onData: (cb) => ipcRenderer.on('terminal:data', (_e, tabId, data) => cb(tabId, data)),
-    onExit: (cb) => ipcRenderer.on('terminal:exit', (_e, tabId, code) => cb(tabId, code)),
+    onData: (cb) => {
+      const handler = (_e, tabId, data) => cb(tabId, data);
+      ipcRenderer.on('terminal:data', handler);
+      return () => ipcRenderer.removeListener('terminal:data', handler);
+    },
+    onExit: (cb) => {
+      const handler = (_e, tabId, code) => cb(tabId, code);
+      ipcRenderer.on('terminal:exit', handler);
+      return () => ipcRenderer.removeListener('terminal:exit', handler);
+    },
   },
   // Window
   window: {

@@ -29,6 +29,17 @@ const SESSIONS_DIR = path.join(COPILOT_DIR, 'session-state');
 const COPILOT_BIN = 'copilot'; // assumes copilot is in PATH
 const COPILOT_CWD = path.join(os.homedir(), 'Copilot');
 const IMAGES_DIR = path.join(COPILOT_CWD, 'images');
+const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
+let imageWatcher = null;
+
+// ── Path Safety ──────────────────────────────────────────────
+function safeSessionPath(sessionId) {
+  const resolved = path.resolve(SESSIONS_DIR, sessionId);
+  if (!resolved.startsWith(SESSIONS_DIR + path.sep) && resolved !== SESSIONS_DIR) {
+    throw new Error('Invalid session ID');
+  }
+  return resolved;
+}
 
 // ── Window ───────────────────────────────────────────────────
 function createWindow() {
@@ -231,7 +242,7 @@ const TEXT_EXTENSIONS = new Set([
   '.txt', '.md', '.json', '.js', '.ts', '.jsx', '.tsx', '.css', '.html', '.xml',
   '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.sh', '.bat', '.ps1',
   '.py', '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb', '.php',
-  '.sql', '.csv', '.log', '.env', '.gitignore', '.dockerfile', '.properties',
+  '.sql', '.csv', '.log', '.gitignore', '.dockerfile', '.properties',
 ]);
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico']);
 
@@ -319,14 +330,16 @@ ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
 });
 
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
-  const sessionPath = path.join(SESSIONS_DIR, sessionId);
-  if (!fs.existsSync(sessionPath)) return false;
-  fs.rmSync(sessionPath, { recursive: true, force: true });
-  return true;
+  try {
+    const sessionPath = safeSessionPath(sessionId);
+    if (!fs.existsSync(sessionPath)) return false;
+    fs.rmSync(sessionPath, { recursive: true, force: true });
+    return true;
+  } catch { return false; }
 });
 
 ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
-  const wsPath = path.join(SESSIONS_DIR, sessionId, 'workspace.yaml');
+  const wsPath = path.join(safeSessionPath(sessionId), 'workspace.yaml');
   if (!fs.existsSync(wsPath)) return false;
   try {
     const raw = fs.readFileSync(wsPath, 'utf-8');
@@ -416,7 +429,9 @@ ipcMain.handle('images:list', async () => {
 });
 
 ipcMain.handle('images:open', async (_event, filePath) => {
-  shell.openPath(filePath);
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(IMAGES_DIR + path.sep) && resolved !== IMAGES_DIR) return;
+  shell.openPath(resolved);
 });
 
 ipcMain.handle('images:delete', async (_event, filePath) => {
@@ -436,7 +451,7 @@ function startImageWatcher() {
   try {
     if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
     let debounce = null;
-    fs.watch(IMAGES_DIR, () => {
+    imageWatcher = fs.watch(IMAGES_DIR, () => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -514,7 +529,7 @@ function scanSessions() {
 }
 
 function readCheckpoints(sessionId) {
-  const indexPath = path.join(SESSIONS_DIR, sessionId, 'checkpoints', 'index.md');
+  const indexPath = path.join(safeSessionPath(sessionId), 'checkpoints', 'index.md');
   if (!fs.existsSync(indexPath)) return [];
   try {
     const content = fs.readFileSync(indexPath, 'utf-8');
@@ -534,7 +549,7 @@ function readCheckpoints(sessionId) {
 }
 
 function readPlan(sessionId) {
-  const planPath = path.join(SESSIONS_DIR, sessionId, 'plan.md');
+  const planPath = path.join(safeSessionPath(sessionId), 'plan.md');
   if (!fs.existsSync(planPath)) return null;
   return fs.readFileSync(planPath, 'utf-8');
 }
@@ -549,7 +564,7 @@ function readConfig() {
 
 // ── Todos (per session) ──────────────────────────────────────
 function readTodos(sessionId) {
-  const todosPath = path.join(SESSIONS_DIR, sessionId, 'todos.json');
+  const todosPath = path.join(safeSessionPath(sessionId), 'todos.json');
   if (!fs.existsSync(todosPath)) return [];
   try {
     return JSON.parse(fs.readFileSync(todosPath, 'utf-8'));
@@ -557,7 +572,7 @@ function readTodos(sessionId) {
 }
 
 function writeTodos(sessionId, todos) {
-  const sessionPath = path.join(SESSIONS_DIR, sessionId);
+  const sessionPath = safeSessionPath(sessionId);
   if (!fs.existsSync(sessionPath)) return;
   fs.writeFileSync(path.join(sessionPath, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
 }
@@ -680,7 +695,11 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
   // Buffer output AND forward to renderer (in case xterm is already mounted)
   ptyProcess.onData((data) => {
     const buf = terminalBuffers.get(tabId);
-    if (buf) buf.push(data);
+    if (buf) {
+      buf.push(data);
+      // Cap buffer at 5000 chunks to prevent memory leak
+      if (buf.length > 5000) buf.splice(0, buf.length - 5000);
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:data', tabId, data);
     }
@@ -776,8 +795,8 @@ ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
     const p = terminalProcesses.get(tabId);
     console.log('[fetch-context] tabId:', tabId, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
     if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
-    
-    // Wait for TUI to be ready before sending /context
+    if (terminalBusy.get(tabId)) return resolve({ success: false, error: 'Ein Befehl läuft bereits' });
+    terminalBusy.set(tabId, true);
     const waitForReady = () => {
       if (terminalReady.get(tabId)) {
         sendContextCommand();
@@ -791,6 +810,7 @@ ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
             sendContextCommand();
           } else if (waited > 20000) {
             clearInterval(readyCheck);
+            terminalBusy.set(tabId, false);
             resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
           }
         }, 500);
@@ -800,6 +820,7 @@ ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
     const sendContextCommand = () => {
       const chunks = [];
       let lastDataTime = Date.now();
+      let resolved = false;
     
     const onData = p.onData((data) => {
       chunks.push(data);
@@ -815,6 +836,7 @@ ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
       if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
         clearInterval(checkInterval);
         onData.dispose();
+        if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
         
         const raw = chunks.join('');
         // Strip ANSI escape sequences and control characters
@@ -835,6 +857,7 @@ ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
     setTimeout(() => {
       clearInterval(checkInterval);
       onData.dispose();
+      if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
       if (chunks.length === 0) {
         resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
       } else {
@@ -860,6 +883,8 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
     const p = terminalProcesses.get(tabId);
     console.log('[send-slash] tabId:', tabId, 'command:', command, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
     if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
+    if (terminalBusy.get(tabId)) return resolve({ success: false, error: 'Ein Befehl läuft bereits' });
+    terminalBusy.set(tabId, true);
     
     const waitForReady = () => {
       if (terminalReady.get(tabId)) {
@@ -873,6 +898,7 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
             sendCommand();
           } else if (waited > 20000) {
             clearInterval(readyCheck);
+            terminalBusy.set(tabId, false);
             resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
           }
         }, 500);
@@ -882,6 +908,7 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
     const sendCommand = () => {
       const chunks = [];
       let lastDataTime = Date.now();
+      let resolved = false;
       
       const onData = p.onData((data) => {
         chunks.push(data);
@@ -897,6 +924,7 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
         if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
           clearInterval(checkInterval);
           onData.dispose();
+          if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
           
           const raw = chunks.join('');
           const stripped = raw
@@ -915,6 +943,7 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
       setTimeout(() => {
         clearInterval(checkInterval);
         onData.dispose();
+        if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
         if (chunks.length === 0) {
           resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
         } else {
@@ -1039,6 +1068,7 @@ app.on('window-all-closed', () => {
   copilotProcesses.clear();
   terminalProcesses.forEach(p => p.kill());
   terminalProcesses.clear();
+  if (imageWatcher) { imageWatcher.close(); imageWatcher = null; }
   app.quit();
 });
 

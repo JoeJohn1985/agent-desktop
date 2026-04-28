@@ -2,6 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Copilot Desktop</title>
   <link rel="stylesheet" href="styles.css" />
@@ -64,8 +65,9 @@
         </div>
         <div class="sidebar__content" id="todosContent">
           <div class="todo-add">
-            <input type="text" id="todoInput" placeholder="Neue Idee / Todo…" />
+            <input type="text" id="todoInput" placeholder="Neues Todo…" />
             <button class="todo-add__btn" id="btnAddTodo" data-tooltip="Hinzufügen">+</button>
+            <button class="todo-add__btn todo-add__btn--sync" id="btnSyncTodos" data-tooltip="Nächste 5 Todos an Chat senden">🔄</button>
           </div>
           <div class="sidebar__list" id="todoList"></div>
         </div>

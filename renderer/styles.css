@@ -1,3 +1,33 @@
+/* ── Toast Notifications ──────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 60px;
+  right: 20px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: #45475a;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 10000;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+}
+.toast--visible { opacity: 1; transform: translateY(0); }
+.toast--success { background: #40a02b; }
+.toast--error { background: #d20f39; }
+.toast--warning { background: #df8e1d; }
+.toast--info { background: #1e66f5; }
+
+[data-theme="dark"] .toast { background: #585b70; }
+[data-theme="dark"] .toast--success { background: #a6e3a1; color: #1e1e2e; }
+[data-theme="dark"] .toast--error { background: #f38ba8; color: #1e1e2e; }
+[data-theme="dark"] .toast--warning { background: #f9e2af; color: #1e1e2e; }
+[data-theme="dark"] .toast--info { background: #89b4fa; color: #1e1e2e; }
+
 /* ── Reset & Variables ─────────────────────────────────── */
 :root {
   --bg-base: #f5f3ef;
@@ -1345,10 +1375,11 @@ mark.chat-search-highlight--active {
   flex: 1;
   min-height: 36px;
   max-height: 120px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-surface);
+  box-sizing: border-box;
   color: var(--text-primary);
   font-family: inherit;
   font-size: 17px;
@@ -1395,6 +1426,7 @@ mark.chat-search-highlight--active {
 }
 .todo-add input {
   flex: 1;
+  min-width: 0;
   padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1413,6 +1445,16 @@ mark.chat-search-highlight--active {
   color: #fff;
   font-size: 12px;
   cursor: pointer;
+  flex-shrink: 0;
+}
+.todo-add__btn--sync {
+  background: var(--bg-tertiary, #313244);
+  color: var(--text-secondary, #a6adc8);
+  font-size: 11px;
+}
+.todo-add__btn--sync:hover {
+  background: var(--bg-hover, #45475a);
+  color: var(--text-primary, #cdd6f4);
 }
 .todo-item {
   display: flex;
