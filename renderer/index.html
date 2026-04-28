@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: file:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Copilot Desktop</title>
   <link rel="stylesheet" href="styles.css" />
@@ -22,9 +22,9 @@
       <span id="sbVersion" data-tooltip="App / CLI Version">🏷️ –</span>
     </div>
     <div class="titlebar__controls">
-      <button class="titlebar__btn" onclick="copilot.window.minimize()" data-tooltip="Minimieren">─</button>
-      <button class="titlebar__btn" onclick="copilot.window.maximize()" data-tooltip="Maximieren">□</button>
-      <button class="titlebar__btn titlebar__btn--close" onclick="copilot.window.close()" data-tooltip="Schließen">✕</button>
+      <button class="titlebar__btn" id="btnWindowMinimize" data-tooltip="Minimieren">─</button>
+      <button class="titlebar__btn" id="btnWindowMaximize" data-tooltip="Maximieren">□</button>
+      <button class="titlebar__btn titlebar__btn--close" id="btnWindowClose" data-tooltip="Schließen">✕</button>
     </div>
   </header>
 

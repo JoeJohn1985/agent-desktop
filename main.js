@@ -988,7 +988,9 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
             .replace(/\r/g, '');
           
           console.log('[send-slash] done, command:', command, 'stripped length:', stripped.length);
-          resolve({ success: true, output: stripped });
+          // Also parse context data if present (e.g. after /compact)
+          const parsed = parseContextOutput(stripped);
+          resolve({ success: true, output: stripped, ...parsed });
         }
       }, 500);
       
@@ -1007,7 +1009,8 @@ ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
             .replace(/\x1b[()][0-9A-Z]/g, '')
             .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
             .replace(/\r/g, '');
-          resolve({ success: true, output: stripped, timedOut: true });
+          const parsed = parseContextOutput(stripped);
+          resolve({ success: true, output: stripped, ...parsed, timedOut: true });
         }
       }, 15000);
     };

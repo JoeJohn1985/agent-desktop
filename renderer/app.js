@@ -1754,6 +1754,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     createTab('🤖 Copilot');
   });
 
+  // Window controls (titlebar)
+  document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
+  document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
+  document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
+
   // Terminal button
   document.getElementById('btnOpenTerminal').addEventListener('click', () => {
     if (activeTabId == null) return;
@@ -1896,10 +1901,64 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     
-    // Show the compact result
-    compactPopupBody.innerHTML = `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escapeHtml(result.output)}</div>`;
-    
-    showNotification('Kontext komprimiert ✓', 'success');
+    // Show designed compact result
+    if (result.percent != null) {
+      const oldPct = tab.contextPercent;
+      const newPct = result.percent;
+      const color = newPct > 80 ? '#f38ba8' : newPct > 60 ? '#f9e2af' : '#a6e3a1';
+      const saved = oldPct != null ? oldPct - newPct : null;
+      
+      let html = '<div style="text-align:center;margin-bottom:12px;">';
+      html += '<div style="font-size:11px;color:var(--text-secondary,#a6adc8);margin-bottom:4px;">Kontext komprimiert</div>';
+      
+      if (saved != null && saved > 0) {
+        html += `<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px;">
+          <span style="font-size:16px;color:var(--text-secondary,#a6adc8);text-decoration:line-through;">${oldPct}%</span>
+          <span style="font-size:14px;color:var(--text-secondary,#a6adc8);">→</span>
+          <span style="font-size:22px;font-weight:700;color:${color};">${newPct}%</span>
+        </div>`;
+        html += `<div style="font-size:12px;color:#a6e3a1;font-weight:600;">−${saved}% freigeräumt</div>`;
+      } else {
+        html += `<div style="font-size:22px;font-weight:700;color:${color};margin-bottom:4px;">${newPct}%</div>`;
+      }
+      
+      html += `<div style="background:var(--bg-tertiary,#313244);border-radius:4px;height:8px;overflow:hidden;margin-top:8px;">
+        <div style="width:${newPct}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
+      </div>`;
+      
+      if (result.usedTokens && result.totalTokens) {
+        html += `<div style="font-size:10px;color:var(--text-secondary,#a6adc8);margin-top:4px;">${result.usedTokens} / ${result.totalTokens} Tokens</div>`;
+      }
+      html += '</div>';
+      
+      if (result.categories) {
+        html += '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
+        for (const cat of result.categories) {
+          const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
+            <span style="color:var(--text-secondary,#a6adc8);">${cat.name}</span>
+            <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
+          </div>
+          <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
+            <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
+          </div>`;
+        }
+        html += '</div>';
+      }
+      
+      compactPopupBody.innerHTML = html;
+      
+      // Update context button with new percentage
+      tab.contextPercent = newPct;
+      const ctxBtn = document.getElementById('btnSlashContext');
+      ctxBtn.innerHTML = `📊 <span style="color:${color}">${newPct}%</span>`;
+      
+      showNotification(`Kontext komprimiert: ${newPct}%`, 'success');
+    } else {
+      // Fallback: show raw output if parsing failed
+      compactPopupBody.innerHTML = `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escapeHtml(result.output)}</div>`;
+      showNotification('Kontext komprimiert ✓', 'success');
+    }
   });
 
   // Clear button — send /clear and show notification
