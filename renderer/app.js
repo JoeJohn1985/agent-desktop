@@ -19,6 +19,11 @@ const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
 
+// ── Global Safety-Net ────────────────────────────────────────
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[App] Unhandled rejection:', e.reason);
+});
+
 // ── Path Helper ──────────────────────────────────────────────
 function shortenPath(p) {
   if (!p || !userHomeDir) return p || '';
@@ -83,7 +88,9 @@ async function restoreOpenTabs() {
         loadTodos(t.sessionId);
         // Start background terminal for restored tab
         if (t.sessionId) {
-          copilot.terminal.spawnBackground(tabId, t.sessionId);
+          copilot.terminal.spawnBackground(tabId, t.sessionId).catch(e => {
+            console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
+          });
         }
         // Display session context for restored tabs
         const session = sessions.find(s => s.id === t.sessionId);
@@ -91,14 +98,14 @@ async function restoreOpenTabs() {
       }
     }
     return true;
-  } catch { return false; }
+  } catch (e) { console.warn('[app] Tab-Restore fehlgeschlagen:', e.message); return false; }
 }
 
 // ── Settings ────────────────────────────────────────────────
 function getSettings() {
   try {
     return JSON.parse(localStorage.getItem('settings') || '{}');
-  } catch { return {}; }
+  } catch (e) { console.warn('[settings] Parse fehlgeschlagen:', e.message); return {}; }
 }
 
 function saveSetting(key, value) {
@@ -128,20 +135,14 @@ function addAllowedTool(toolName) {
   renderAllowedTools();
 }
 
-function removeAllowedTool(toolName) {
-  const tools = getAllowedTools().filter(t => t !== toolName);
+function removeAllowedTool(idx) {
+  const tools = getAllowedTools();
+  tools.splice(idx, 1);
   saveSetting('allowedTools', tools);
   renderAllowedTools();
 }
 
-function renderAllowedTools() {
-  const container = document.getElementById('settAllowedToolsList');
-  if (!container) return;
-  const tools = getAllowedTools();
-  container.innerHTML = tools.map(t =>
-    `<span class="settings__tool-tag">${escapeHtml(t)}<span class="settings__tool-tag__remove" onclick="removeAllowedTool('${escapeHtml(t)}')">&times;</span></span>`
-  ).join('');
-}
+function renderAllowedTools() { renderTagList('settAllowedToolsList', getAllowedTools(), 'removeAllowedTool'); }
 
 function addDeniedTool(toolName) {
   const tools = getDeniedTools();
@@ -152,20 +153,14 @@ function addDeniedTool(toolName) {
   renderDeniedTools();
 }
 
-function removeDeniedTool(toolName) {
-  const tools = getDeniedTools().filter(t => t !== toolName);
+function removeDeniedTool(idx) {
+  const tools = getDeniedTools();
+  tools.splice(idx, 1);
   saveSetting('deniedTools', tools);
   renderDeniedTools();
 }
 
-function renderDeniedTools() {
-  const container = document.getElementById('settDeniedToolsList');
-  if (!container) return;
-  const tools = getDeniedTools();
-  container.innerHTML = tools.map(t =>
-    `<span class="settings__tool-tag">${escapeHtml(t)}<span class="settings__tool-tag__remove" onclick="removeDeniedTool('${escapeHtml(t)}')">&times;</span></span>`
-  ).join('');
-}
+function renderDeniedTools() { renderTagList('settDeniedToolsList', getDeniedTools(), 'removeDeniedTool'); }
 
 function addExtraDir(dir) {
   const dirs = getExtraDirs();
@@ -176,20 +171,14 @@ function addExtraDir(dir) {
   renderExtraDirs();
 }
 
-function removeExtraDir(dir) {
-  const dirs = getExtraDirs().filter(d => d !== dir);
+function removeExtraDir(idx) {
+  const dirs = getExtraDirs();
+  dirs.splice(idx, 1);
   saveSetting('extraDirs', dirs);
   renderExtraDirs();
 }
 
-function renderExtraDirs() {
-  const container = document.getElementById('settExtraDirsList');
-  if (!container) return;
-  const dirs = getExtraDirs();
-  container.innerHTML = dirs.map(d =>
-    `<span class="settings__tool-tag">${escapeHtml(d)}<span class="settings__tool-tag__remove" onclick="removeExtraDir('${escapeHtml(d)}')">&times;</span></span>`
-  ).join('');
-}
+function renderExtraDirs() { renderTagList('settExtraDirsList', getExtraDirs(), 'removeExtraDir'); }
 
 // ── Shell Exceptions (synced to copilot-instructions.md) ────
 let shellExceptions = [];
@@ -199,13 +188,7 @@ async function loadShellExceptions() {
   renderShellExceptions();
 }
 
-function renderShellExceptions() {
-  const container = document.getElementById('settShellExceptionsList');
-  if (!container) return;
-  container.innerHTML = shellExceptions.map(ex =>
-    `<span class="settings__tool-tag">${escapeHtml(ex)}<span class="settings__tool-tag__remove" onclick="removeShellException(this)" data-ex="${escapeHtml(ex)}">&times;</span></span>`
-  ).join('');
-}
+function renderShellExceptions() { renderTagList('settShellExceptionsList', shellExceptions, 'removeShellException'); }
 
 async function addShellException(text) {
   if (!text || shellExceptions.includes(text)) return;
@@ -214,9 +197,8 @@ async function addShellException(text) {
   renderShellExceptions();
 }
 
-async function removeShellException(el) {
-  const ex = el.dataset.ex;
-  shellExceptions = shellExceptions.filter(e => e !== ex);
+async function removeShellException(idx) {
+  shellExceptions.splice(idx, 1);
   await copilot.instructions.setShellExceptions(shellExceptions);
   renderShellExceptions();
 }
@@ -245,7 +227,56 @@ function playNotificationSound() {
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.3);
-  } catch (e) { /* Audio not available */ }
+  } catch (e) { console.warn('[audio] Benachrichtigungston fehlgeschlagen:', e.message); }
+}
+
+// ── Context Color Helper ─────────────────────────────────────
+function contextColor(percent) {
+  return percent > 80 ? '#f38ba8' : percent > 60 ? '#fab387' : '#a6e3a1';
+}
+
+// ── Context Category HTML Builder ────────────────────────────
+function buildContextCategoryHtml(categories) {
+  if (!categories || !categories.length) return '';
+  let html = '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
+  for (const cat of categories) {
+    const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
+      <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
+      <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
+    </div>
+    <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
+      <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// ── Generic Tag List Rendering ───────────────────────────────
+function renderTagList(containerId, items, removeFnName) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = items.map((item, i) =>
+    `<span class="sett-tag">${escapeHtml(item)} <span class="sett-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
+  ).join('');
+}
+
+// ── Generic Tag Input Init ───────────────────────────────────
+function initTagInput(btnId, inputId, addFn) {
+  const btn = document.getElementById(btnId);
+  const input = document.getElementById(inputId);
+  if (!btn || !input) return;
+
+  const handler = () => {
+    const val = input.value.trim();
+    if (val) { addFn(val); input.value = ''; }
+  };
+
+  btn.addEventListener('click', handler);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handler(); }
+  });
 }
 
 // ── Toast Notifications ─────────────────────────────────────
@@ -339,7 +370,7 @@ function switchTab(tabId) {
   const ctxBtn = document.getElementById('btnSlashContext');
   if (activeTab && activeTab.contextPercent != null) {
     const pct = activeTab.contextPercent;
-    const color = pct > 80 ? '#f38ba8' : pct > 60 ? '#f9e2af' : '#a6e3a1';
+    const color = contextColor(pct);
     ctxBtn.innerHTML = `📊 <span style="color:${color}">${pct}%</span>`;
   } else {
     ctxBtn.textContent = '📊 Kontext';
@@ -352,7 +383,7 @@ function closeTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
-  copilot.chat.stop(tabId);
+  copilot.chat.stop(tabId).catch(e => console.warn('[chat] Stop fehlgeschlagen:', e.message));
   tab.streamEl.remove();
 
   // Clean up terminal if present
@@ -471,14 +502,24 @@ function startTabRename(tabId, tabEl, labelSpan) {
 
       if (tab.sessionId) {
         // Existing session — just rename
-        await copilot.sessions.rename(tab.sessionId, newName);
+        try {
+          await copilot.sessions.rename(tab.sessionId, newName);
+        } catch (e) {
+          console.warn('[sessions] Umbenennen fehlgeschlagen:', e.message);
+          showNotification('Session konnte nicht umbenannt werden', 'error');
+        }
       } else {
         // No session yet — create one
-        const newId = await copilot.sessions.create(newName);
-        if (newId) {
-          tab.sessionId = newId;
-          activeSessionId = newId;
-          saveOpenTabs();
+        try {
+          const newId = await copilot.sessions.create(newName);
+          if (newId) {
+            tab.sessionId = newId;
+            activeSessionId = newId;
+            saveOpenTabs();
+          }
+        } catch (e) {
+          console.warn('[sessions] Erstellen fehlgeschlagen:', e.message);
+          showNotification('Session konnte nicht erstellt werden', 'error');
         }
       }
       loadSessions(); // refresh sidebar
@@ -835,7 +876,10 @@ function initCopilotIPC() {
           tab.sessionId = event.sessionId;
           saveOpenTabs();
           // Start background terminal for this session
-          copilot.terminal.spawnBackground(tabId, event.sessionId);
+          copilot.terminal.spawnBackground(tabId, event.sessionId).catch(e => {
+            console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
+            showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
+          });
           // Show todos panel for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
@@ -942,7 +986,12 @@ async function loadTodos(sessionId) {
     return;
   }
   document.getElementById('todosSection').style.display = '';
-  currentTodos = await copilot.todos.list(sessionId);
+  try {
+    currentTodos = await copilot.todos.list(sessionId) || [];
+  } catch (e) {
+    console.warn('[todos] Laden fehlgeschlagen:', e.message);
+    currentTodos = [];
+  }
   renderTodos();
 }
 
@@ -1037,7 +1086,13 @@ async function addTodo() {
   const text = input.value.trim();
   if (!text || !activeSessionId) return;
 
-  currentTodos = await copilot.todos.add(activeSessionId, { text });
+  try {
+    currentTodos = await copilot.todos.add(activeSessionId, { text }) || currentTodos;
+  } catch (e) {
+    console.warn('[todos] Hinzufügen fehlgeschlagen:', e.message);
+    showNotification('Todo konnte nicht hinzugefügt werden', 'error');
+    return;
+  }
   input.value = '';
   renderTodos();
 }
@@ -1046,13 +1101,25 @@ async function toggleTodo(todoId) {
   const todo = currentTodos.find(t => t.id === todoId);
   if (!todo || !activeSessionId) return;
   const newStatus = todo.status === 'done' ? 'open' : 'done';
-  currentTodos = await copilot.todos.update(activeSessionId, todoId, { status: newStatus });
+  try {
+    currentTodos = await copilot.todos.update(activeSessionId, todoId, { status: newStatus }) || currentTodos;
+  } catch (e) {
+    console.warn('[todos] Aktualisieren fehlgeschlagen:', e.message);
+    showNotification('Todo konnte nicht aktualisiert werden', 'error');
+    return;
+  }
   renderTodos();
 }
 
 async function deleteTodo(todoId) {
   if (!activeSessionId) return;
-  currentTodos = await copilot.todos.delete(activeSessionId, todoId);
+  try {
+    currentTodos = await copilot.todos.delete(activeSessionId, todoId) || currentTodos;
+  } catch (e) {
+    console.warn('[todos] Löschen fehlgeschlagen:', e.message);
+    showNotification('Todo konnte nicht gelöscht werden', 'error');
+    return;
+  }
   renderTodos();
 }
 
@@ -1060,7 +1127,12 @@ async function deleteTodo(todoId) {
 let currentImages = [];
 
 async function loadImages() {
-  currentImages = await copilot.images.list();
+  try {
+    currentImages = await copilot.images.list() || [];
+  } catch (e) {
+    console.warn('[images] Laden fehlgeschlagen:', e.message);
+    currentImages = [];
+  }
   document.getElementById('imageCount').textContent = currentImages.length;
   renderImages();
 }
@@ -1111,7 +1183,13 @@ function closeLightbox(e) {
 }
 
 async function deleteImage(filePath) {
-  await copilot.images.delete(filePath);
+  try {
+    await copilot.images.delete(filePath);
+  } catch (e) {
+    console.warn('[images] Löschen fehlgeschlagen:', e.message);
+    showNotification('Bild konnte nicht gelöscht werden', 'error');
+    return;
+  }
   await loadImages();
 }
 
@@ -1122,7 +1200,13 @@ function openImagesFolder() {
 // ── Sessions ─────────────────────────────────────────────────
 
 async function loadSessions() {
-  const allSessions = await copilot.sessions.list();
+  let allSessions = [];
+  try {
+    allSessions = await copilot.sessions.list() || [];
+  } catch (e) {
+    console.warn('[sessions] Laden fehlgeschlagen:', e.message);
+    showNotification('Sessions konnten nicht geladen werden', 'error');
+  }
   sessions = allSessions.filter(s => s.name);
   document.getElementById('sessionCount').textContent = sessions.length;
   renderSessions(sessions);
@@ -1163,7 +1247,10 @@ async function resumeSession(sessionId) {
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
   // Start background terminal for instant /context access
-  copilot.terminal.spawnBackground(tabId, sessionId);
+  copilot.terminal.spawnBackground(tabId, sessionId).catch(e => {
+    console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
+    showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
+  });
   activeSessionId = sessionId;
   loadTodos(sessionId);
   saveOpenTabs();
@@ -1214,7 +1301,7 @@ async function displaySessionContext(tab, session) {
       }
       html += '</ul></div>';
     }
-  } catch { /* checkpoints not available */ }
+  } catch (e) { console.warn('[sessions] Checkpoints nicht verfügbar:', e.message); }
 
   // Load plan
   try {
@@ -1225,7 +1312,7 @@ async function displaySessionContext(tab, session) {
       html += `<div class="stream-session-context__plan markdown-body">${window.markdown.render(plan)}</div>`;
       html += '</div>';
     }
-  } catch { /* plan not available */ }
+  } catch (e) { console.warn('[sessions] Plan nicht verfügbar:', e.message); }
 
   html += '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
 
@@ -1658,7 +1745,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const folders = await copilot.folders.read();
     userHomeDir = folders.homeDir || '';
-  } catch (_) {}
+  } catch (e) { console.warn('[app] Home-Verzeichnis nicht geladen:', e.message); }
 
   // Show working directory in statusbar
   try {
@@ -1667,7 +1754,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const short = shortenPath(cwd);
       updateStatusbar('sbCwd', `📁 ${short}`);
     }
-  } catch (_) {}
+  } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
 
   // Show instruction files in statusbar
   try {
@@ -1680,10 +1767,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         el.setAttribute('data-tooltip', tooltip);
       }
     }
-  } catch (_) {}
+  } catch (e) { console.warn('[app] Instructions nicht geladen:', e.message); }
 
   // Load skills dynamically
-  skills = await copilot.skills.list();
+  try {
+    skills = await copilot.skills.list() || [];
+  } catch (e) {
+    console.warn('[skills] Laden fehlgeschlagen:', e.message);
+    skills = [];
+  }
   // Restore active skills from settings
   const savedActiveSkills = getSettings().activeSkills || [];
   activeSkills = new Set(savedActiveSkills);
@@ -1697,7 +1789,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       el.textContent = `🏷️ v${ver.app}`;
       el.setAttribute('data-tooltip', `App: v${ver.app}\nCLI: ${ver.cli}`);
     }
-  } catch (_) {}
+  } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
 
   await loadSessions();
 
@@ -1831,7 +1923,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Build formatted context display
     if (result.percent != null) {
-      const color = result.percent > 80 ? '#f38ba8' : result.percent > 60 ? '#f9e2af' : '#a6e3a1';
+      const color = contextColor(result.percent);
       let html = `<div style="margin-bottom:12px;">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
           <span style="font-size:20px;font-weight:700;color:${color};">${result.percent}%</span>
@@ -1842,20 +1934,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>`;
       
-      if (result.categories) {
-        html += '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
-        for (const cat of result.categories) {
-          const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
-          html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
-            <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
-            <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
-          </div>
-          <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
-            <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
-          </div>`;
-        }
-        html += '</div>';
-      }
+      html += buildContextCategoryHtml(result.categories);
       
       contextPopupBody.innerHTML = DOMPurify.sanitize(html);
     } else {
@@ -1866,7 +1945,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (result.percent != null) {
       const tab = tabs.get(activeTabId);
       if (tab) tab.contextPercent = result.percent;
-      const color = result.percent > 80 ? '#f38ba8' : result.percent > 60 ? '#f9e2af' : '#a6e3a1';
+      const color = contextColor(result.percent);
       sbContextBtn.innerHTML = `📊 <span style="color:${color}">${result.percent}%</span>`;
     }
   });
@@ -1919,7 +1998,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (result.percent != null) {
       const oldPct = tab.contextPercent;
       const newPct = result.percent;
-      const color = newPct > 80 ? '#f38ba8' : newPct > 60 ? '#f9e2af' : '#a6e3a1';
+      const color = contextColor(newPct);
       const saved = oldPct != null ? oldPct - newPct : null;
       
       let html = '<div style="text-align:center;margin-bottom:12px;">';
@@ -1945,20 +2024,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       html += '</div>';
       
-      if (result.categories) {
-        html += '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
-        for (const cat of result.categories) {
-          const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
-          html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
-            <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
-            <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
-          </div>
-          <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
-            <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
-          </div>`;
-        }
-        html += '</div>';
-      }
+      html += buildContextCategoryHtml(result.categories);
       
       compactPopupBody.innerHTML = html;
       
@@ -2198,65 +2264,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     saveSetting('allowAllPaths', settAllowAllPaths.checked);
   });
 
-  // Allowed tools list in settings
+  // Tag lists in settings
   renderAllowedTools();
-  document.getElementById('btnAddTool').addEventListener('click', () => {
-    const input = document.getElementById('settToolInput');
-    const name = input.value.trim();
-    if (name) { addAllowedTool(name); input.value = ''; }
-  });
-  document.getElementById('settToolInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const name = e.target.value.trim();
-      if (name) { addAllowedTool(name); e.target.value = ''; }
-    }
-  });
-
-  // Denied tools list in settings
   renderDeniedTools();
-  document.getElementById('btnAddDeniedTool').addEventListener('click', () => {
-    const input = document.getElementById('settDeniedToolInput');
-    const name = input.value.trim();
-    if (name) { addDeniedTool(name); input.value = ''; }
-  });
-  document.getElementById('settDeniedToolInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const name = e.target.value.trim();
-      if (name) { addDeniedTool(name); e.target.value = ''; }
-    }
-  });
-
-  // Extra directories list in settings
   renderExtraDirs();
-  document.getElementById('btnAddDir').addEventListener('click', () => {
-    const input = document.getElementById('settDirInput');
-    const dir = input.value.trim();
-    if (dir) { addExtraDir(dir); input.value = ''; }
-  });
-  document.getElementById('settDirInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const dir = e.target.value.trim();
-      if (dir) { addExtraDir(dir); e.target.value = ''; }
-    }
-  });
-
-  // Shell exceptions list in settings (synced to instructions.md)
   loadShellExceptions();
-  document.getElementById('btnAddShellEx').addEventListener('click', () => {
-    const input = document.getElementById('settShellExInput');
-    const text = input.value.trim();
-    if (text) { addShellException(text); input.value = ''; }
-  });
-  document.getElementById('settShellExInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const text = e.target.value.trim();
-      if (text) { addShellException(text); e.target.value = ''; }
-    }
-  });
+  initTagInput('btnAddTool', 'settToolInput', addAllowedTool);
+  initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
+  initTagInput('btnAddDir', 'settDirInput', addExtraDir);
+  initTagInput('btnAddShellEx', 'settShellExInput', addShellException);
 
   // Terminal minimize button — hides panel, keeps PTY alive
   document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
@@ -2420,7 +2436,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else if (activeTabId != null) {
         const tab = tabs.get(activeTabId);
         if (tab && tab.isProcessing) {
-          copilot.chat.stop(activeTabId);
+          copilot.chat.stop(activeTabId).catch(e2 => console.warn('[chat] Stop fehlgeschlagen:', e2.message));
         }
       }
     }
@@ -2464,7 +2480,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     for (const file of files) {
       let filePath;
-      try { filePath = copilot.files.getPath(file); } catch { continue; }
+      try { filePath = copilot.files.getPath(file); } catch (e) { console.warn('[files] getPath fehlgeschlagen:', e.message); continue; }
       if (!filePath) continue;
 
       const result = await copilot.files.processDropped(filePath);

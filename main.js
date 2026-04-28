@@ -25,7 +25,9 @@ function readFolderConfig() {
     if (fs.existsSync(FOLDERS_CONFIG_PATH)) {
       return JSON.parse(fs.readFileSync(FOLDERS_CONFIG_PATH, 'utf-8'));
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[folders:readConfig] Fehler:', e.message || e);
+  }
   return {};
 }
 
@@ -59,6 +61,72 @@ function safeSessionPath(sessionId) {
     throw new Error('Invalid session ID');
   }
   return resolved;
+}
+
+// ── Helper Functions ─────────────────────────────────────────
+
+function stripAnsi(raw) {
+  return raw
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/\x1b[()][0-9A-Z]/g, '')
+    .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
+    .replace(/\r/g, '');
+}
+
+function sendToRenderer(channel, ...args) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args);
+  }
+}
+
+function waitForTerminalReady(tabId, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    if (terminalReady.get(tabId)) return resolve();
+    const check = setInterval(() => {
+      if (terminalReady.get(tabId)) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 200);
+    setTimeout(() => {
+      clearInterval(check);
+      if (!terminalReady.get(tabId)) {
+        reject(new Error('Terminal nicht bereit (Timeout)'));
+      } else {
+        resolve();
+      }
+    }, timeoutMs);
+  });
+}
+
+function collectPtyOutput(pty, { quietMs = 3000, timeoutMs = 15000 } = {}) {
+  return new Promise((resolve) => {
+    let chunks = [];
+    let resolved = false;
+    let quietTimer = null;
+
+    const listener = pty.onData((data) => {
+      chunks.push(data);
+      if (quietTimer) clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          listener.dispose();
+          resolve(stripAnsi(chunks.join('')));
+        }
+      }, quietMs);
+    });
+
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        listener.dispose();
+        if (quietTimer) clearTimeout(quietTimer);
+        resolve(stripAnsi(chunks.join('')));
+      }
+    }, timeoutMs);
+  });
 }
 
 // ── Window ───────────────────────────────────────────────────
@@ -163,23 +231,19 @@ function spawnCopilot(tabId, prompt, options = {}) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('copilot:event', tabId, event);
-        }
+        sendToRenderer('copilot:event', tabId, event);
       } catch (e) {
-        // Skip malformed JSON lines
+        console.warn('[copilot:jsonl] Fehler:', e.message || e);
       }
     }
   });
 
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString('utf-8');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('copilot:event', tabId, {
-        type: 'error',
-        data: { message: text },
-      });
-    }
+    sendToRenderer('copilot:event', tabId, {
+      type: 'error',
+      data: { message: text },
+    });
   });
 
   proc.on('close', (code) => {
@@ -187,15 +251,13 @@ function spawnCopilot(tabId, prompt, options = {}) {
     if (buffer.trim()) {
       try {
         const event = JSON.parse(buffer);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('copilot:event', tabId, event);
-        }
-      } catch { /* ignore */ }
+        sendToRenderer('copilot:event', tabId, event);
+      } catch (e) {
+        console.warn('[copilot:flush] Fehler:', e.message || e);
+      }
     }
     copilotProcesses.delete(tabId);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('copilot:done', tabId, code);
-    }
+    sendToRenderer('copilot:done', tabId, code);
   });
 
   return tabId;
@@ -205,6 +267,9 @@ function spawnCopilot(tabId, prompt, options = {}) {
 
 // Copilot Chat
 ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
+  if (typeof tabId !== 'number' || typeof prompt !== 'string') {
+    return { success: false, error: 'Ungültige Argumente' };
+  }
   spawnCopilot(tabId, prompt, options || {});
   return tabId;
 });
@@ -227,7 +292,9 @@ ipcMain.handle('copilot:getVersions', async () => {
   try {
     const { execSync } = require('child_process');
     cliVersion = execSync('copilot --version', { timeout: 5000 }).toString().trim();
-  } catch {}
+  } catch (e) {
+    console.warn('[copilot:getVersions] Fehler:', e.message || e);
+  }
   return { app: appVersion, cli: cliVersion };
 });
 
@@ -245,7 +312,9 @@ ipcMain.handle('copilot:getInstructions', () => {
         const rel = path.relative(cwd, p) || path.basename(p);
         found.push({ path: rel.startsWith('..') ? p : rel, name: path.basename(p) });
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[copilot:getInstructions] Fehler:', e.message || e);
+    }
   }
   return found;
 });
@@ -264,7 +333,7 @@ const TEXT_EXTENSIONS = new Set([
   '.py', '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb', '.php',
   '.sql', '.csv', '.log', '.gitignore', '.dockerfile', '.properties',
 ]);
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff']);
 
 ipcMain.handle('files:processDropped', (_event, filePath) => {
   try {
@@ -319,7 +388,10 @@ ipcMain.handle('instructions:getShellExceptions', () => {
     if (!match) return [];
     const items = match[1].match(/^- .+$/gm) || [];
     return items.map(line => line.replace(/^- /, '').trim());
-  } catch { return []; }
+  } catch (e) {
+    console.warn('[instructions:getShellExceptions] Fehler:', e.message || e);
+    return [];
+  }
 });
 
 ipcMain.handle('instructions:setShellExceptions', (_event, exceptions) => {
@@ -333,7 +405,10 @@ ipcMain.handle('instructions:setShellExceptions', (_event, exceptions) => {
     );
     fs.writeFileSync(INSTRUCTIONS_PATH, content, 'utf-8');
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    console.warn('[instructions:setShellExceptions] Fehler:', e.message || e);
+    return false;
+  }
 });
 
 // Sessions
@@ -355,7 +430,10 @@ ipcMain.handle('sessions:delete', async (_event, sessionId) => {
     if (!fs.existsSync(sessionPath)) return false;
     fs.rmSync(sessionPath, { recursive: true, force: true });
     return true;
-  } catch { return false; }
+  } catch (e) {
+    console.warn('[sessions:delete] Fehler:', e.message || e);
+    return false;
+  }
 });
 
 ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
@@ -367,7 +445,10 @@ ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
     ws.name = newName;
     fs.writeFileSync(wsPath, yaml.stringify(ws), 'utf-8');
     return true;
-  } catch { return false; }
+  } catch (e) {
+    console.warn('[sessions:rename] Fehler:', e.message || e);
+    return false;
+  }
 });
 
 ipcMain.handle('sessions:create', async (_event, name) => {
@@ -393,6 +474,9 @@ ipcMain.handle('todos:list', async (_event, sessionId) => {
 });
 
 ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
+  if (!todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
+    return { success: false, error: 'Ungültige Argumente' };
+  }
   const todos = readTodos(sessionId);
   todo.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   todo.status = todo.status || 'open';
@@ -403,6 +487,9 @@ ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
 });
 
 ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
+  if (typeof todoId !== 'string' || typeof updates !== 'object') {
+    return { success: false, error: 'Ungültige Argumente' };
+  }
   const todos = readTodos(sessionId);
   const idx = todos.findIndex(t => t.id === todoId);
   if (idx === -1) return todos;
@@ -431,21 +518,23 @@ ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
 });
 
 // Images
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg']);
 
 ipcMain.handle('images:list', async () => {
   try {
     if (!fs.existsSync(IMAGES_DIR)) return [];
     const files = fs.readdirSync(IMAGES_DIR);
     return files
-      .filter(f => IMAGE_EXTS.has(path.extname(f).toLowerCase()))
+      .filter(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()))
       .map(f => {
         const fullPath = path.join(IMAGES_DIR, f);
         const stat = fs.statSync(fullPath);
         return { name: f, path: fullPath, size: stat.size, mtime: stat.mtimeMs };
       })
       .sort((a, b) => b.mtime - a.mtime);
-  } catch (_) { return []; }
+  } catch (e) {
+    console.warn('[images:list] Fehler:', e.message || e);
+    return [];
+  }
 });
 
 ipcMain.handle('images:open', async (_event, filePath) => {
@@ -460,7 +549,9 @@ ipcMain.handle('images:delete', async (_event, filePath) => {
     if (fs.existsSync(resolved) && resolved.startsWith(IMAGES_DIR + path.sep)) {
       fs.unlinkSync(resolved);
     }
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[images:delete] Fehler:', e.message || e);
+  }
 });
 
 ipcMain.handle('images:openFolder', async () => {
@@ -475,12 +566,12 @@ function startImageWatcher() {
     imageWatcher = fs.watch(IMAGES_DIR, () => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('images:changed');
-        }
+        sendToRenderer('images:changed');
       }, 500);
     });
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[images:watcher] Fehler:', e.message || e);
+  }
 }
 
 // Config
@@ -576,7 +667,9 @@ function scanSessions() {
         hasPlan,
         isActive,
       });
-    } catch { /* skip broken sessions */ }
+    } catch (e) {
+      console.warn('[sessions:scan] Fehler:', e.message || e);
+    }
   }
 
   sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -600,7 +693,10 @@ function readCheckpoints(sessionId) {
       }
     }
     return checkpoints;
-  } catch { return []; }
+  } catch (e) {
+    console.warn('[sessions:readCheckpoints] Fehler:', e.message || e);
+    return [];
+  }
 }
 
 function readPlan(sessionId) {
@@ -614,7 +710,10 @@ function readConfig() {
   if (!fs.existsSync(cfgPath)) return {};
   try {
     return JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-  } catch { return {}; }
+  } catch (e) {
+    console.warn('[config:read] Fehler:', e.message || e);
+    return {};
+  }
 }
 
 // ── Todos (per session) ──────────────────────────────────────
@@ -623,7 +722,10 @@ function readTodos(sessionId) {
   if (!fs.existsSync(todosPath)) return [];
   try {
     return JSON.parse(fs.readFileSync(todosPath, 'utf-8'));
-  } catch { return []; }
+  } catch (e) {
+    console.warn('[todos:read] Fehler:', e.message || e);
+    return [];
+  }
 }
 
 function writeTodos(sessionId, todos) {
@@ -691,7 +793,9 @@ function scanSkills() {
                 icon: meta.icon || builtinSkillIcon(meta.name || entry.name),
               });
             }
-          } catch { /* skip broken skill */ }
+          } catch (e) {
+            console.warn('[skills:scan:builtin] Fehler:', e.message || e);
+          }
         }
       }
     }
@@ -718,7 +822,9 @@ function scanSkills() {
             icon: meta.icon || userSkillIcon(meta.name || entry.name),
           });
         }
-      } catch { /* skip broken skill */ }
+      } catch (e) {
+        console.warn('[skills:scan:user] Fehler:', e.message || e);
+      }
     }
   }
 
@@ -755,9 +861,7 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
       // Cap buffer at 5000 chunks to prevent memory leak
       if (buf.length > 5000) buf.splice(0, buf.length - 5000);
     }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:data', tabId, data);
-    }
+    sendToRenderer('terminal:data', tabId, data);
   });
 
   // Auto-confirm resume prompt and track when TUI is ready
@@ -794,9 +898,7 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
     terminalBusy.delete(tabId);
     readyListener.dispose();
     clearTimeout(readyFallback);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
-    }
+    sendToRenderer('terminal:exit', tabId, exitCode);
   });
 
   // Start copilot
@@ -811,6 +913,9 @@ ipcMain.handle('terminal:get-buffer', (_event, tabId) => {
 });
 
 ipcMain.handle('terminal:send-command', (_event, tabId, command) => {
+  if (typeof command !== 'string') {
+    return { success: false, error: 'Ungültige Argumente' };
+  }
   const p = terminalProcesses.get(tabId);
   if (!p) return { success: false, error: 'No terminal process' };
   p.write(`\x1b[200~${command}\x1b[201~`);
@@ -848,180 +953,49 @@ function parseContextOutput(text) {
   return result;
 }
 
-ipcMain.handle('terminal:fetch-context', (_event, tabId) => {
-  return new Promise((resolve) => {
-    const p = terminalProcesses.get(tabId);
-    console.log('[fetch-context] tabId:', tabId, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
-    if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
-    if (terminalBusy.get(tabId)) return resolve({ success: false, error: 'Ein Befehl läuft bereits' });
-    terminalBusy.set(tabId, true);
-    const waitForReady = () => {
-      if (terminalReady.get(tabId)) {
-        sendContextCommand();
-      } else {
-        console.log('[fetch-context] Waiting for TUI to be ready...');
-        let waited = 0;
-        const readyCheck = setInterval(() => {
-          waited += 500;
-          if (terminalReady.get(tabId)) {
-            clearInterval(readyCheck);
-            sendContextCommand();
-          } else if (waited > 20000) {
-            clearInterval(readyCheck);
-            terminalBusy.set(tabId, false);
-            resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
-          }
-        }, 500);
-      }
-    };
-    
-    const sendContextCommand = () => {
-      const chunks = [];
-      let lastDataTime = Date.now();
-      let resolved = false;
-    
-    const onData = p.onData((data) => {
-      chunks.push(data);
-      lastDataTime = Date.now();
-    });
-    
-    // Send /context via bracketed paste (TUI needs this for slash commands)
+ipcMain.handle('terminal:fetch-context', async (_event, tabId) => {
+  const p = terminalProcesses.get(tabId);
+  console.log('[fetch-context] tabId:', tabId, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
+  if (!p) return { success: false, error: 'Kein Background-Terminal aktiv' };
+  if (terminalBusy.get(tabId)) return { success: false, error: 'Ein Befehl läuft bereits' };
+
+  terminalBusy.set(tabId, true);
+  try {
+    await waitForTerminalReady(tabId);
     p.write(`\x1b[200~/context\x1b[201~`);
     setTimeout(() => p.write('\r'), 500);
-    
-    // Wait until output settles (3s quiet), then return
-    const checkInterval = setInterval(() => {
-      if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
-        clearInterval(checkInterval);
-        onData.dispose();
-        if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
-        
-        const raw = chunks.join('');
-        // Strip ANSI escape sequences and control characters
-        const stripped = raw
-          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-          .replace(/\x1b\][^\x07]*\x07/g, '')
-          .replace(/\x1b[()][0-9A-Z]/g, '')
-          .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
-          .replace(/\r/g, '');
-        
-        console.log('[fetch-context] done, stripped length:', stripped.length);
-        console.log('[fetch-context] OUTPUT:', stripped.substring(0, 500));
-        resolve({ success: true, ...parseContextOutput(stripped) });
-      }
-    }, 500);
-    
-    // Timeout after 15s
-    setTimeout(() => {
-      clearInterval(checkInterval);
-      onData.dispose();
-      if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
-      if (chunks.length === 0) {
-        resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
-      } else {
-        const raw = chunks.join('');
-        const stripped = raw
-          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-          .replace(/\x1b\][^\x07]*\x07/g, '')
-          .replace(/\x1b[()][0-9A-Z]/g, '')
-          .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
-          .replace(/\r/g, '');
-        resolve({ success: true, ...parseContextOutput(stripped), timedOut: true });
-      }
-    }, 15000);
-    }; // end sendContextCommand
-    
-    waitForReady();
-  });
+    const raw = await collectPtyOutput(p);
+    console.log('[fetch-context] done, stripped length:', raw.length);
+    console.log('[fetch-context] OUTPUT:', raw.substring(0, 500));
+    return { success: true, ...parseContextOutput(raw) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  } finally {
+    terminalBusy.set(tabId, false);
+  }
 });
 
 // Generic slash command handler — sends any slash command to background PTY
-ipcMain.handle('terminal:send-slash', (_event, tabId, command) => {
-  return new Promise((resolve) => {
-    const p = terminalProcesses.get(tabId);
-    console.log('[send-slash] tabId:', tabId, 'command:', command, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
-    if (!p) return resolve({ success: false, error: 'Kein Background-Terminal aktiv' });
-    if (terminalBusy.get(tabId)) return resolve({ success: false, error: 'Ein Befehl läuft bereits' });
-    terminalBusy.set(tabId, true);
-    
-    const waitForReady = () => {
-      if (terminalReady.get(tabId)) {
-        sendCommand();
-      } else {
-        let waited = 0;
-        const readyCheck = setInterval(() => {
-          waited += 500;
-          if (terminalReady.get(tabId)) {
-            clearInterval(readyCheck);
-            sendCommand();
-          } else if (waited > 20000) {
-            clearInterval(readyCheck);
-            terminalBusy.set(tabId, false);
-            resolve({ success: false, error: 'Terminal nicht bereit (Timeout)' });
-          }
-        }, 500);
-      }
-    };
-    
-    const sendCommand = () => {
-      const chunks = [];
-      let lastDataTime = Date.now();
-      let resolved = false;
-      
-      const onData = p.onData((data) => {
-        chunks.push(data);
-        lastDataTime = Date.now();
-      });
-      
-      // Send command via bracketed paste
-      p.write(`\x1b[200~${command}\x1b[201~`);
-      setTimeout(() => p.write('\r'), 500);
-      
-      // Wait until output settles (3s quiet)
-      const checkInterval = setInterval(() => {
-        if (chunks.length > 0 && Date.now() - lastDataTime > 3000) {
-          clearInterval(checkInterval);
-          onData.dispose();
-          if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
-          
-          const raw = chunks.join('');
-          const stripped = raw
-            .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-            .replace(/\x1b\][^\x07]*\x07/g, '')
-            .replace(/\x1b[()][0-9A-Z]/g, '')
-            .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
-            .replace(/\r/g, '');
-          
-          console.log('[send-slash] done, command:', command, 'stripped length:', stripped.length);
-          // Also parse context data if present (e.g. after /compact)
-          const parsed = parseContextOutput(stripped);
-          resolve({ success: true, output: stripped, ...parsed });
-        }
-      }, 500);
-      
-      // Timeout after 15s
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        onData.dispose();
-        if (resolved) return; resolved = true; terminalBusy.set(tabId, false);
-        if (chunks.length === 0) {
-          resolve({ success: false, error: 'Timeout — keine Antwort vom Terminal' });
-        } else {
-          const raw = chunks.join('');
-          const stripped = raw
-            .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-            .replace(/\x1b\][^\x07]*\x07/g, '')
-            .replace(/\x1b[()][0-9A-Z]/g, '')
-            .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
-            .replace(/\r/g, '');
-          const parsed = parseContextOutput(stripped);
-          resolve({ success: true, output: stripped, ...parsed, timedOut: true });
-        }
-      }, 15000);
-    };
-    
-    waitForReady();
-  });
+ipcMain.handle('terminal:send-slash', async (_event, tabId, command) => {
+  const p = terminalProcesses.get(tabId);
+  console.log('[send-slash] tabId:', tabId, 'command:', command, 'has PTY:', !!p, 'ready:', terminalReady.get(tabId));
+  if (!p) return { success: false, error: 'Kein Background-Terminal aktiv' };
+  if (terminalBusy.get(tabId)) return { success: false, error: 'Ein Befehl läuft bereits' };
+
+  terminalBusy.set(tabId, true);
+  try {
+    await waitForTerminalReady(tabId);
+    p.write(`\x1b[200~${command}\x1b[201~`);
+    setTimeout(() => p.write('\r'), 500);
+    const raw = await collectPtyOutput(p);
+    console.log('[send-slash] done, command:', command, 'stripped length:', raw.length);
+    const parsed = parseContextOutput(raw);
+    return { success: true, output: raw, ...parsed };
+  } catch (e) {
+    return { success: false, error: e.message };
+  } finally {
+    terminalBusy.set(tabId, false);
+  }
 });
 
 ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
@@ -1060,18 +1034,14 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   terminalProcesses.set(tabId, ptyProcess);
 
   ptyProcess.onData((data) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:data', tabId, data);
-    }
+    sendToRenderer('terminal:data', tabId, data);
   });
 
   ptyProcess.onExit(({ exitCode }) => {
     terminalProcesses.delete(tabId);
     terminalBuffers.delete(tabId); terminalReady.delete(tabId);
     terminalBusy.delete(tabId);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
-    }
+    sendToRenderer('terminal:exit', tabId, exitCode);
   });
 
   const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
@@ -1103,6 +1073,7 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
 });
 
 ipcMain.on('terminal:input', (_event, tabId, data) => {
+  if (typeof data !== 'string') return;
   const p = terminalProcesses.get(tabId);
   if (p) p.write(data);
 });
