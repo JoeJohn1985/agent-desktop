@@ -9,6 +9,7 @@ let skills = []; // dynamically loaded from main process
 let sessions = [];
 let activeSessionId = null;
 let activeSkills = new Set();
+let userHomeDir = ''; // loaded from main process at startup
 const inputHistory = [];
 let historyIndex = -1;
 let historySavedInput = '';
@@ -17,6 +18,13 @@ let historySavedInput = '';
 const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
+
+// ── Path Helper ──────────────────────────────────────────────
+function shortenPath(p) {
+  if (!p || !userHomeDir) return p || '';
+  const homeEscaped = userHomeDir.replace(/[\\\/]+/g, '\\\\');
+  return p.replace(new RegExp(homeEscaped, 'gi'), '~\\');
+}
 
 // ── Auto-Scroll (per-tab) ──────────────────────────────────
 function scrollToBottom(streamEl) {
@@ -815,7 +823,7 @@ function initCopilotIPC() {
         if (cwdMatch) {
           const cwd = cwdMatch[1].trim();
           tab.context.cwd = cwd;
-          const short = cwd.replace(/C:\\Users\\MSchneider\\/gi, '~\\');
+          const short = shortenPath(cwd);
           updateStatusbar('sbCwd', `📁 ${short}`);
         }
         break;
@@ -1394,7 +1402,7 @@ function toolDisplayName(name) {
 
 function formatToolArgs(name, args) {
   if (!args) return '';
-  if (args.path) return args.path.replace(/C:\\Users\\MSchneider\\/g, '~\\');
+  if (args.path) return shortenPath(args.path);
   if (args.pattern) return args.pattern;
   if (args.command) return args.command.substring(0, 60) + (args.command.length > 60 ? '…' : '');
   if (args.query) return args.query.substring(0, 60) + (args.query.length > 60 ? '…' : '');
@@ -1646,11 +1654,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   initResize();
   initTerminalResize();
 
+  // Load user home directory for path shortening
+  try {
+    const folders = await copilot.folders.read();
+    userHomeDir = folders.homeDir || '';
+  } catch (_) {}
+
   // Show working directory in statusbar
   try {
     const cwd = await copilot.chat.getCwd();
     if (cwd) {
-      const short = cwd.replace(/C:\\Users\\MSchneider\\/gi, '~\\');
+      const short = shortenPath(cwd);
       updateStatusbar('sbCwd', `📁 ${short}`);
     }
   } catch (_) {}
@@ -2251,7 +2265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnScrollBottom').addEventListener('click', () => {
     const tab = tabs.get(activeTabId);
     if (tab) {
-      autoScrollEnabled = true;
+      tab.autoScrollEnabled = true;
       tab.streamEl.scrollTop = tab.streamEl.scrollHeight;
       document.getElementById('btnScrollBottom').style.display = 'none';
     }

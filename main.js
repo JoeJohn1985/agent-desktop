@@ -456,8 +456,9 @@ ipcMain.handle('images:open', async (_event, filePath) => {
 
 ipcMain.handle('images:delete', async (_event, filePath) => {
   try {
-    if (fs.existsSync(filePath) && filePath.startsWith(IMAGES_DIR)) {
-      fs.unlinkSync(filePath);
+    const resolved = path.resolve(filePath);
+    if (fs.existsSync(resolved) && resolved.startsWith(IMAGES_DIR + path.sep)) {
+      fs.unlinkSync(resolved);
     }
   } catch (_) {}
 });
@@ -501,6 +502,7 @@ ipcMain.handle('folders:read', () => {
     sessionsDir: SESSIONS_DIR,
     skillsDir: config.skillsDir || path.join(COPILOT_DIR, 'skills'),
     imagesDir: IMAGES_DIR,
+    homeDir: os.homedir(),
   };
 });
 
@@ -758,18 +760,6 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
     }
   });
 
-  ptyProcess.onExit(({ exitCode }) => {
-    terminalProcesses.delete(tabId);
-    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
-    }
-  });
-
-  // Start copilot
-  const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
-  ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
-
   // Auto-confirm resume prompt and track when TUI is ready
   terminalReady.set(tabId, false);
   let allData = '';
@@ -790,13 +780,28 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
     }
   });
   // Fallback: assume ready after 20s
-  setTimeout(() => {
+  const readyFallback = setTimeout(() => {
     if (!terminalReady.get(tabId)) {
       console.log('[bg-terminal] Fallback: assuming ready for tab', tabId);
       terminalReady.set(tabId, true);
     }
     readyListener.dispose();
   }, 20000);
+
+  ptyProcess.onExit(({ exitCode }) => {
+    terminalProcesses.delete(tabId);
+    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
+    terminalBusy.delete(tabId);
+    readyListener.dispose();
+    clearTimeout(readyFallback);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:exit', tabId, exitCode);
+    }
+  });
+
+  // Start copilot
+  const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
+  ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
 
   return { success: true };
 });
@@ -1063,6 +1068,7 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   ptyProcess.onExit(({ exitCode }) => {
     terminalProcesses.delete(tabId);
     terminalBuffers.delete(tabId); terminalReady.delete(tabId);
+    terminalBusy.delete(tabId);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:exit', tabId, exitCode);
     }
@@ -1111,6 +1117,7 @@ ipcMain.on('terminal:close', (_event, tabId) => {
   if (p) p.kill();
   terminalProcesses.delete(tabId);
   terminalBuffers.delete(tabId); terminalReady.delete(tabId);
+  terminalBusy.delete(tabId);
 });
 
 // ── App Lifecycle ────────────────────────────────────────────
