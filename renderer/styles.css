@@ -894,6 +894,29 @@ body {
   border-color: var(--accent);
 }
 
+.settings__folder-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings__folder-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  cursor: default;
+}
+
+.settings__folder-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
 /* ── Stream Base ─────────────────────────────────────── */
 .stream-area {
   flex: 1;

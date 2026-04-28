@@ -2026,6 +2026,59 @@ document.addEventListener('DOMContentLoaded', async () => {
     settingsOverlay.classList.add('overlay--visible');
   });
 
+  // ── Folder Settings ────────────────────────────────────
+  async function loadFolderSettings() {
+    const folders = await copilot.folders.read();
+    document.getElementById('settFolderCwd').value = folders.cwd || '';
+    document.getElementById('settFolderCopilotDir').value = folders.copilotDir || '';
+    document.getElementById('settFolderSessions').value = folders.sessionsDir || '';
+    document.getElementById('settFolderSkills').value = folders.skillsDir || '';
+    document.getElementById('settFolderImages').value = folders.imagesDir || '';
+  }
+
+  const folderFields = [
+    { btn: 'btnBrowseCwd', input: 'settFolderCwd' },
+    { btn: 'btnBrowseCopilotDir', input: 'settFolderCopilotDir' },
+    { btn: 'btnBrowseSessions', input: 'settFolderSessions' },
+    { btn: 'btnBrowseSkills', input: 'settFolderSkills' },
+    { btn: 'btnBrowseImages', input: 'settFolderImages' },
+  ];
+
+  folderFields.forEach(({ btn, input }) => {
+    document.getElementById(btn).addEventListener('click', async () => {
+      const folder = await copilot.folders.browse();
+      if (folder) document.getElementById(input).value = folder;
+    });
+  });
+
+  document.getElementById('btnFoldersSave').addEventListener('click', async () => {
+    const config = {
+      cwd: document.getElementById('settFolderCwd').value || undefined,
+      copilotDir: document.getElementById('settFolderCopilotDir').value || undefined,
+      sessionsDir: document.getElementById('settFolderSessions').value || undefined,
+      skillsDir: document.getElementById('settFolderSkills').value || undefined,
+      imagesDir: document.getElementById('settFolderImages').value || undefined,
+    };
+    Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
+    const result = await copilot.folders.save(config);
+    if (result.success) {
+      showNotification('Ordner gespeichert — bitte App neu starten', 'success');
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
+  });
+
+  document.getElementById('btnFoldersReset').addEventListener('click', async () => {
+    const result = await copilot.folders.save({});
+    if (result.success) {
+      await loadFolderSettings();
+      showNotification('Ordner auf Standard zurückgesetzt — bitte App neu starten', 'success');
+    }
+  });
+
+  document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
+  loadFolderSettings();
+
   // Sidebar collapse toggle
   const collapseBtn = document.getElementById('btnCollapseSidebar');
   const sidebar = document.getElementById('sidebar');

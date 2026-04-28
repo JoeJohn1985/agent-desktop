@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -17,6 +17,26 @@ try {
   }
 }
 
+// ── Folder Configuration ─────────────────────────────────────
+const FOLDERS_CONFIG_PATH = path.join(os.homedir(), '.copilot-desktop', 'folders.json');
+
+function readFolderConfig() {
+  try {
+    if (fs.existsSync(FOLDERS_CONFIG_PATH)) {
+      return JSON.parse(fs.readFileSync(FOLDERS_CONFIG_PATH, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function writeFolderConfig(config) {
+  const dir = path.dirname(FOLDERS_CONFIG_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(FOLDERS_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+const folderConfig = readFolderConfig();
+
 // ── Globals ──────────────────────────────────────────────────
 let mainWindow = null;
 const copilotProcesses = new Map(); // tabId → child process
@@ -24,11 +44,11 @@ const terminalProcesses = new Map(); // tabId → pty process
 const terminalBuffers = new Map(); // tabId → string[]
 const terminalReady = new Map(); // tabId → boolean (Copilot TUI is ready for commands)
 let nextTabId = 1;
-const COPILOT_DIR = path.join(os.homedir(), '.copilot');
-const SESSIONS_DIR = path.join(COPILOT_DIR, 'session-state');
-const COPILOT_BIN = 'copilot'; // assumes copilot is in PATH
-const COPILOT_CWD = path.join(os.homedir(), 'Copilot');
-const IMAGES_DIR = path.join(COPILOT_CWD, 'images');
+let COPILOT_DIR = folderConfig.copilotDir || path.join(os.homedir(), '.copilot');
+let SESSIONS_DIR = folderConfig.sessionsDir || path.join(COPILOT_DIR, 'session-state');
+const COPILOT_BIN = 'copilot';
+let COPILOT_CWD = folderConfig.cwd || path.join(os.homedir(), 'Copilot');
+let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
 const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
 let imageWatcher = null;
 
@@ -472,6 +492,39 @@ ipcMain.handle('skills:list', async () => {
   return scanSkills();
 });
 
+// Folders
+ipcMain.handle('folders:read', () => {
+  const config = readFolderConfig();
+  return {
+    cwd: COPILOT_CWD,
+    copilotDir: COPILOT_DIR,
+    sessionsDir: SESSIONS_DIR,
+    skillsDir: config.skillsDir || path.join(COPILOT_DIR, 'skills'),
+    imagesDir: IMAGES_DIR,
+  };
+});
+
+ipcMain.handle('folders:save', async (_event, newConfig) => {
+  try {
+    writeFolderConfig(newConfig);
+    if (newConfig.cwd) COPILOT_CWD = newConfig.cwd;
+    if (newConfig.copilotDir) COPILOT_DIR = newConfig.copilotDir;
+    if (newConfig.sessionsDir) SESSIONS_DIR = newConfig.sessionsDir;
+    if (newConfig.imagesDir) IMAGES_DIR = newConfig.imagesDir;
+    return { success: true, requiresRestart: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('folders:browse', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
 // Window controls
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
@@ -643,7 +696,7 @@ function scanSkills() {
   }
 
   // 2) User skills from ~/.copilot/skills/
-  const userSkillsDir = path.join(COPILOT_DIR, 'skills');
+  const userSkillsDir = folderConfig.skillsDir || path.join(COPILOT_DIR, 'skills');
   if (fs.existsSync(userSkillsDir)) {
     for (const entry of fs.readdirSync(userSkillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -685,7 +738,7 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
-    cwd: 'C:\\Users\\MSchneider\\Copilot',
+    cwd: COPILOT_CWD,
     env: { ...process.env, TERM: 'xterm-256color' },
   });
 
@@ -992,7 +1045,7 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
-    cwd: 'C:\\Users\\MSchneider\\Copilot',
+    cwd: COPILOT_CWD,
     env: { ...process.env, TERM: 'xterm-256color' },
   });
 

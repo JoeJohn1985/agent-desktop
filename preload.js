@@ -91,6 +91,12 @@ contextBridge.exposeInMainWorld('copilot', {
   config: {
     read: () => ipcRenderer.invoke('config:read'),
   },
+  // Folders
+  folders: {
+    read: () => ipcRenderer.invoke('folders:read'),
+    save: (config) => ipcRenderer.invoke('folders:save', config),
+    browse: () => ipcRenderer.invoke('folders:browse'),
+  },
   // Instructions
   instructions: {
     getShellExceptions: () => ipcRenderer.invoke('instructions:getShellExceptions'),

@@ -191,6 +191,7 @@
       <div class="settings__tabs">
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
         <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
+        <button class="settings__tab" data-tab="folders">Ordner</button>
       </div>
       <div class="settings">
         <!-- Tab: UI -->
@@ -277,6 +278,56 @@
               <input type="text" class="settings__tool-input" id="settShellExInput" placeholder="z.B. git commit, npm run build" />
               <button class="action-btn" id="btnAddShellEx" data-tooltip="Ausnahme hinzufügen">+</button>
             </div>
+          </div>
+        </div>
+        <!-- Tab: Ordner -->
+        <div class="settings__panel" data-panel="folders">
+          <div class="settings__group">
+            <div class="settings__hint" style="margin-bottom:12px;">Konfiguriere die Verzeichnisse, die Copilot Desktop verwendet. Änderungen erfordern einen Neustart der App.</div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">📂 Arbeitsverzeichnis (CWD)</label>
+            <div class="settings__hint">Hauptverzeichnis in dem Copilot arbeitet.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderCwd" placeholder="z.B. C:\Users\Name\Copilot" readonly />
+              <button class="action-btn" id="btnBrowseCwd" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">⚙️ Copilot Konfiguration</label>
+            <div class="settings__hint">Copilot CLI Konfigurationsordner (enthält config.yaml).</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderCopilotDir" placeholder="z.B. C:\Users\Name\.copilot" readonly />
+              <button class="action-btn" id="btnBrowseCopilotDir" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">💾 Sessions</label>
+            <div class="settings__hint">Speicherort der Copilot-Sessions.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderSessions" placeholder="z.B. C:\Users\Name\.copilot\session-state" readonly />
+              <button class="action-btn" id="btnBrowseSessions" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">🧩 Skills</label>
+            <div class="settings__hint">Ordner mit SKILL.md Dateien für KI-Skills.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderSkills" placeholder="z.B. C:\Users\Name\.copilot\skills" readonly />
+              <button class="action-btn" id="btnBrowseSkills" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">🖼️ Bilder</label>
+            <div class="settings__hint">Ordner für die Bildergalerie.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderImages" placeholder="z.B. C:\Users\Name\Copilot\images" readonly />
+              <button class="action-btn" id="btnBrowseImages" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <button class="action-btn action-btn--primary" id="btnFoldersSave" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
+            <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
           </div>
         </div>
       </div>
