@@ -9,13 +9,18 @@
     "rebuild": "electron-rebuild",
     "test": "jest",
     "test:verbose": "jest --verbose",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "author": "MSchneider",
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
+    "@eslint/js": "^10.0.1",
     "electron": "^35.0.0",
+    "eslint": "^10.2.1",
+    "globals": "^17.5.0",
     "jest": "^30.3.0"
   },
   "dependencies": {

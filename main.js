@@ -56,6 +56,20 @@ let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
 const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
 let imageWatcher = null;
 
+// ── Constants ──────────────────────────────────────────────────
+const PTY_READY_TIMEOUT_MS = 20000;
+const PTY_READY_CHECK_INTERVAL_MS = 200;
+const PTY_QUIET_MS = 3000;
+const PTY_OUTPUT_TIMEOUT_MS = 15000;
+const PTY_BUFFER_MAX_CHUNKS = 5000;
+const PTY_SLASH_QUIET_THRESHOLD_MS = 5000;
+const PTY_SLASH_CHECK_INTERVAL_MS = 500;
+const PTY_SLASH_FALLBACK_TIMEOUT_MS = 30000;
+const PTY_WRITE_DELAY_MS = 100;
+const CLI_VERSION_TIMEOUT_MS = 5000;
+const TEST_RUN_TIMEOUT_MS = 30000;
+const TEST_COVERAGE_TIMEOUT_MS = 60000;
+
 // ── Path Safety ──────────────────────────────────────────────
 function safeSessionPath(sessionId) {
   return _safeSessionPath(SESSIONS_DIR, sessionId);
@@ -69,7 +83,7 @@ function sendToRenderer(channel, ...args) {
   }
 }
 
-function waitForTerminalReady(tabId, timeoutMs = 20000) {
+function waitForTerminalReady(tabId, timeoutMs = PTY_READY_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     if (terminalReady.get(tabId)) return resolve();
     const check = setInterval(() => {
@@ -77,7 +91,7 @@ function waitForTerminalReady(tabId, timeoutMs = 20000) {
         clearInterval(check);
         resolve();
       }
-    }, 200);
+    }, PTY_READY_CHECK_INTERVAL_MS);
     setTimeout(() => {
       clearInterval(check);
       if (!terminalReady.get(tabId)) {
@@ -89,7 +103,7 @@ function waitForTerminalReady(tabId, timeoutMs = 20000) {
   });
 }
 
-function collectPtyOutput(pty, { quietMs = 3000, timeoutMs = 15000 } = {}) {
+function collectPtyOutput(pty, { quietMs = PTY_QUIET_MS, timeoutMs = PTY_OUTPUT_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     let chunks = [];
     let resolved = false;
@@ -116,6 +130,15 @@ function collectPtyOutput(pty, { quietMs = 3000, timeoutMs = 15000 } = {}) {
       }
     }, timeoutMs);
   });
+}
+
+function cleanupPty(tabId, exitCode, extraCleanup) {
+  terminalProcesses.delete(tabId);
+  terminalBuffers.delete(tabId);
+  terminalReady.delete(tabId);
+  terminalBusy.delete(tabId);
+  if (extraCleanup) extraCleanup();
+  sendToRenderer('terminal:exit', tabId, exitCode);
 }
 
 // ── Window ───────────────────────────────────────────────────
@@ -280,7 +303,7 @@ ipcMain.handle('copilot:getVersions', async () => {
   let cliVersion = '?';
   try {
     const { execSync } = require('child_process');
-    cliVersion = execSync('copilot --version', { timeout: 5000 }).toString().trim();
+    cliVersion = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS }).toString().trim();
   } catch (e) {
     console.warn('[copilot:getVersions] Fehler:', e.message || e);
   }
@@ -580,7 +603,7 @@ ipcMain.handle('tests:run', async () => {
     execFile('npx', ['jest', '--json', '--no-coverage'], {
       cwd: __dirname,
       shell: true,
-      timeout: 30000,
+      timeout: TEST_RUN_TIMEOUT_MS,
     }, (error, stdout, stderr) => {
       try {
         const jsonOutput = JSON.parse(stdout);
@@ -625,7 +648,7 @@ ipcMain.handle('tests:coverage', async () => {
     execFile('npx', ['jest', '--coverage', '--json', '--no-color'], {
       cwd: __dirname,
       shell: true,
-      timeout: 60000,
+      timeout: TEST_COVERAGE_TIMEOUT_MS,
     }, (error, stdout, stderr) => {
       try {
         const jsonOutput = JSON.parse(stdout);
@@ -747,6 +770,34 @@ function scanSessions() {
 // ── Skill Icon Mapping ─────────────────────────────────────---
 // SKILL_ICON_MAP, builtinSkillIcon, userSkillIcon imported from ./src/utils
 // ── Skills Scanner ────────────────────────────────────────────
+function scanSkillDirectory(dir, source, iconFn) {
+  const results = [];
+  if (!fs.existsSync(dir)) return results;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const skillMd = path.join(dir, entry.name, 'SKILL.md');
+    if (!fs.existsSync(skillMd)) continue;
+
+    try {
+      const raw = fs.readFileSync(skillMd, 'utf-8').replace(/^\uFEFF/, '');
+      const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (frontmatter) {
+        const meta = yaml.parse(frontmatter[1]);
+        results.push({
+          id: meta.name || entry.name,
+          name: meta.name || entry.name,
+          description: meta.description || '',
+          source,
+          icon: meta.icon || iconFn(meta.name || entry.name),
+        });
+      }
+    } catch (e) {
+      console.warn(`[skills:scan:${source}] Fehler:`, e.message || e);
+    }
+  }
+  return results;
+}
+
 function scanSkills() {
   const skills = [];
 
@@ -769,59 +820,13 @@ function scanSkills() {
     const latestVersion = versions[0];
     if (latestVersion) {
       const skillsDir = path.join(pkgBase, latestVersion, 'builtin-skills');
-      if (fs.existsSync(skillsDir)) {
-        for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const skillMd = path.join(skillsDir, entry.name, 'SKILL.md');
-          if (!fs.existsSync(skillMd)) continue;
-
-          try {
-            const raw = fs.readFileSync(skillMd, 'utf-8').replace(/^\uFEFF/, '');
-            const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-            if (frontmatter) {
-              const meta = yaml.parse(frontmatter[1]);
-              skills.push({
-                id: meta.name || entry.name,
-                name: meta.name || entry.name,
-                description: meta.description || '',
-                source: 'builtin',
-                icon: meta.icon || builtinSkillIcon(meta.name || entry.name),
-              });
-            }
-          } catch (e) {
-            console.warn('[skills:scan:builtin] Fehler:', e.message || e);
-          }
-        }
-      }
+      skills.push(...scanSkillDirectory(skillsDir, 'builtin', builtinSkillIcon));
     }
   }
 
   // 2) User skills from ~/.copilot/skills/
   const userSkillsDir = folderConfig.skillsDir || path.join(COPILOT_DIR, 'skills');
-  if (fs.existsSync(userSkillsDir)) {
-    for (const entry of fs.readdirSync(userSkillsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const skillMd = path.join(userSkillsDir, entry.name, 'SKILL.md');
-      if (!fs.existsSync(skillMd)) continue;
-
-      try {
-        const raw = fs.readFileSync(skillMd, 'utf-8').replace(/^\uFEFF/, '');
-        const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-        if (frontmatter) {
-          const meta = yaml.parse(frontmatter[1]);
-          skills.push({
-            id: meta.name || entry.name,
-            name: meta.name || entry.name,
-            description: meta.description || '',
-            source: 'user',
-            icon: meta.icon || userSkillIcon(meta.name || entry.name),
-          });
-        }
-      } catch (e) {
-        console.warn('[skills:scan:user] Fehler:', e.message || e);
-      }
-    }
-  }
+  skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
 
   return skills;
 }
@@ -853,8 +858,8 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
     const buf = terminalBuffers.get(tabId);
     if (buf) {
       buf.push(data);
-      // Cap buffer at 5000 chunks to prevent memory leak
-      if (buf.length > 5000) buf.splice(0, buf.length - 5000);
+      // Cap buffer to prevent memory leak
+      if (buf.length > PTY_BUFFER_MAX_CHUNKS) buf.splice(0, buf.length - PTY_BUFFER_MAX_CHUNKS);
     }
     sendToRenderer('terminal:data', tabId, data);
   });
@@ -885,15 +890,10 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
       terminalReady.set(tabId, true);
     }
     readyListener.dispose();
-  }, 20000);
+  }, PTY_READY_TIMEOUT_MS);
 
   ptyProcess.onExit(({ exitCode }) => {
-    terminalProcesses.delete(tabId);
-    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
-    terminalBusy.delete(tabId);
-    readyListener.dispose();
-    clearTimeout(readyFallback);
-    sendToRenderer('terminal:exit', tabId, exitCode);
+    cleanupPty(tabId, exitCode, () => { readyListener.dispose(); clearTimeout(readyFallback); });
   });
 
   // Start copilot
@@ -914,7 +914,7 @@ ipcMain.handle('terminal:send-command', (_event, tabId, command) => {
   const p = terminalProcesses.get(tabId);
   if (!p) return { success: false, error: 'No terminal process' };
   p.write(`\x1b[200~${command}\x1b[201~`);
-  setTimeout(() => p.write('\r'), 100);
+  setTimeout(() => p.write('\r'), PTY_WRITE_DELAY_MS);
   return { success: true };
 });
 
@@ -1006,10 +1006,7 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   });
 
   ptyProcess.onExit(({ exitCode }) => {
-    terminalProcesses.delete(tabId);
-    terminalBuffers.delete(tabId); terminalReady.delete(tabId);
-    terminalBusy.delete(tabId);
-    sendToRenderer('terminal:exit', tabId, exitCode);
+    cleanupPty(tabId, exitCode);
   });
 
   const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
@@ -1021,20 +1018,20 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
     let slashSent = false;
     const onData = ptyProcess.onData(() => { lastDataTime = Date.now(); });
     const checkInterval = setInterval(() => {
-      if (!slashSent && Date.now() - lastDataTime > 5000) {
+      if (!slashSent && Date.now() - lastDataTime > PTY_SLASH_QUIET_THRESHOLD_MS) {
         slashSent = true;
         console.log('[terminal:slash] PTY quiet for 5s — sending:', slashCommand);
         ptyProcess.write(`\x1b[200~${slashCommand}\x1b[201~`);
-        setTimeout(() => ptyProcess.write('\r'), 100);
+        setTimeout(() => ptyProcess.write('\r'), PTY_WRITE_DELAY_MS);
         clearInterval(checkInterval);
         onData.dispose();
       }
-    }, 500);
+    }, PTY_SLASH_CHECK_INTERVAL_MS);
     setTimeout(() => {
       if (!slashSent) console.log('[terminal:slash] Fallback timeout — command not sent');
       clearInterval(checkInterval);
       onData.dispose();
-    }, 30000);
+    }, PTY_SLASH_FALLBACK_TIMEOUT_MS);
   }
 
   return { success: true };
