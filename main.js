@@ -931,7 +931,9 @@ ipcMain.handle('terminal:fetch-context', async (_event, tabId) => {
   try {
     await waitForTerminalReady(tabId);
     p.write(`\x1b[200~/context\x1b[201~`);
-    setTimeout(() => p.write('\r'), 500);
+    // Wait for bracket paste to be processed, then send Enter
+    await new Promise(resolve => setTimeout(resolve, 600));
+    p.write('\r');
     const raw = await collectPtyOutput(p);
     console.log('[fetch-context] done, stripped length:', raw.length);
     console.log('[fetch-context] OUTPUT:', raw.substring(0, 500));
@@ -954,7 +956,9 @@ ipcMain.handle('terminal:send-slash', async (_event, tabId, command) => {
   try {
     await waitForTerminalReady(tabId);
     p.write(`\x1b[200~${command}\x1b[201~`);
-    setTimeout(() => p.write('\r'), 500);
+    // Wait for bracket paste to be processed, then send Enter
+    await new Promise(resolve => setTimeout(resolve, 600));
+    p.write('\r');
     const raw = await collectPtyOutput(p);
     console.log('[send-slash] done, command:', command, 'stripped length:', raw.length);
     const parsed = parseContextOutput(raw);
