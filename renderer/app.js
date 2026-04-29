@@ -1,3 +1,24 @@
+// Capture renderer console for dev console
+const _rendererOrigLog = console.log;
+const _rendererOrigWarn = console.warn;
+const _rendererOrigError = console.error;
+window._rendererLogs = [];
+console.log = (...args) => {
+  _rendererOrigLog(...args);
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  window._rendererLogs.push({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
+};
+console.warn = (...args) => {
+  _rendererOrigWarn(...args);
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  window._rendererLogs.push({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
+};
+console.error = (...args) => {
+  _rendererOrigError(...args);
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  window._rendererLogs.push({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
+};
+
 // ── Terminal Panel State ──────────────────────────────────────
 // Per-tab terminal state is stored in the tab object:
 //   tab.terminal = { instance, fitAddon, bodyEl, alive }
@@ -226,7 +247,14 @@ function applyChatFontSize(size) {
 // ── Developer Mode ──────────────────────────────────────────
 function applyDevMode(enabled) {
   const btnTests = document.getElementById('btnTests');
+  const btnDevConsole = document.getElementById('btnDevConsole');
   if (btnTests) btnTests.style.display = enabled ? '' : 'none';
+  if (btnDevConsole) btnDevConsole.style.display = enabled ? '' : 'none';
+  // Hide console panel when devMode is disabled
+  if (!enabled) {
+    const panel = document.getElementById('devConsolePanel');
+    if (panel) panel.style.display = 'none';
+  }
 }
 
 // ── Notification Sound ──────────────────────────────────────
@@ -1589,6 +1617,48 @@ function renderCoverageResults(result, body) {
   body.innerHTML = html;
 }
 
+// ── Developer Console ──────────────────────────────────────
+const devConsoleLogs = [];
+const DEV_CONSOLE_MAX_ENTRIES = 1000;
+let devConsoleFilter = 'all';
+
+function addDevConsoleEntry(entry) {
+  devConsoleLogs.push(entry);
+  if (devConsoleLogs.length > DEV_CONSOLE_MAX_ENTRIES) devConsoleLogs.shift();
+
+  const body = document.getElementById('devConsoleBody');
+  const panel = document.getElementById('devConsolePanel');
+  if (!body || !panel || panel.style.display === 'none') return;
+  if (devConsoleFilter !== 'all' && entry.level !== devConsoleFilter) return;
+
+  appendDevConsoleRow(body, entry);
+}
+
+function appendDevConsoleRow(body, entry) {
+  const row = document.createElement('div');
+  row.className = `dev-console__entry dev-console__entry--${entry.level}`;
+  const time = new Date(entry.timestamp).toLocaleTimeString('de-DE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+  row.innerHTML = `<span class="dev-console__time">${time}</span><span class="dev-console__level dev-console__level--${entry.level}">${entry.level}</span><span class="dev-console__msg">${escapeHtml(entry.message)}</span>`;
+  body.appendChild(row);
+  body.scrollTop = body.scrollHeight;
+}
+
+function renderDevConsole() {
+  const body = document.getElementById('devConsoleBody');
+  if (!body) return;
+  body.innerHTML = '';
+  const filtered = devConsoleFilter === 'all' ? devConsoleLogs : devConsoleLogs.filter(e => e.level === devConsoleFilter);
+  filtered.forEach(entry => appendDevConsoleRow(body, entry));
+}
+
+function toggleDevConsole() {
+  const panel = document.getElementById('devConsolePanel');
+  if (!panel) return;
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  if (!visible) renderDevConsole();
+}
+
 function updateStatus(text, color) {
   const badge = document.getElementById('statusBadge');
   if (!badge) return;
@@ -2308,6 +2378,52 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
   document.getElementById('btnRunTests')?.addEventListener('click', runTests);
   document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
+
+  // ── Dev Console Event Listeners ────────────────────────
+  document.getElementById('btnDevConsole')?.addEventListener('click', toggleDevConsole);
+  document.getElementById('devConsoleClose')?.addEventListener('click', () => {
+    document.getElementById('devConsolePanel').style.display = 'none';
+  });
+  document.getElementById('devConsoleClear')?.addEventListener('click', () => {
+    devConsoleLogs.length = 0;
+    document.getElementById('devConsoleBody').innerHTML = '';
+  });
+
+  // Filter buttons
+  document.querySelectorAll('.dev-console__filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.dev-console__filter').forEach(b => b.classList.remove('dev-console__filter--active'));
+      btn.classList.add('dev-console__filter--active');
+      devConsoleFilter = btn.dataset.level;
+      renderDevConsole();
+    });
+  });
+
+  // Main process logs via IPC
+  if (copilot.devConsole) {
+    copilot.devConsole.onLog((entry) => addDevConsoleEntry(entry));
+  }
+
+  // Flush renderer logs that were captured before DOM ready
+  if (window._rendererLogs) {
+    window._rendererLogs.forEach(entry => addDevConsoleEntry(entry));
+    // Override renderer console to use addDevConsoleEntry directly
+    console.log = (...args) => {
+      _rendererOrigLog(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+    console.warn = (...args) => {
+      _rendererOrigWarn(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+    console.error = (...args) => {
+      _rendererOrigError(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+  }
 
   // ── Folder Settings ────────────────────────────────────
   async function loadFolderSettings() {

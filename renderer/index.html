@@ -95,6 +95,9 @@
         <button class="action-btn" id="btnTests" data-tooltip="Tests ausführen" style="display:none;">
           🧪 Tests
         </button>
+        <button class="action-btn" id="btnDevConsole" data-tooltip="Developer Console" style="display:none;">
+          🖥️
+        </button>
         <button class="action-btn" id="btnSettings" data-tooltip="Einstellungen">
           ⚙️ Einstellungen
         </button>
@@ -167,6 +170,22 @@
         <div class="test-runner-popup__body" id="testRunnerBody">
           <div class="test-runner-popup__empty">Klicke ▶ Run um Tests zu starten</div>
         </div>
+      </div>
+      <div id="devConsolePanel" class="dev-console" style="display:none;">
+        <div class="dev-console__header">
+          <span class="dev-console__title">🖥️ Developer Console</span>
+          <div class="dev-console__filters">
+            <button class="dev-console__filter dev-console__filter--active" data-level="all">All</button>
+            <button class="dev-console__filter" data-level="info">Info</button>
+            <button class="dev-console__filter" data-level="warn">Warn</button>
+            <button class="dev-console__filter" data-level="error">Error</button>
+          </div>
+          <div class="dev-console__actions">
+            <button class="dev-console__btn" id="devConsoleClear" title="Clear">🗑️</button>
+            <button class="dev-console__btn" id="devConsoleClose" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="dev-console__body" id="devConsoleBody"></div>
       </div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
@@ -244,7 +263,7 @@
                 <span class="settings__toggle-slider"></span>
               </label>
             </div>
-            <div class="settings__hint">Aktiviert Entwickler-Werkzeuge wie den Test Runner (🧪) in der Sidebar.</div>
+            <div class="settings__hint">Aktiviert Entwickler-Werkzeuge: Test Runner (🧪) und Developer Console (🖥️) in der Sidebar.</div>
           </div>
         </div>
         <!-- Tab: Copilot Konfiguration -->

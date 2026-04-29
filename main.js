@@ -10,6 +10,24 @@ const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOut
 const { scanSessions: _scanSessions, scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { processDroppedFile, getShellExceptions, setShellExceptions } = require('./src/file-processing');
 
+// ── Dev Console Log Capture ─────────────────────────────────
+const _originalConsoleLog = console.log;
+const _originalConsoleWarn = console.warn;
+const _originalConsoleError = console.error;
+
+function _sendDevLog(level, args) {
+  try {
+    const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('dev-console:log', { level, message, timestamp: Date.now() });
+    }
+  } catch (_) { /* ignore serialization errors */ }
+}
+
+console.log = (...args) => { _originalConsoleLog(...args); _sendDevLog('info', args); };
+console.warn = (...args) => { _originalConsoleWarn(...args); _sendDevLog('warn', args); };
+console.error = (...args) => { _originalConsoleError(...args); _sendDevLog('error', args); };
+
 // ── PTY (optional, for interactive terminal) ─────────────────
 let pty;
 try {
@@ -766,10 +784,8 @@ ipcMain.handle('terminal:fetch-context', async (_event, tabId) => {
   terminalBusy.set(tabId, true);
   try {
     await waitForTerminalReady(tabId);
-    p.write(`\x1b[200~/context\x1b[201~`);
-    // Wait for bracket paste to be processed, then send Enter
-    await new Promise(resolve => setTimeout(resolve, 600));
-    p.write('\r');
+    // Send command + Enter as a single write to avoid autocomplete interference
+    p.write('/context\r');
     const raw = await collectPtyOutput(p);
     console.log('[fetch-context] done, stripped length:', raw.length);
     console.log('[fetch-context] OUTPUT:', raw.substring(0, 500));
@@ -791,10 +807,8 @@ ipcMain.handle('terminal:send-slash', async (_event, tabId, command) => {
   terminalBusy.set(tabId, true);
   try {
     await waitForTerminalReady(tabId);
-    p.write(`\x1b[200~${command}\x1b[201~`);
-    // Wait for bracket paste to be processed, then send Enter
-    await new Promise(resolve => setTimeout(resolve, 600));
-    p.write('\r');
+    // Send command + Enter as a single write to avoid autocomplete interference
+    p.write(`${command}\r`);
     const raw = await collectPtyOutput(p);
     console.log('[send-slash] done, command:', command, 'stripped length:', raw.length);
     const parsed = parseContextOutput(raw);

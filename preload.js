@@ -111,6 +111,14 @@ contextBridge.exposeInMainWorld('copilot', {
     run: () => ipcRenderer.invoke('tests:run'),
     coverage: () => ipcRenderer.invoke('tests:coverage'),
   },
+  // Dev Console
+  devConsole: {
+    onLog: (cb) => {
+      const handler = (_e, entry) => cb(entry);
+      ipcRenderer.on('dev-console:log', handler);
+      return () => ipcRenderer.removeListener('dev-console:log', handler);
+    },
+  },
   // Terminal (interactive PTY for slash commands)
   terminal: {
     available: () => ipcRenderer.invoke('terminal:available'),
