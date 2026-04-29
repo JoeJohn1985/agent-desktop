@@ -209,6 +209,12 @@ function applyChatFontSize(size) {
   });
 }
 
+// ── Developer Mode ──────────────────────────────────────────
+function applyDevMode(enabled) {
+  const btnTests = document.getElementById('btnTests');
+  if (btnTests) btnTests.style.display = enabled ? '' : 'none';
+}
+
 // ── Notification Sound ──────────────────────────────────────
 let _audioCtx = null;
 function playNotificationSound() {
@@ -1454,6 +1460,121 @@ function escapeAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Test Runner ──────────────────────────────────────────────
+function openTestRunner() {
+  let backdrop = document.getElementById('testRunnerBackdrop');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'testRunnerBackdrop';
+    backdrop.className = 'test-runner-backdrop';
+    backdrop.addEventListener('click', closeTestRunner);
+    document.body.appendChild(backdrop);
+  }
+  backdrop.style.display = 'block';
+  document.getElementById('testRunnerPopup').style.display = 'flex';
+}
+
+function closeTestRunner() {
+  document.getElementById('testRunnerPopup').style.display = 'none';
+  const backdrop = document.getElementById('testRunnerBackdrop');
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+async function runTests() {
+  const body = document.getElementById('testRunnerBody');
+  body.innerHTML = '<div class="test-runner__loading">Tests werden ausgeführt…</div>';
+
+  try {
+    const result = await copilot.tests.run();
+    renderTestResults(result, body);
+  } catch (e) {
+    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function runCoverage() {
+  const body = document.getElementById('testRunnerBody');
+  body.innerHTML = '<div class="test-runner__loading">Coverage wird berechnet…</div>';
+
+  try {
+    const result = await copilot.tests.coverage();
+    renderCoverageResults(result, body);
+  } catch (e) {
+    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderTestResults(result, body) {
+  if (result.error) {
+    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">❌ ${escapeHtml(result.error)}</div>`;
+    return;
+  }
+
+  const icon = result.success ? '✅' : '❌';
+  const durationSec = (result.duration / 1000).toFixed(1);
+
+  let html = `<div class="test-runner__summary">
+    <span class="test-runner__stat test-runner__stat--total">${icon} ${result.numTotal} Tests</span>
+    <span class="test-runner__stat test-runner__stat--pass">✅ ${result.numPassed} bestanden</span>
+    <span class="test-runner__stat test-runner__stat--fail">❌ ${result.numFailed} fehlgeschlagen</span>
+    <span class="test-runner__stat test-runner__stat--time">⏱️ ${durationSec}s</span>
+  </div>`;
+
+  for (const suite of (result.testResults || [])) {
+    const suiteIcon = suite.status === 'passed' ? '✅' : '❌';
+    const suiteDuration = suite.duration ? `${suite.duration}ms` : '';
+
+    html += `<div class="test-runner__suite">
+      <div class="test-runner__suite-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+        <span>${suiteIcon} ${escapeHtml(suite.name)}</span>
+        <span class="test-runner__test-duration">${suiteDuration}</span>
+      </div>
+      <ul class="test-runner__suite-tests">`;
+
+    for (const test of (suite.tests || [])) {
+      const testIcon = test.status === 'passed' ? '✅' : test.status === 'failed' ? '❌' : '⏭️';
+      const testClass = test.status === 'passed' ? 'test-runner__test--passed' : test.status === 'failed' ? 'test-runner__test--failed' : '';
+      const testDur = test.duration != null ? `${test.duration}ms` : '';
+
+      html += `<li class="test-runner__test ${testClass}">
+        <span>${testIcon} ${escapeHtml(test.title)}</span>
+        <span class="test-runner__test-duration">${testDur}</span>
+      </li>`;
+
+      if (test.failureMessages && test.failureMessages.length) {
+        html += `<li class="test-runner__test" style="color:#f38ba8;padding-left:36px;font-family:monospace;font-size:10px;white-space:pre-wrap;">${escapeHtml(test.failureMessages.join('\n'))}</li>`;
+      }
+    }
+
+    html += `</ul></div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function renderCoverageResults(result, body) {
+  if (result.error) {
+    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">❌ ${escapeHtml(result.error)}</div>`;
+    return;
+  }
+
+  let html = `<div class="test-runner__summary">
+    <span class="test-runner__stat test-runner__stat--total">📊 Coverage</span>
+    <span class="test-runner__stat test-runner__stat--pass">✅ ${result.numPassed}/${result.numTotal} Tests</span>
+  </div>`;
+
+  if (result.files && result.files.length) {
+    html += '<div class="test-runner__suite"><div class="test-runner__suite-header" style="cursor:default;"><span>Datei</span><span>Statements</span></div><ul class="test-runner__suite-tests">';
+    for (const file of result.files) {
+      const color = file.stmts > 80 ? '#a6e3a1' : file.stmts > 50 ? '#fab387' : '#f38ba8';
+      html += `<li class="test-runner__test"><span>${escapeHtml(file.file)}</span><span style="color:${color};font-weight:600;">${file.stmts}%</span></li>`;
+    }
+    html += '</ul></div>';
+  }
+
+  body.innerHTML = html;
+}
+
 function updateStatus(text, color) {
   const badge = document.getElementById('statusBadge');
   if (!badge) return;
@@ -2135,6 +2256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settFontSize = document.getElementById('settFontSize');
   const settFontSizeVal = document.getElementById('settFontSizeVal');
   const settSound = document.getElementById('settSound');
+  const settDevMode = document.getElementById('settDevMode');
   const settAutoApprove = document.getElementById('settAutoApprove');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
 
@@ -2157,6 +2279,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   settFontSizeVal.textContent = fontSize + 'px';
   applyChatFontSize(fontSize);
   settSound.checked = savedSettings.soundEnabled !== false;
+  settDevMode.checked = savedSettings.devMode === true;
+  applyDevMode(savedSettings.devMode === true);
   settAutoApprove.checked = savedSettings.autoApproveTools !== false;
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
 
@@ -2164,6 +2288,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     settTheme.value = getCurrentTheme();
     settingsOverlay.classList.add('overlay--visible');
   });
+
+  // ── Test Runner Event Listeners ─────────────────────────
+  document.getElementById('btnTests')?.addEventListener('click', openTestRunner);
+  document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
+  document.getElementById('btnRunTests')?.addEventListener('click', runTests);
+  document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
 
   // ── Folder Settings ────────────────────────────────────
   async function loadFolderSettings() {
@@ -2254,6 +2384,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   settSound.addEventListener('change', () => {
     saveSetting('soundEnabled', settSound.checked);
+  });
+
+  settDevMode.addEventListener('change', () => {
+    saveSetting('devMode', settDevMode.checked);
+    applyDevMode(settDevMode.checked);
   });
 
   settAutoApprove.addEventListener('change', () => {
@@ -2426,8 +2561,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       document.getElementById('btnCollapseSidebar').click();
     }
-    // Escape — close lightbox, search, or stop processing
+    // Escape — close lightbox, search, test runner, or stop processing
     if (e.key === 'Escape') {
+      const testPopup = document.getElementById('testRunnerPopup');
+      if (testPopup && testPopup.style.display !== 'none') {
+        closeTestRunner();
+        return;
+      }
       const lb = document.getElementById('imageLightbox');
       if (lb.classList.contains('image-lightbox--visible')) {
         lb.classList.remove('image-lightbox--visible');

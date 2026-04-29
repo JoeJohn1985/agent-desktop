@@ -92,6 +92,9 @@
         <button class="action-btn sidebar__collapse-btn" id="btnCollapseSidebar" data-tooltip="Sidebar minimieren">
           ◀
         </button>
+        <button class="action-btn" id="btnTests" data-tooltip="Tests ausführen" style="display:none;">
+          🧪 Tests
+        </button>
         <button class="action-btn" id="btnSettings" data-tooltip="Einstellungen">
           ⚙️ Einstellungen
         </button>
@@ -150,6 +153,20 @@
           </div>
         </div>
         <div class="terminal-panel__body" id="terminalBody"></div>
+      </div>
+      <!-- Test Runner Popup -->
+      <div id="testRunnerPopup" class="test-runner-popup" style="display:none;">
+        <div class="test-runner-popup__header">
+          <span class="test-runner-popup__title">🧪 Test Runner</span>
+          <div class="test-runner-popup__actions">
+            <button class="test-runner-popup__btn" id="btnRunTests" data-tooltip="Tests ausführen">▶ Run</button>
+            <button class="test-runner-popup__btn" id="btnRunCoverage" data-tooltip="Coverage anzeigen">📊 Coverage</button>
+            <button class="test-runner-popup__btn test-runner-popup__close" id="btnCloseTestRunner">✕</button>
+          </div>
+        </div>
+        <div class="test-runner-popup__body" id="testRunnerBody">
+          <div class="test-runner-popup__empty">Klicke ▶ Run um Tests zu starten</div>
+        </div>
       </div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
@@ -217,6 +234,17 @@
               <input type="checkbox" id="settSound" checked />
               <span class="settings__toggle-slider"></span>
             </label>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <div class="settings__row">
+              <label class="settings__label">🛠️ Entwicklermodus</label>
+              <label class="settings__toggle">
+                <input type="checkbox" id="settDevMode" />
+                <span class="settings__toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings__hint">Aktiviert Entwickler-Werkzeuge wie den Test Runner (🧪) in der Sidebar.</div>
           </div>
         </div>
         <!-- Tab: Copilot Konfiguration -->

@@ -106,6 +106,11 @@ contextBridge.exposeInMainWorld('copilot', {
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
   },
+  // Tests
+  tests: {
+    run: () => ipcRenderer.invoke('tests:run'),
+    coverage: () => ipcRenderer.invoke('tests:coverage'),
+  },
   // Terminal (interactive PTY for slash commands)
   terminal: {
     available: () => ipcRenderer.invoke('terminal:available'),
