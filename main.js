@@ -8,6 +8,7 @@ const { stripAnsi, safeSessionPath: _safeSessionPath, parseContextOutput, builti
 const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
 const { scanSessions: _scanSessions, scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
+const { processDroppedFile, getShellExceptions, setShellExceptions } = require('./src/file-processing');
 
 // ── PTY (optional, for interactive terminal) ─────────────────
 let pty;
@@ -296,42 +297,7 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg
 
 ipcMain.handle('files:processDropped', (_event, filePath) => {
   try {
-    if (!fs.existsSync(filePath)) return { type: 'error', message: 'Datei nicht gefunden' };
-
-    const ext = path.extname(filePath).toLowerCase();
-    const basename = path.basename(filePath);
-    const relative = path.relative(COPILOT_CWD, filePath);
-    const isInCwd = !relative.startsWith('..') && !path.isAbsolute(relative);
-
-    // File is inside CWD → just return the path
-    if (isInCwd) {
-      return { type: 'path', path: filePath };
-    }
-
-    // Image file outside CWD → copy to Dateien folder
-    if (IMAGE_EXTENSIONS.has(ext)) {
-      if (!fs.existsSync(FILES_DROP_DIR)) fs.mkdirSync(FILES_DROP_DIR, { recursive: true });
-      const dest = path.join(FILES_DROP_DIR, basename);
-      fs.copyFileSync(filePath, dest);
-      return { type: 'image', path: dest, originalPath: filePath };
-    }
-
-    // Text file outside CWD → read content
-    if (TEXT_EXTENSIONS.has(ext)) {
-      const stat = fs.statSync(filePath);
-      if (stat.size > 100 * 1024) {
-        return { type: 'error', message: `Datei zu groß (${Math.round(stat.size / 1024)} KB). Max 100 KB.` };
-      }
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const lang = ext.replace('.', '');
-      return { type: 'text', content, filename: basename, lang };
-    }
-
-    // Binary/unknown file outside CWD → copy to Dateien folder
-    if (!fs.existsSync(FILES_DROP_DIR)) fs.mkdirSync(FILES_DROP_DIR, { recursive: true });
-    const dest = path.join(FILES_DROP_DIR, basename);
-    fs.copyFileSync(filePath, dest);
-    return { type: 'copied', path: dest, originalPath: filePath };
+    return processDroppedFile(filePath, { cwd: COPILOT_CWD, filesDropDir: FILES_DROP_DIR, textExtensions: TEXT_EXTENSIONS, imageExtensions: IMAGE_EXTENSIONS });
   } catch (e) {
     return { type: 'error', message: e.message };
   }
@@ -341,33 +307,11 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
 const INSTRUCTIONS_PATH = path.join(COPILOT_CWD, 'copilot-instructions.md');
 
 ipcMain.handle('instructions:getShellExceptions', () => {
-  try {
-    const content = fs.readFileSync(INSTRUCTIONS_PATH, 'utf-8');
-    const match = content.match(/\*\*Ausnahmen\*\*[^\n]*\n([\s\S]*?)(?=\n(?:Bei \*\*allen|##|$))/);
-    if (!match) return [];
-    const items = match[1].match(/^- .+$/gm) || [];
-    return items.map(line => line.replace(/^- /, '').trim());
-  } catch (e) {
-    console.warn('[instructions:getShellExceptions] Fehler:', e.message || e);
-    return [];
-  }
+  return getShellExceptions(INSTRUCTIONS_PATH);
 });
 
 ipcMain.handle('instructions:setShellExceptions', (_event, exceptions) => {
-  try {
-    let content = fs.readFileSync(INSTRUCTIONS_PATH, 'utf-8');
-    const exList = exceptions.map(e => `- ${e}`).join('\n');
-    const newSection = `**Ausnahmen** (diese dürfen ohne Rückfrage ausgeführt werden):\n${exList}\n`;
-    content = content.replace(
-      /\*\*Ausnahmen\*\*[^\n]*\n[\s\S]*?(?=\nBei \*\*allen)/,
-      newSection
-    );
-    fs.writeFileSync(INSTRUCTIONS_PATH, content, 'utf-8');
-    return true;
-  } catch (e) {
-    console.warn('[instructions:setShellExceptions] Fehler:', e.message || e);
-    return false;
-  }
+  return setShellExceptions(INSTRUCTIONS_PATH, exceptions);
 });
 
 // Sessions

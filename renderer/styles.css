@@ -1024,6 +1024,7 @@ mark.chat-search-highlight--active {
 .stream-output {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
   font-size: 16px;
   line-height: 1.6;
@@ -1077,6 +1078,7 @@ mark.chat-search-highlight--active {
   color: var(--text-primary);
   word-wrap: break-word;
   overflow-wrap: break-word;
+  overflow-x: auto;
 }
 
 /* ── Markdown inside responses ──────────────────────── */
@@ -1106,6 +1108,7 @@ mark.chat-search-highlight--active {
   padding: 2px 5px;
   border-radius: 4px;
   font-size: 0.9em;
+  word-break: break-all;
 }
 .stream-response.markdown-body pre {
   margin: 0.6em 0;
@@ -1143,6 +1146,8 @@ mark.chat-search-highlight--active {
   border-collapse: collapse;
   margin: 0.6em 0;
   width: 100%;
+  display: block;
+  overflow-x: auto;
 }
 .stream-response.markdown-body th,
 .stream-response.markdown-body td {
