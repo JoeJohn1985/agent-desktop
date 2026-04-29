@@ -22,7 +22,7 @@ function defaultEscapeHtml(s) {
  */
 function shortenPath(p, userHomeDir) {
   if (!p || !userHomeDir) return p || '';
-  const homeEscaped = userHomeDir.replace(/[\\\/]+/g, '\\\\');
+  const homeEscaped = userHomeDir.replace(/[\\/]+/g, '\\\\');
   return p.replace(new RegExp(homeEscaped, 'gi'), '~\\');
 }
 

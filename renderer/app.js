@@ -19,6 +19,20 @@ const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
 
+// ── UI Constants ─────────────────────────────────────────────
+const SCROLL_BOTTOM_THRESHOLD = 60;
+const NOTIFICATION_FREQUENCY_HZ = 880;
+const NOTIFICATION_DURATION_S = 0.3;
+const TOAST_DISPLAY_MS = 3000;
+const TOAST_FADE_MS = 300;
+const CHAT_INPUT_MAX_HEIGHT = 150;
+const TOOL_PREVIEW_MAX_LENGTH = 150;
+const TOOL_ARGS_MAX_LENGTH = 60;
+const TERMINAL_SCROLLBACK = 1000;
+const TERMINAL_FIT_DELAY_MS = 150;
+const RESIZE_FIT_DELAY_MS = 100;
+const SESSION_REFRESH_DELAY_MS = 400;
+
 // ── Global Safety-Net ────────────────────────────────────────
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[App] Unhandled rejection:', e.reason);
@@ -27,7 +41,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // ── Path Helper ──────────────────────────────────────────────
 function shortenPath(p) {
   if (!p || !userHomeDir) return p || '';
-  const homeEscaped = userHomeDir.replace(/[\\\/]+/g, '\\\\');
+  const homeEscaped = userHomeDir.replace(/[\\/]+/g, '\\\\');
   return p.replace(new RegExp(homeEscaped, 'gi'), '~\\');
 }
 
@@ -42,7 +56,7 @@ function scrollToBottom(streamEl) {
 
 function initAutoScroll(streamEl) {
   streamEl.addEventListener('scroll', () => {
-    const atBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 60;
+    const atBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
     // Store per-tab
     const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
     if (tabEntry) tabEntry[1].autoScrollEnabled = atBottom;
@@ -227,12 +241,12 @@ function playNotificationSound() {
     const gain = ctx.createGain();
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.frequency.value = 880;
+    osc.frequency.value = NOTIFICATION_FREQUENCY_HZ;
     osc.type = 'sine';
     gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + NOTIFICATION_DURATION_S);
     osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.3);
+    osc.stop(ctx.currentTime + NOTIFICATION_DURATION_S);
   } catch (e) { console.warn('[audio] Benachrichtigungston fehlgeschlagen:', e.message); }
 }
 
@@ -295,8 +309,8 @@ function showNotification(message, type = 'info') {
   requestAnimationFrame(() => toast.classList.add('toast--visible'));
   setTimeout(() => {
     toast.classList.remove('toast--visible');
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+    setTimeout(() => toast.remove(), TOAST_FADE_MS);
+  }, TOAST_DISPLAY_MS);
 }
 
 // ── Tab Management ──────────────────────────────────────────
@@ -694,14 +708,14 @@ function initCopilotIPC() {
           tab._responseRaw = '';
         }
         tab._responseRaw += event.data.deltaContent || '';
-        // Throttled markdown render (every 100ms)
+        // Throttled markdown render
         if (!tab._mdTimer) {
           tab._mdTimer = setTimeout(() => {
             tab._mdTimer = null;
             if (tab._responseEl && tab._responseRaw) {
               tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
             }
-          }, 100);
+          }, RESIZE_FIT_DELAY_MS);
         }
         scrollToBottom(tab.streamEl);
         break;
@@ -800,10 +814,10 @@ function initCopilotIPC() {
         toolEl.className = 'stream-tool-result';
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
-        const preview = (event.data.result.content || '').substring(0, 150).replace(/\n/g, ' ');
+        const preview = (event.data.result.content || '').substring(0, TOOL_PREVIEW_MAX_LENGTH).replace(/\n/g, ' ');
 
         const summary = document.createElement('summary');
-        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}${preview.length >= 150 ? '…' : ''}</span>`;
+        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}${preview.length >= TOOL_PREVIEW_MAX_LENGTH ? '…' : ''}</span>`;
         toolEl.appendChild(summary);
 
         const content = document.createElement('pre');
@@ -1228,7 +1242,7 @@ function renderSessions(list) {
   const openSessionIds = new Set([...tabs.values()].map(t => t.sessionId).filter(Boolean));
   container.innerHTML = list.map(s => {
     const isLive = openSessionIds.has(s.id);
-    const title = s.name || s.summary || shortenPath(s.cwd) || s.id.substring(0, 8);
+    const title = s.name || s.summary || truncatePath(s.cwd) || s.id.substring(0, 8);
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" data-tooltip="${s.cwd}">
@@ -1444,7 +1458,7 @@ function formatDate(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function shortenPath(p) {
+function truncatePath(p) {
   if (!p) return '';
   const parts = p.replace(/\\/g, '/').split('/');
   return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : p;
@@ -1610,11 +1624,11 @@ function toolDisplayName(name) {
 
 function formatToolArgs(name, args) {
   if (!args) return '';
-  if (args.path) return shortenPath(args.path);
+  if (args.path) return truncatePath(args.path);
   if (args.pattern) return args.pattern;
-  if (args.command) return args.command.substring(0, 60) + (args.command.length > 60 ? '…' : '');
-  if (args.query) return args.query.substring(0, 60) + (args.query.length > 60 ? '…' : '');
-  if (args.prompt) return args.prompt.substring(0, 60) + (args.prompt.length > 60 ? '…' : '');
+  if (args.command) return args.command.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.command.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
+  if (args.query) return args.query.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.query.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
+  if (args.prompt) return args.prompt.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.prompt.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
   return '';
 }
 
@@ -1699,7 +1713,7 @@ async function openTerminal(tabId, sessionId, slashCommand) {
       brightWhite: '#a6adc8',
     },
     cursorBlink: true,
-    scrollback: 1000,
+    scrollback: TERMINAL_SCROLLBACK,
   });
 
   const fitAddon = new FitAddon.FitAddon();
@@ -1715,7 +1729,7 @@ async function openTerminal(tabId, sessionId, slashCommand) {
   instance.open(bodyEl);
   requestAnimationFrame(() => {
     fitAddon.fit();
-    setTimeout(() => fitAddon.fit(), 150);
+    setTimeout(() => fitAddon.fit(), TERMINAL_FIT_DELAY_MS);
     setTimeout(() => fitAddon.fit(), 500);
   });
 
@@ -1949,7 +1963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       chatInput.value = inputHistory[historyIndex];
       chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
     }
     if (e.key === 'ArrowDown' && historyIndex !== -1) {
       e.preventDefault();
@@ -1961,14 +1975,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatInput.value = historySavedInput;
       }
       chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
     }
   });
 
   // Auto-resize textarea
   chatInput.addEventListener('input', () => {
     chatInput.style.height = 'auto';
-    chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+    chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
   });
 
   // Search
@@ -2426,7 +2440,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('resize', () => {
     const tab = tabs.get(activeTabId);
     if (tab && tab.terminal && tab.terminal.fitAddon) {
-      setTimeout(() => tab.terminal.fitAddon.fit(), 100);
+      setTimeout(() => tab.terminal.fitAddon.fit(), RESIZE_FIT_DELAY_MS);
     }
   });
 
@@ -2647,7 +2661,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const prefix = chatInput.value ? '\n' : '';
       chatInput.value += prefix + parts.join('\n');
       chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
       chatInput.focus();
     }
   });
@@ -2692,7 +2706,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
           tooltip.style.visibility = '';
         });
-      }, 400);
+      }, SESSION_REFRESH_DELAY_MS);
     });
 
     document.addEventListener('mouseout', (e) => {
