@@ -6,13 +6,17 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "rebuild": "electron-rebuild"
+    "rebuild": "electron-rebuild",
+    "test": "jest",
+    "test:verbose": "jest --verbose",
+    "test:coverage": "jest --coverage"
   },
   "author": "MSchneider",
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
-    "electron": "^35.0.0"
+    "electron": "^35.0.0",
+    "jest": "^30.3.0"
   },
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",

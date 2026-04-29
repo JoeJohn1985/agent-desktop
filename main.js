@@ -4,6 +4,8 @@ const os = require('os');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const yaml = require('yaml');
+const { stripAnsi, safeSessionPath: _safeSessionPath, parseContextOutput, builtinSkillIcon, userSkillIcon, SKILL_ICON_MAP } = require('./src/utils');
+const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('./src/sessions');
 
 // ── PTY (optional, for interactive terminal) ─────────────────
 let pty;
@@ -56,23 +58,10 @@ let imageWatcher = null;
 
 // ── Path Safety ──────────────────────────────────────────────
 function safeSessionPath(sessionId) {
-  const resolved = path.resolve(SESSIONS_DIR, sessionId);
-  if (!resolved.startsWith(SESSIONS_DIR + path.sep) && resolved !== SESSIONS_DIR) {
-    throw new Error('Invalid session ID');
-  }
-  return resolved;
+  return _safeSessionPath(SESSIONS_DIR, sessionId);
 }
 
 // ── Helper Functions ─────────────────────────────────────────
-
-function stripAnsi(raw) {
-  return raw
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-    .replace(/\x1b\][^\x07]*\x07/g, '')
-    .replace(/\x1b[()][0-9A-Z]/g, '')
-    .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '')
-    .replace(/\r/g, '');
-}
 
 function sendToRenderer(channel, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -417,11 +406,11 @@ ipcMain.handle('sessions:list', async () => {
 });
 
 ipcMain.handle('sessions:readCheckpoints', async (_event, sessionId) => {
-  return readCheckpoints(sessionId);
+  return readCheckpoints(safeSessionPath(sessionId));
 });
 
 ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
-  return readPlan(sessionId);
+  return readPlan(safeSessionPath(sessionId));
 });
 
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
@@ -470,19 +459,19 @@ ipcMain.handle('sessions:create', async (_event, name) => {
 
 // Todos (per session)
 ipcMain.handle('todos:list', async (_event, sessionId) => {
-  return readTodos(sessionId);
+  return readTodos(safeSessionPath(sessionId));
 });
 
 ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
   if (!todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(sessionId);
+  const todos = readTodos(safeSessionPath(sessionId));
   todo.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   todo.status = todo.status || 'open';
   todo.createdAt = new Date().toISOString();
   todos.push(todo);
-  writeTodos(sessionId, todos);
+  writeTodos(safeSessionPath(sessionId), todos);
   return todos;
 });
 
@@ -490,30 +479,30 @@ ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
   if (typeof todoId !== 'string' || typeof updates !== 'object') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(sessionId);
+  const todos = readTodos(safeSessionPath(sessionId));
   const idx = todos.findIndex(t => t.id === todoId);
   if (idx === -1) return todos;
   Object.assign(todos[idx], updates, { updatedAt: new Date().toISOString() });
-  writeTodos(sessionId, todos);
+  writeTodos(safeSessionPath(sessionId), todos);
   return todos;
 });
 
 ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
-  let todos = readTodos(sessionId);
+  let todos = readTodos(safeSessionPath(sessionId));
   todos = todos.filter(t => t.id !== todoId);
-  writeTodos(sessionId, todos);
+  writeTodos(safeSessionPath(sessionId), todos);
   return todos;
 });
 
 ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
-  const todos = readTodos(sessionId);
+  const todos = readTodos(safeSessionPath(sessionId));
   const byId = new Map(todos.map(t => [t.id, t]));
   const reordered = orderedIds.map(id => byId.get(id)).filter(Boolean);
   // Append any todos not in the ordered list (safety)
   for (const t of todos) {
     if (!orderedIds.includes(t.id)) reordered.push(t);
   }
-  writeTodos(sessionId, reordered);
+  writeTodos(safeSessionPath(sessionId), reordered);
   return reordered;
 });
 
@@ -576,7 +565,7 @@ function startImageWatcher() {
 
 // Config
 ipcMain.handle('config:read', async () => {
-  return readConfig();
+  return readConfig(COPILOT_DIR);
 });
 
 // Skills
@@ -676,81 +665,8 @@ function scanSessions() {
   return sessions;
 }
 
-function readCheckpoints(sessionId) {
-  const indexPath = path.join(safeSessionPath(sessionId), 'checkpoints', 'index.md');
-  if (!fs.existsSync(indexPath)) return [];
-  try {
-    const content = fs.readFileSync(indexPath, 'utf-8');
-    const checkpoints = [];
-    for (const line of content.split('\n')) {
-      const match = line.match(/^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/);
-      if (match) {
-        checkpoints.push({
-          number: parseInt(match[1]),
-          title: match[2].trim(),
-          file: match[3].trim(),
-        });
-      }
-    }
-    return checkpoints;
-  } catch (e) {
-    console.warn('[sessions:readCheckpoints] Fehler:', e.message || e);
-    return [];
-  }
-}
-
-function readPlan(sessionId) {
-  const planPath = path.join(safeSessionPath(sessionId), 'plan.md');
-  if (!fs.existsSync(planPath)) return null;
-  return fs.readFileSync(planPath, 'utf-8');
-}
-
-function readConfig() {
-  const cfgPath = path.join(COPILOT_DIR, 'config.json');
-  if (!fs.existsSync(cfgPath)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-  } catch (e) {
-    console.warn('[config:read] Fehler:', e.message || e);
-    return {};
-  }
-}
-
-// ── Todos (per session) ──────────────────────────────────────
-function readTodos(sessionId) {
-  const todosPath = path.join(safeSessionPath(sessionId), 'todos.json');
-  if (!fs.existsSync(todosPath)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(todosPath, 'utf-8'));
-  } catch (e) {
-    console.warn('[todos:read] Fehler:', e.message || e);
-    return [];
-  }
-}
-
-function writeTodos(sessionId, todos) {
-  const sessionPath = safeSessionPath(sessionId);
-  if (!fs.existsSync(sessionPath)) return;
-  fs.writeFileSync(path.join(sessionPath, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
-}
-
 // ── Skill Icon Mapping ─────────────────────────────────────---
-const SKILL_ICON_MAP = {
-  'task-router': '🧠',
-  'code-review': '🔍',
-  'quality-audit': '🧪',
-  'security-audit': '🛡️',
-  'customize-cloud-agent': '☁️',
-};
-function builtinSkillIcon(name) {
-  return SKILL_ICON_MAP[(name || '').toLowerCase()] || '🧩';
-}
-function userSkillIcon(name) {
-  const mapped = SKILL_ICON_MAP[(name || '').toLowerCase()];
-  if (mapped) return mapped;
-  const m = (name||'').match(/([\p{Emoji}])/u);
-  return m ? m[1] : '🧩';
-}
+// SKILL_ICON_MAP, builtinSkillIcon, userSkillIcon imported from ./src/utils
 // ── Skills Scanner ────────────────────────────────────────────
 function scanSkills() {
   const skills = [];
@@ -924,34 +840,7 @@ ipcMain.handle('terminal:send-command', (_event, tabId, command) => {
 });
 
 // Parse context data from stripped output
-function parseContextOutput(text) {
-  const result = { raw: text };
-  
-  try {
-    // Extract "Model · UsedK/TotalK tokens (Percent%)"
-    // Example: "Claude Opus 4.6 · 136k/200k tokens (68%)"
-    const headerMatch = text.match(/([A-Za-z\s.]+\d[\w.]*)\s*[·]\s*([\d.]+k)\/([\d.]+k)\s*tokens?\s*\((\d+)%\)/i);
-    if (headerMatch) {
-      result.model = headerMatch[1].trim();
-      result.usedTokens = headerMatch[2];
-      result.totalTokens = headerMatch[3];
-      result.percent = parseInt(headerMatch[4]);
-    }
-    
-    // Extract categories: "Category: Xk (Y%)"
-    const categories = [];
-    const catRegex = /(System\/Tools|Messages|Free Space|Buffer):\s*([\d.]+k)\s*\((\d+)%\)/gi;
-    let match;
-    while ((match = catRegex.exec(text)) !== null) {
-      categories.push({ name: match[1], tokens: match[2], percent: parseInt(match[3]) });
-    }
-    if (categories.length) result.categories = categories;
-  } catch (e) {
-    console.log('[parseContextOutput] Parse error, returning raw:', e.message);
-  }
-  
-  return result;
-}
+// parseContextOutput, builtinSkillIcon, userSkillIcon imported from ./src/utils
 
 ipcMain.handle('terminal:fetch-context', async (_event, tabId) => {
   const p = terminalProcesses.get(tabId);
