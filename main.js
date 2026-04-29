@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const yaml = require('yaml');
 const { stripAnsi, safeSessionPath: _safeSessionPath, parseContextOutput, builtinSkillIcon, userSkillIcon, SKILL_ICON_MAP } = require('./src/utils');
 const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('./src/sessions');
+const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
 
 // ── PTY (optional, for interactive terminal) ─────────────────
 let pty;
@@ -77,68 +78,22 @@ function safeSessionPath(sessionId) {
 
 // ── Helper Functions ─────────────────────────────────────────
 
-function sendToRenderer(channel, ...args) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, ...args);
-  }
-}
+const sendToRenderer = _createSendToRenderer(() => mainWindow);
 
 function waitForTerminalReady(tabId, timeoutMs = PTY_READY_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
-    if (terminalReady.get(tabId)) return resolve();
-    const check = setInterval(() => {
-      if (terminalReady.get(tabId)) {
-        clearInterval(check);
-        resolve();
-      }
-    }, PTY_READY_CHECK_INTERVAL_MS);
-    setTimeout(() => {
-      clearInterval(check);
-      if (!terminalReady.get(tabId)) {
-        reject(new Error('Terminal nicht bereit (Timeout)'));
-      } else {
-        resolve();
-      }
-    }, timeoutMs);
-  });
+  return waitForReady(terminalReady, tabId, { timeoutMs, checkIntervalMs: PTY_READY_CHECK_INTERVAL_MS });
 }
 
-function collectPtyOutput(pty, { quietMs = PTY_QUIET_MS, timeoutMs = PTY_OUTPUT_TIMEOUT_MS } = {}) {
-  return new Promise((resolve) => {
-    let chunks = [];
-    let resolved = false;
-    let quietTimer = null;
-
-    const listener = pty.onData((data) => {
-      chunks.push(data);
-      if (quietTimer) clearTimeout(quietTimer);
-      quietTimer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          listener.dispose();
-          resolve(stripAnsi(chunks.join('')));
-        }
-      }, quietMs);
-    });
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        listener.dispose();
-        if (quietTimer) clearTimeout(quietTimer);
-        resolve(stripAnsi(chunks.join('')));
-      }
-    }, timeoutMs);
-  });
+function collectPtyOutput(ptyProc, { quietMs = PTY_QUIET_MS, timeoutMs = PTY_OUTPUT_TIMEOUT_MS } = {}) {
+  return _collectPtyOutput(ptyProc, stripAnsi, { quietMs, timeoutMs });
 }
 
 function cleanupPty(tabId, exitCode, extraCleanup) {
-  terminalProcesses.delete(tabId);
-  terminalBuffers.delete(tabId);
-  terminalReady.delete(tabId);
-  terminalBusy.delete(tabId);
-  if (extraCleanup) extraCleanup();
-  sendToRenderer('terminal:exit', tabId, exitCode);
+  _cleanupPty(
+    [terminalProcesses, terminalBuffers, terminalReady, terminalBusy],
+    tabId, exitCode,
+    { extraCleanup, sendFn: sendToRenderer }
+  );
 }
 
 // ── Window ───────────────────────────────────────────────────
