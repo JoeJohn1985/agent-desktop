@@ -1328,9 +1328,9 @@ mark.chat-search-highlight--active {
 }
 
 .session-actions__btn {
-  background: var(--bg-tertiary, #313244);
-  border: 1px solid var(--border, #45475a);
-  color: var(--text-secondary, #a6adc8);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
@@ -1341,9 +1341,9 @@ mark.chat-search-highlight--active {
 }
 
 .session-actions__btn:hover {
-  background: var(--bg-hover, #45475a);
-  color: var(--text-primary, #cdd6f4);
-  border-color: var(--text-secondary, #a6adc8);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
 }
 
 .session-actions__btn:active {

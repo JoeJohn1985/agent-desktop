@@ -1,0 +1,16 @@
+{
+  "theme": "dark",
+  "openTabs": [
+    {
+      "sessionId": "8c205927-6dbd-42aa-9a42-e7e8551a3ee0",
+      "label": "🤖 CD: Copilot Desktop Weiterentwicklung"
+    }
+  ],
+  "settings": {
+    "activeSkills": [
+      "task-router"
+    ],
+    "devMode": true
+  },
+  "sidebarWidth": 248
+}

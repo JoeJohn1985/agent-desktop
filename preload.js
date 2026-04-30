@@ -91,6 +91,11 @@ contextBridge.exposeInMainWorld('copilot', {
   config: {
     read: () => ipcRenderer.invoke('config:read'),
   },
+  // Preferences (file-based persistent settings)
+  preferences: {
+    read: () => ipcRenderer.invoke('preferences:read'),
+    write: (prefs) => ipcRenderer.invoke('preferences:write', prefs),
+  },
   // Folders
   folders: {
     read: () => ipcRenderer.invoke('folders:read'),

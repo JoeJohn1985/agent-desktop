@@ -378,6 +378,7 @@ ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
     const raw = fs.readFileSync(wsPath, 'utf-8');
     const ws = yaml.parse(raw);
     ws.name = newName;
+    ws.user_named = true;
     fs.writeFileSync(wsPath, yaml.stringify(ws), 'utf-8');
     return true;
   } catch (e) {
@@ -512,6 +513,37 @@ function startImageWatcher() {
 // Config
 ipcMain.handle('config:read', async () => {
   return readConfig(COPILOT_DIR);
+});
+
+// Preferences (persistent file-based settings)
+const PREFS_PATH = path.join(__dirname, 'preferences.json');
+
+function readPreferences() {
+  if (!fs.existsSync(PREFS_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf-8'));
+  } catch (e) {
+    console.warn('[preferences:read] Fehler:', e.message || e);
+    return {};
+  }
+}
+
+function writePreferences(prefs) {
+  try {
+    fs.writeFileSync(PREFS_PATH, JSON.stringify(prefs, null, 2), 'utf-8');
+    return true;
+  } catch (e) {
+    console.warn('[preferences:write] Fehler:', e.message || e);
+    return false;
+  }
+}
+
+ipcMain.handle('preferences:read', async () => {
+  return readPreferences();
+});
+
+ipcMain.handle('preferences:write', async (_event, prefs) => {
+  return writePreferences(prefs);
 });
 
 // Skills

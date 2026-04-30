@@ -88,13 +88,36 @@ function initAutoScroll(streamEl) {
 
 const THEMES = ['light', 'dark', 'gebit'];
 
+// ── Preferences (file-based persistence) ────────────────────
+let _prefs = {};
+
+async function loadPreferences() {
+  try {
+    _prefs = await copilot.preferences.read() || {};
+  } catch (e) {
+    console.warn('[prefs] Laden fehlgeschlagen:', e.message);
+    _prefs = {};
+  }
+}
+
+function getPref(key, defaultValue) {
+  return _prefs[key] !== undefined ? _prefs[key] : defaultValue;
+}
+
+function setPref(key, value) {
+  _prefs[key] = value;
+  copilot.preferences.write(_prefs).catch(e => {
+    console.warn('[prefs] Speichern fehlgeschlagen:', e.message);
+  });
+}
+
 function getCurrentTheme() {
-  return localStorage.getItem('theme') || 'light';
+  return getPref('theme', 'dark');
 }
 
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
+  setPref('theme', theme);
 }
 
 // ── Session Restore ─────────────────────────────────────────
@@ -105,15 +128,13 @@ function saveOpenTabs() {
       openTabs.push({ sessionId: tab.sessionId, label: tab.label });
     }
   });
-  localStorage.setItem('openTabs', JSON.stringify(openTabs));
+  setPref('openTabs', openTabs);
 }
 
 async function restoreOpenTabs() {
-  const saved = localStorage.getItem('openTabs');
-  if (!saved) return false;
+  const openTabs = getPref('openTabs', []);
+  if (!openTabs.length) return false;
   try {
-    const openTabs = JSON.parse(saved);
-    if (!openTabs.length) return false;
     for (const t of openTabs) {
       const tabId = await createTab(t.label || '🤖 Copilot');
       const tab = tabs.get(tabId);
@@ -138,15 +159,13 @@ async function restoreOpenTabs() {
 
 // ── Settings ────────────────────────────────────────────────
 function getSettings() {
-  try {
-    return JSON.parse(localStorage.getItem('settings') || '{}');
-  } catch (e) { console.warn('[settings] Parse fehlgeschlagen:', e.message); return {}; }
+  return getPref('settings', {});
 }
 
 function saveSetting(key, value) {
   const s = getSettings();
   s[key] = value;
-  localStorage.setItem('settings', JSON.stringify(s));
+  setPref('settings', s);
 }
 
 function getAllowedTools() {
@@ -1255,7 +1274,7 @@ async function loadSessions() {
     console.warn('[sessions] Laden fehlgeschlagen:', e.message);
     showNotification('Sessions konnten nicht geladen werden', 'error');
   }
-  sessions = allSessions.filter(s => s.name);
+  sessions = allSessions.filter(s => s.userNamed);
   document.getElementById('sessionCount').textContent = sessions.length;
   renderSessions(sessions);
 }
@@ -1423,7 +1442,7 @@ function initResize() {
   let isResizing = false;
 
   // Restore saved width
-  const savedWidth = localStorage.getItem('sidebarWidth');
+  const savedWidth = getPref('sidebarWidth', null);
   if (savedWidth) sidebar.style.width = savedWidth + 'px';
 
   handle.addEventListener('mousedown', (e) => {
@@ -1444,7 +1463,7 @@ function initResize() {
     isResizing = false;
     handle.classList.remove('dragging');
     document.body.style.cursor = '';
-    localStorage.setItem('sidebarWidth', parseInt(sidebar.style.width));
+    setPref('sidebarWidth', parseInt(sidebar.style.width));
   });
 }
 
@@ -1940,6 +1959,7 @@ function initTerminalResize() {
 
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  await loadPreferences();
   applyTheme(getCurrentTheme());
   initCopilotIPC();
   initTerminalIPC();
@@ -2481,7 +2501,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Sidebar collapse toggle
   const collapseBtn = document.getElementById('btnCollapseSidebar');
   const sidebar = document.getElementById('sidebar');
-  if (localStorage.getItem('sidebarCollapsed') === 'true') {
+  if (getPref('sidebarCollapsed', false)) {
     sidebar.classList.add('sidebar--collapsed');
     collapseBtn.textContent = '▶';
     collapseBtn.setAttribute('data-tooltip', 'Sidebar erweitern');
@@ -2490,7 +2510,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isCollapsed = sidebar.classList.toggle('sidebar--collapsed');
     collapseBtn.textContent = isCollapsed ? '▶' : '◀';
     collapseBtn.setAttribute('data-tooltip', isCollapsed ? 'Sidebar erweitern' : 'Sidebar minimieren');
-    localStorage.setItem('sidebarCollapsed', isCollapsed);
+    setPref('sidebarCollapsed', isCollapsed);
   });
 
   document.getElementById('btnSettingsClose').addEventListener('click', () => {

@@ -98,6 +98,7 @@ describe('scanSessions', () => {
     expect(result[0]).toEqual({
       id: 'sess-abc',
       name: 'Meine Session',
+      userNamed: false,
       summary: 'Zusammenfassung',
       cwd: '/home/user/project',
       createdAt: '2025-01-01T10:00:00Z',
