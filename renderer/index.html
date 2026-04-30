@@ -318,12 +318,12 @@
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
-            <label class="settings__label">Shell-Ausnahmen</label>
-            <div class="settings__hint">Diese Befehlskategorien darf Copilot <strong>ohne Rückfrage</strong> ausführen. Alle anderen Shell-Befehle erfordern deine Bestätigung.</div>
+            <label class="settings__label">Erlaubte Shell-Befehle (Instructions)</label>
+            <div class="settings__hint">Diese Befehle werden in die <code>copilot-instructions.md</code> geschrieben, damit Copilot sie ohne Rückfrage ausführen darf. Es handelt sich um eine Anweisung, keine harte Einschränkung.</div>
             <div class="settings__tool-list" id="settShellExceptionsList"></div>
             <div class="settings__tool-add">
               <input type="text" class="settings__tool-input" id="settShellExInput" placeholder="z.B. git commit, npm run build" />
-              <button class="action-btn" id="btnAddShellEx" data-tooltip="Ausnahme hinzufügen">+</button>
+              <button class="action-btn" id="btnAddShellEx" data-tooltip="Hinzufügen">+</button>
             </div>
           </div>
         </div>

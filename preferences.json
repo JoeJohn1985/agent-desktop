@@ -10,7 +10,12 @@
     "activeSkills": [
       "task-router"
     ],
-    "devMode": true
+    "devMode": true,
+    "extraDirs": [
+      "C:\\Users\\MSchneider\\.copilot\\session-state",
+      "C:\\Users\\MSchneider\\.copilot\\skills",
+      "C:\\Users\\MSchneider\\Copilot"
+    ]
   },
   "sidebarWidth": 248
 }

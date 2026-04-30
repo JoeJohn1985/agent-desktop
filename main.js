@@ -68,6 +68,16 @@ let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
 const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
 let imageWatcher = null;
 
+// Bundled PowerShell — fallback to system shell
+const BUNDLED_PWSH = path.join(__dirname, 'vendor', 'pwsh', 'pwsh.exe');
+function getShell() {
+  if (process.platform === 'win32') {
+    if (fs.existsSync(BUNDLED_PWSH)) return BUNDLED_PWSH;
+    return 'cmd.exe';
+  }
+  return process.env.SHELL || '/bin/bash';
+}
+
 // ── Constants ──────────────────────────────────────────────────
 const PTY_READY_TIMEOUT_MS = 20000;
 const PTY_READY_CHECK_INTERVAL_MS = 200;
@@ -727,7 +737,7 @@ ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
   if (terminalProcesses.has(tabId)) { console.log('[bg-terminal] already running'); return { success: true, alreadyRunning: true }; }
   if (!pty) return { success: false, error: 'node-pty not available' };
 
-  const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+  const shell = getShell();
   const ptyProcess = pty.spawn(shell, [], {
     name: 'xterm-256color',
     cols: 80,
@@ -876,7 +886,7 @@ ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
   }
 
   // No background PTY — spawn fresh (fallback)
-  const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+  const shell = getShell();
   const ptyProcess = pty.spawn(shell, [], {
     name: 'xterm-256color',
     cols: 80,
