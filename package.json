@@ -1,6 +1,6 @@
 {
   "name": "copilot-desktop",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
   "main": "main.js",
   "scripts": {
@@ -35,3 +35,4 @@
     "yaml": "^2.7.0"
   }
 }
+

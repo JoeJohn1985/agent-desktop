@@ -388,6 +388,7 @@ ipcMain.handle('sessions:rename', async (_event, sessionId, newName) => {
     const raw = fs.readFileSync(wsPath, 'utf-8');
     const ws = yaml.parse(raw);
     ws.name = newName;
+    ws.display_name = newName; // Copilot-sicheres Feld (wird nicht überschrieben)
     ws.user_named = true;
     fs.writeFileSync(wsPath, yaml.stringify(ws), 'utf-8');
     return true;
@@ -635,6 +636,81 @@ ipcMain.handle('tests:coverage', async () => {
         });
       } catch (e) {
         resolve({ success: false, error: e.message, files: [] });
+      }
+    });
+  });
+});
+
+ipcMain.handle('tests:e2e', async () => {
+  const { execFile } = require('child_process');
+  return new Promise((resolve) => {
+    execFile('npx', ['playwright', 'test', '--reporter=json'], {
+      cwd: __dirname,
+      shell: true,
+      timeout: TEST_COVERAGE_TIMEOUT_MS,
+    }, (error, stdout, stderr) => {
+      try {
+        const jsonOutput = JSON.parse(stdout);
+        const suites = jsonOutput.suites || [];
+        let numPassed = 0;
+        let numFailed = 0;
+        let numTotal = 0;
+        const testResults = [];
+
+        function collectTests(suite, suiteName) {
+          const tests = [];
+          for (const spec of (suite.specs || [])) {
+            for (const test of (spec.tests || [])) {
+              numTotal++;
+              const result = test.results && test.results[0];
+              const status = result?.status === 'passed' ? 'passed' : 'failed';
+              if (status === 'passed') numPassed++;
+              else numFailed++;
+              tests.push({
+                title: spec.title,
+                fullName: `${suiteName} > ${spec.title}`,
+                status,
+                duration: result?.duration || 0,
+                failureMessages: result?.errors?.map(e => e.message || e.stack || '') || [],
+              });
+            }
+          }
+          if (tests.length > 0) {
+            testResults.push({
+              name: suiteName,
+              status: tests.every(t => t.status === 'passed') ? 'passed' : 'failed',
+              duration: tests.reduce((s, t) => s + t.duration, 0),
+              tests,
+            });
+          }
+          for (const child of (suite.suites || [])) {
+            collectTests(child, `${suiteName} > ${child.title}`);
+          }
+        }
+
+        for (const suite of suites) {
+          collectTests(suite, suite.title || 'E2E');
+        }
+
+        resolve({
+          success: numFailed === 0,
+          numPassed,
+          numFailed,
+          numTotal,
+          numSuites: testResults.length,
+          numSuitesPassed: testResults.filter(s => s.status === 'passed').length,
+          duration: jsonOutput.stats?.duration || 0,
+          testResults,
+        });
+      } catch (parseErr) {
+        resolve({
+          success: !error || error.code === 0,
+          error: stderr || stdout || parseErr.message,
+          numPassed: 0,
+          numFailed: 0,
+          numTotal: 0,
+          testResults: [],
+        });
       }
     });
   });

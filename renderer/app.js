@@ -411,8 +411,8 @@ function switchTab(tabId) {
   activeTabId = tabId;
   const activeTab = tabs.get(tabId);
 
-  // Show/hide terminal panel based on whether this tab has an active terminal
-  if (activeTab && activeTab.terminal) {
+  // Show/hide terminal panel based on whether this tab has a visible terminal
+  if (activeTab && activeTab.terminal && activeTab.terminalVisible !== false) {
     activeTab.terminal.bodyEl.style.display = '';
     panel.classList.add('terminal-panel--open');
     // Re-fit after showing
@@ -1482,9 +1482,11 @@ function filterSessions() {
 window.toggleSection = function(name) {
   const el = document.getElementById(name + 'Content');
   const chevron = document.getElementById(name + 'Chevron');
+  const search = document.querySelector(`#${name}Content`)?.parentElement?.querySelector('.sidebar__search');
   if (el) {
     const isHidden = el.style.display === 'none';
     el.style.display = isHidden ? '' : 'none';
+    if (search) search.style.display = isHidden ? '' : 'none';
     if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !isHidden);
   }
 };
@@ -1560,6 +1562,18 @@ async function runCoverage() {
   try {
     const result = await copilot.tests.coverage();
     renderCoverageResults(result, body);
+  } catch (e) {
+    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function runE2E() {
+  const body = document.getElementById('testRunnerBody');
+  body.innerHTML = '<div class="test-runner__loading">🎭 Playwright E2E Tests werden ausgeführt…</div>';
+
+  try {
+    const result = await copilot.tests.e2e();
+    renderTestResults(result, body);
   } catch (e) {
     body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
   }
@@ -1740,6 +1754,7 @@ async function openTerminal(tabId, sessionId, slashCommand) {
   if (tab.terminal && tab.terminal.alive) {
     const panel = document.getElementById('terminalPanel');
     panel.classList.add('terminal-panel--open');
+    tab.terminalVisible = true;
     tab.terminal.bodyEl.style.display = '';
     requestAnimationFrame(() => tab.terminal.fitAddon.fit());
     tab.terminal.instance.focus();
@@ -1810,6 +1825,7 @@ async function openTerminal(tabId, sessionId, slashCommand) {
 
   // Store terminal state on the tab
   tab.terminal = { instance, fitAddon, bodyEl, alive: true };
+  tab.terminalVisible = true;
 
   // Show panel
   panel.classList.add('terminal-panel--open');
@@ -1889,6 +1905,8 @@ function closeTerminalForTab(tabId) {
 
 function minimizeTerminal() {
   document.getElementById('terminalPanel').classList.remove('terminal-panel--open');
+  const tab = tabs.get(activeTabId);
+  if (tab) tab.terminalVisible = false;
   document.getElementById('chatInput')?.focus();
 }
 
@@ -2090,12 +2108,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
   document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
 
-  // Terminal button
+  // Terminal button (toggle: open or minimize)
   document.getElementById('btnOpenTerminal').addEventListener('click', () => {
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
     if (!tab) return;
-    openTerminal(activeTabId, tab.sessionId, null);
+    if (tab.terminal && tab.terminalVisible !== false) {
+      minimizeTerminal();
+    } else if (tab.terminal && tab.terminalVisible === false) {
+      tab.terminalVisible = true;
+      document.getElementById('terminalPanel').classList.add('terminal-panel--open');
+      tab.terminal.bodyEl.style.display = '';
+      requestAnimationFrame(() => { if (tab.terminal.fitAddon) tab.terminal.fitAddon.fit(); });
+    } else {
+      openTerminal(activeTabId, tab.sessionId, null);
+    }
   });
 
   // Export chat
@@ -2397,6 +2424,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnTests')?.addEventListener('click', openTestRunner);
   document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
   document.getElementById('btnRunTests')?.addEventListener('click', runTests);
+  document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
   document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
 
   // ── Dev Console Event Listeners ────────────────────────
