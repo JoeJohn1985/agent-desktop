@@ -1,6 +1,6 @@
 {
   "name": "copilot-desktop",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
   "main": "main.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "test": "jest",
     "test:verbose": "jest --verbose",
     "test:coverage": "jest --coverage",
+    "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
@@ -18,7 +19,8 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
     "@eslint/js": "^10.0.1",
-    "electron": "^35.0.0",
+    "@playwright/test": "^1.59.1",
+    "electron": "^35.7.5",
     "eslint": "^10.2.1",
     "globals": "^17.5.0",
     "jest": "^30.3.0"
