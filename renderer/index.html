@@ -33,6 +33,8 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
 
+      <!-- Scrollable sections wrapper -->
+      <div class="sidebar__sections">
       <!-- Sessions Section -->
       <div class="sidebar__section" data-icon="📂">
         <div class="sidebar__header" onclick="toggleSection('sessions')">
@@ -86,6 +88,7 @@
           </div>
         </div>
       </div>
+      </div><!-- end sidebar__sections -->
 
       <!-- Quick Actions -->
       <div class="sidebar__footer">
@@ -162,7 +165,8 @@
         <div class="test-runner-popup__header">
           <span class="test-runner-popup__title">🧪 Test Runner</span>
           <div class="test-runner-popup__actions">
-            <button class="test-runner-popup__btn" id="btnRunTests" data-tooltip="Tests ausführen">▶ Run</button>
+            <button class="test-runner-popup__btn" id="btnRunTests" data-tooltip="Unit Tests ausführen">▶ Unit</button>
+            <button class="test-runner-popup__btn" id="btnRunE2E" data-tooltip="E2E Tests ausführen (Playwright)">▶ E2E</button>
             <button class="test-runner-popup__btn" id="btnRunCoverage" data-tooltip="Coverage anzeigen">📊 Coverage</button>
             <button class="test-runner-popup__btn test-runner-popup__close" id="btnCloseTestRunner">✕</button>
           </div>

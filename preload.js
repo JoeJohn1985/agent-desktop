@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('copilot', {
   // Tests
   tests: {
     run: () => ipcRenderer.invoke('tests:run'),
+    e2e: () => ipcRenderer.invoke('tests:e2e'),
     coverage: () => ipcRenderer.invoke('tests:coverage'),
   },
   // Dev Console
