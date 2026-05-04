@@ -3,6 +3,7 @@ dist/
 *.log
 
 coverage/
+test-results/
 vendor/
 preferences.json
 folders.json
