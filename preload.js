@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('copilot', {
       return () => ipcRenderer.removeListener('images:changed', cb);
     },
   },
+  videos: {
+    extractFrames: (videoPath, options) => ipcRenderer.invoke('videos:extractFrames', videoPath, options),
+  },
   // Config
   config: {
     read: () => ipcRenderer.invoke('config:read'),

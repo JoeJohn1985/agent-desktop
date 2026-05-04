@@ -336,6 +336,7 @@ const TEXT_EXTENSIONS = new Set([
   '.sql', '.csv', '.log', '.gitignore', '.dockerfile', '.properties',
 ]);
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.avi', '.mov', '.wmv']);
 
 ipcMain.handle('files:processDropped', (_event, filePath) => {
   try {
@@ -471,11 +472,18 @@ ipcMain.handle('images:list', async () => {
     if (!fs.existsSync(IMAGES_DIR)) return [];
     const files = fs.readdirSync(IMAGES_DIR);
     return files
-      .filter(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()))
+      .filter(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()) || VIDEO_EXTENSIONS.has(path.extname(f).toLowerCase()))
       .map(f => {
         const fullPath = path.join(IMAGES_DIR, f);
         const stat = fs.statSync(fullPath);
-        return { name: f, path: fullPath, size: stat.size, mtime: stat.mtimeMs };
+        const ext = path.extname(f).toLowerCase();
+        return {
+          name: f,
+          path: fullPath,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          type: VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image',
+        };
       })
       .sort((a, b) => b.mtime - a.mtime);
   } catch (e) {
@@ -503,6 +511,84 @@ ipcMain.handle('images:delete', async (_event, filePath) => {
 
 ipcMain.handle('images:openFolder', async () => {
   shell.openPath(IMAGES_DIR);
+});
+
+// Video frame extraction
+const VIDEO_FRAMES_DIR = path.join(IMAGES_DIR, '_frames');
+
+ipcMain.handle('videos:extractFrames', async (_event, videoPath, options = {}) => {
+  if (typeof videoPath !== 'string') return { success: false, error: 'Ungültiger Pfad' };
+  const resolved = path.resolve(videoPath);
+  if (!fs.existsSync(resolved)) return { success: false, error: 'Datei nicht gefunden' };
+
+  const videoName = path.basename(resolved, path.extname(resolved));
+  const outDir = path.join(VIDEO_FRAMES_DIR, videoName);
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+  // Check if frames already exist
+  const existing = fs.readdirSync(outDir).filter(f => f.endsWith('.png'));
+  if (existing.length > 0 && !options.force) {
+    return {
+      success: true,
+      cached: true,
+      framesDir: outDir,
+      frames: existing.sort().map(f => path.join(outDir, f)),
+      count: existing.length,
+    };
+  }
+
+  const interval = options.interval || 1; // seconds between frames
+  const maxFrames = options.maxFrames || 30;
+
+  const { execFile } = require('child_process');
+  return new Promise((resolve) => {
+    const script = `
+import cv2, os, sys, json
+video_path = sys.argv[1]
+out_dir = sys.argv[2]
+interval = int(sys.argv[3])
+max_frames = int(sys.argv[4])
+
+cap = cv2.VideoCapture(video_path)
+fps = cap.get(cv2.CAP_PROP_FPS)
+total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+duration = total / fps if fps > 0 else 0
+
+frame_interval = max(int(fps * interval), 1)
+count = 0
+saved = 0
+frames = []
+
+while saved < max_frames:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    if count % frame_interval == 0:
+        p = os.path.join(out_dir, f'frame_{saved:03d}.png')
+        cv2.imwrite(p, frame)
+        frames.append(p)
+        saved += 1
+    count += 1
+
+cap.release()
+print(json.dumps({"success": True, "frames": frames, "count": saved, "duration": round(duration, 1), "fps": round(fps, 1)}))
+`;
+    execFile('python', ['-c', script, resolved, outDir, String(interval), String(maxFrames)], {
+      timeout: 60000,
+      shell: false,
+    }, (error, stdout, stderr) => {
+      try {
+        const result = JSON.parse(stdout.trim());
+        result.framesDir = outDir;
+        resolve(result);
+      } catch (e) {
+        resolve({
+          success: false,
+          error: stderr || stdout || (error && error.message) || 'Frame-Extraktion fehlgeschlagen',
+        });
+      }
+    });
+  });
 });
 
 // Watch images directory for changes
