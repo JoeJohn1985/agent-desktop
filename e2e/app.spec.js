@@ -6,13 +6,19 @@
 const { test, expect } = require('@playwright/test');
 const { _electron: electron } = require('playwright');
 const path = require('path');
+const fs = require('fs');
 
 const APP_PATH = path.resolve(__dirname, '..');
+const TEST_PREFS_PATH = path.join(APP_PATH, 'preferences.test.json');
 
 let electronApp;
 let window;
 
 test.beforeAll(async () => {
+  // Remove stale test preferences to start clean
+  if (fs.existsSync(TEST_PREFS_PATH)) fs.unlinkSync(TEST_PREFS_PATH);
+  if (fs.existsSync(TEST_PREFS_PATH + '.bak')) fs.unlinkSync(TEST_PREFS_PATH + '.bak');
+
   electronApp = await electron.launch({
     args: [APP_PATH],
     env: { ...process.env, NODE_ENV: 'test' },
@@ -27,6 +33,9 @@ test.afterAll(async () => {
   if (electronApp) {
     await electronApp.close();
   }
+  // Clean up test preferences file
+  if (fs.existsSync(TEST_PREFS_PATH)) fs.unlinkSync(TEST_PREFS_PATH);
+  if (fs.existsSync(TEST_PREFS_PATH + '.bak')) fs.unlinkSync(TEST_PREFS_PATH + '.bak');
 });
 
 // ── App Start ────────────────────────────────────────────────

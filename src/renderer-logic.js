@@ -143,8 +143,7 @@ function filterSessions(sessions, query) {
   if (!query) return sessions;
   const lower = query.toLowerCase();
   return sessions.filter(s =>
-    (s.summary || '').toLowerCase().includes(lower) ||
-    (s.cwd || '').toLowerCase().includes(lower) ||
+    (s.name || '').toLowerCase().includes(lower) ||
     s.id.toLowerCase().includes(lower)
   );
 }

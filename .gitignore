@@ -4,6 +4,10 @@ dist/
 
 coverage/
 test-results/
+test-output.txt
 vendor/
 preferences.json
+preferences.json.bak
+preferences.test.json
+preferences.test.json.bak
 folders.json

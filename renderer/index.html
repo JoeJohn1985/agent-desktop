@@ -118,9 +118,23 @@
       </div>
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
-        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Kontext</button>
+        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Context</button>
         <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
         <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
+        <div class="session-actions__spacer"></div>
+        <div class="pinned-tools" id="pinnedTools"></div>
+        <div class="tools-popup-wrapper">
+          <button class="session-actions__btn" id="btnSessionTools" data-tooltip="Session Shell Tools verwalten">🔧 Tools</button>
+          <!-- Session Tools Popup -->
+          <div id="sessionToolsPopup" class="session-tools-popup" style="display:none;">
+            <div class="session-tools-popup__header">🔧 Session Shell Tools</div>
+            <div class="session-tools-popup__input-row">
+              <input type="text" class="session-tools-popup__input" id="sessionToolInput" placeholder="z.B. git push" />
+              <button class="session-tools-popup__add" id="btnAddSessionTool">+</button>
+            </div>
+            <div class="session-tools-popup__list" id="sessionToolsList"></div>
+          </div>
+        </div>
         <!-- Context Popup -->
         <div id="contextPopup" class="context-popup" style="display:none;">
           <div class="context-popup__body" id="contextPopupBody">
@@ -273,30 +287,11 @@
         <!-- Tab: Copilot Konfiguration -->
         <div class="settings__panel" data-panel="copilot">
           <div class="settings__group">
-            <div class="settings__row">
-              <label class="settings__label">Werkzeuge automatisch genehmigen</label>
-              <label class="settings__toggle">
-                <input type="checkbox" id="settAutoApprove" checked />
-                <span class="settings__toggle-slider"></span>
-              </label>
-            </div>
-            <div class="settings__hint">Alle Werkzeuge (edit, view, powershell, …) ohne Rückfrage erlauben.</div>
-          </div>
-          <div class="settings__group" id="settAllowedToolsGroup">
-            <label class="settings__label">Erlaubte Werkzeuge</label>
-            <div class="settings__hint">Diese Werkzeuge werden explizit erlaubt (z.B. <code>write</code>, <code>shell(git:*)</code>).</div>
-            <div class="settings__tool-list" id="settAllowedToolsList"></div>
-            <div class="settings__tool-add">
-              <input type="text" class="settings__tool-input" id="settToolInput" placeholder="z.B. write, shell(npm:*)" />
-              <button class="action-btn" id="btnAddTool" data-tooltip="Tool hinzufügen">+</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">Verbotene Werkzeuge</label>
-            <div class="settings__hint">Diese Werkzeuge werden blockiert (z.B. <code>shell(git push)</code>, <code>shell(pip:*)</code>).</div>
+            <label class="settings__label">Verbotene Shell Tools (global)</label>
+            <div class="settings__hint">Diese Shell-Befehle werden in allen Sessions blockiert (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
             <div class="settings__tool-list" id="settDeniedToolsList"></div>
             <div class="settings__tool-add">
-              <input type="text" class="settings__tool-input" id="settDeniedToolInput" placeholder="z.B. shell(git push)" />
+              <input type="text" class="settings__tool-input" id="settDeniedToolInput" placeholder="z.B. git push" />
               <button class="action-btn" id="btnAddDeniedTool" data-tooltip="Tool blockieren">+</button>
             </div>
           </div>
@@ -391,6 +386,14 @@
   <script src="../node_modules/dompurify/dist/purify.min.js"></script>
   <script src="../node_modules/xterm/lib/xterm.js"></script>
   <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+  <!-- Extracted modules (loaded before app.js, share global scope) -->
+  <script src="modules/utils.js"></script>
+  <script src="modules/dev-console.js"></script>
+  <script src="modules/todos.js"></script>
+  <script src="modules/images.js"></script>
+  <script src="modules/test-runner.js"></script>
+  <script src="modules/terminal.js"></script>
+  <script src="modules/session-tools.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

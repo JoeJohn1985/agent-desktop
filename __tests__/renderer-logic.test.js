@@ -12,8 +12,6 @@ const {
   toolDisplayName,
   formatToolArgs,
   filterSessions,
-  TOOL_ICONS,
-  TOOL_DISPLAY_NAMES,
   TOOL_ARGS_MAX_LENGTH,
 } = require('../src/renderer-logic');
 
@@ -243,9 +241,9 @@ describe('formatToolArgs', () => {
 // ── filterSessions ───────────────────────────────────────────
 describe('filterSessions', () => {
   const mockSessions = [
-    { id: 'abc-123', summary: 'Fix sidebar bug', cwd: '/home/user/project' },
-    { id: 'def-456', summary: 'Add video feature', cwd: '/home/user/app' },
-    { id: 'ghi-789', summary: null, cwd: '/tmp/test' },
+    { id: 'abc-123', name: 'Fix sidebar bug' },
+    { id: 'def-456', name: 'Add video feature' },
+    { id: 'ghi-789', name: null },
   ];
 
   it('returns all sessions when query is empty', () => {
@@ -254,16 +252,10 @@ describe('filterSessions', () => {
     expect(filterSessions(mockSessions, undefined)).toEqual(mockSessions);
   });
 
-  it('filters by summary', () => {
+  it('filters by name', () => {
     const result = filterSessions(mockSessions, 'sidebar');
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('abc-123');
-  });
-
-  it('filters by cwd', () => {
-    const result = filterSessions(mockSessions, '/tmp');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('ghi-789');
   });
 
   it('filters by id', () => {
@@ -278,13 +270,22 @@ describe('filterSessions', () => {
     expect(result[0].id).toBe('def-456');
   });
 
-  it('handles sessions with null summary', () => {
+  it('handles sessions with null name', () => {
     const result = filterSessions(mockSessions, 'xyz');
     expect(result).toHaveLength(0);
   });
 
   it('returns multiple matches', () => {
-    const result = filterSessions(mockSessions, 'user');
-    expect(result).toHaveLength(2);
+    const result = filterSessions(mockSessions, 'fix');
+    // Only 'Fix sidebar bug' matches
+    expect(result).toHaveLength(1);
+  });
+
+  it('matches session ID for resume-by-id use case', () => {
+    const result = filterSessions(mockSessions, '8c205927-6dbd-42aa');
+    expect(result).toHaveLength(0); // not in the list
+    const result2 = filterSessions(mockSessions, 'ghi-789');
+    expect(result2).toHaveLength(1);
+    expect(result2[0].id).toBe('ghi-789');
   });
 });

@@ -40,19 +40,7 @@ const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
 
-// ── UI Constants ─────────────────────────────────────────────
-const SCROLL_BOTTOM_THRESHOLD = 60;
-const NOTIFICATION_FREQUENCY_HZ = 880;
-const NOTIFICATION_DURATION_S = 0.3;
-const TOAST_DISPLAY_MS = 3000;
-const TOAST_FADE_MS = 300;
-const CHAT_INPUT_MAX_HEIGHT = 150;
-const TOOL_PREVIEW_MAX_LENGTH = 150;
-const TOOL_ARGS_MAX_LENGTH = 60;
-const TERMINAL_SCROLLBACK = 1000;
-const TERMINAL_FIT_DELAY_MS = 150;
-const RESIZE_FIT_DELAY_MS = 100;
-const SESSION_REFRESH_DELAY_MS = 400;
+// ── UI Constants → modules/utils.js ──────────────────────────
 
 // ── Global Safety-Net ────────────────────────────────────────
 window.addEventListener('unhandledrejection', (e) => {
@@ -126,6 +114,8 @@ function saveOpenTabs() {
   tabs.forEach((tab, id) => {
     if (tab.sessionId) {
       openTabs.push({ sessionId: tab.sessionId, label: tab.label });
+      // Persist denied tools in namedSessions
+      saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
     }
   });
   setPref('openTabs', openTabs);
@@ -136,10 +126,15 @@ async function restoreOpenTabs() {
   if (!openTabs.length) return false;
   try {
     for (const t of openTabs) {
-      const tabId = await createTab(t.label || '🤖 Copilot');
+      // Use namedSessions as primary label source
+      const customName = t.sessionId ? getSessionName(t.sessionId) : null;
+      const label = customName ? '🤖 ' + customName : (t.label || '🤖 Copilot');
+      const tabId = await createTab(label);
       const tab = tabs.get(tabId);
       if (tab) {
         tab.sessionId = t.sessionId;
+        // Load denied tools from namedSessions
+        tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
         // Start background terminal for restored tab
@@ -149,8 +144,7 @@ async function restoreOpenTabs() {
           });
         }
         // Display session context for restored tabs
-        const session = sessions.find(s => s.id === t.sessionId);
-        if (session) displaySessionContext(tab, session);
+        if (t.sessionId) displaySessionContext(tab, t.sessionId);
       }
     }
     return true;
@@ -168,8 +162,55 @@ function saveSetting(key, value) {
   setPref('settings', s);
 }
 
-function getAllowedTools() {
-  return getSettings().allowedTools || [];
+// ── Named Sessions (persistent, CLI-sicher) ──────────────────
+function getNamedSessions() {
+  return getPref('namedSessions', {});
+}
+
+function getSessionName(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return entry?.name || null;
+}
+
+function getSessionEntry(sessionId) {
+  return getNamedSessions()[sessionId] || null;
+}
+
+function setSessionName(sessionId, name) {
+  const all = getNamedSessions();
+  if (!all[sessionId]) {
+    all[sessionId] = { name, deniedTools: [], lastUsed: new Date().toISOString() };
+  } else {
+    all[sessionId].name = name;
+  }
+  setPref('namedSessions', all);
+}
+
+function removeSessionName(sessionId) {
+  const all = getNamedSessions();
+  delete all[sessionId];
+  setPref('namedSessions', all);
+}
+
+function touchSession(sessionId) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].lastUsed = new Date().toISOString();
+    setPref('namedSessions', all);
+  }
+}
+
+function getSessionDeniedTools(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return entry?.deniedTools || [];
+}
+
+function saveSessionDeniedTools(sessionId, tools) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].deniedTools = tools;
+    setPref('namedSessions', all);
+  }
 }
 
 function getDeniedTools() {
@@ -180,28 +221,11 @@ function getExtraDirs() {
   return getSettings().extraDirs || [];
 }
 
-function addAllowedTool(toolName) {
-  const tools = getAllowedTools();
-  if (!tools.includes(toolName)) {
-    tools.push(toolName);
-    saveSetting('allowedTools', tools);
-  }
-  renderAllowedTools();
-}
-
-function removeAllowedTool(idx) {
-  const tools = getAllowedTools();
-  tools.splice(idx, 1);
-  saveSetting('allowedTools', tools);
-  renderAllowedTools();
-}
-
-function renderAllowedTools() { renderTagList('settAllowedToolsList', getAllowedTools(), 'removeAllowedTool'); }
-
 function addDeniedTool(toolName) {
+  const wrapped = toolName.startsWith('shell(') ? toolName : `shell(${toolName})`;
   const tools = getDeniedTools();
-  if (!tools.includes(toolName)) {
-    tools.push(toolName);
+  if (!tools.includes(wrapped)) {
+    tools.push(wrapped);
     saveSetting('deniedTools', tools);
   }
   renderDeniedTools();
@@ -299,11 +323,16 @@ function buildContextCategoryHtml(categories) {
 }
 
 // ── Generic Tag List Rendering ───────────────────────────────
+function stripShellWrapper(name) {
+  const m = name.match(/^shell\((.+)\)$/);
+  return m ? m[1] : name;
+}
+
 function renderTagList(containerId, items, removeFnName) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = items.map((item, i) =>
-    `<span class="settings__tool-tag">${escapeHtml(item)} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
+    `<span class="settings__tool-tag">${escapeHtml(stripShellWrapper(item))} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
   ).join('');
 }
 
@@ -364,6 +393,7 @@ async function createTab(label) {
     sessionId: null,    // filled after first response
     isProcessing: false,
     allowedTools: new Set(),
+    sessionDeniedTools: [],  // per-session denied tools [{name, enabled}]
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
   });
 
@@ -418,8 +448,11 @@ function switchTab(tabId) {
     const color = contextColor(pct);
     ctxBtn.innerHTML = `📊 <span style="color:${color}">${pct}%</span>`;
   } else {
-    ctxBtn.textContent = '📊 Kontext';
+    ctxBtn.textContent = '📊 Context';
   }
+
+  // Refresh session tools list for this tab
+  renderSessionTools();
   
   document.getElementById('chatInput')?.focus();
 }
@@ -546,13 +579,8 @@ function startTabRename(tabId, tabEl, labelSpan) {
       labelSpan.textContent = tab.label;
 
       if (tab.sessionId) {
-        // Existing session — just rename
-        try {
-          await copilot.sessions.rename(tab.sessionId, newName);
-        } catch (e) {
-          console.warn('[sessions] Umbenennen fehlgeschlagen:', e.message);
-          showNotification('Session konnte nicht umbenannt werden', 'error');
-        }
+        // Existing session — save name in preferences (CLI-safe)
+        setSessionName(tab.sessionId, newName);
       } else {
         // No session yet — create one
         try {
@@ -560,6 +588,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
           if (newId) {
             tab.sessionId = newId;
             activeSessionId = newId;
+            setSessionName(newId, newName);
             saveOpenTabs();
           }
         } catch (e) {
@@ -633,11 +662,11 @@ function sendMessage() {
       }
     }
     if (activeSkillInfos.length > 0) {
-      const skillDescs = [...activeSkills].map(id => {
+      const skillNames = [...activeSkills].map(id => {
         const s = skills.find(sk => sk.id === id);
-        return s ? `- **${s.name}**: ${s.description}` : null;
+        return s ? `- ${s.name}` : null;
       }).filter(Boolean);
-      skillPrefix = `Verwende folgende Skills für diese Aufgabe:\n${skillDescs.join('\n')}\n\n`;
+      skillPrefix = `Verwende folgende Skills für diese Aufgabe:\n${skillNames.join('\n')}\n\n`;
     }
   }
 
@@ -659,17 +688,20 @@ function sendMessage() {
 
   // Send to Copilot via JSON API
   const settings = getSettings();
-  const autoApprove = settings.autoApproveTools !== false; // default: true
-  const mergedTools = new Set([...tab.allowedTools, ...getAllowedTools()]);
+  const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
+  const mergedDenied = [...new Set([...getDeniedTools(), ...sessionDenied])];
 
   copilot.chat.send(activeTabId, skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
-    autoApprove,
-    allowedTools: [...mergedTools],
-    deniedTools: getDeniedTools(),
+    autoApprove: true,
+    allowedTools: [],
+    deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
     addDirs: getExtraDirs(),
   });
+
+  // Update lastUsed for sorting
+  if (tab.sessionId) touchSession(tab.sessionId);
 
   // Clear input
   input.value = '';
@@ -1020,330 +1052,50 @@ function exportChat() {
   URL.revokeObjectURL(url);
 }
 
-// ── Todos ────────────────────────────────────────────────────
-let currentTodos = [];
+// ── Todos → modules/todos.js ─────────────────────────────────
 
-async function loadTodos(sessionId) {
-  if (!sessionId) {
-    currentTodos = [];
-    renderTodos();
-    document.getElementById('todosSection').style.display = 'none';
-    return;
-  }
-  document.getElementById('todosSection').style.display = '';
-  try {
-    currentTodos = await copilot.todos.list(sessionId) || [];
-  } catch (e) {
-    console.warn('[todos] Laden fehlgeschlagen:', e.message);
-    currentTodos = [];
-  }
-  renderTodos();
-}
-
-function renderTodos() {
-  const container = document.getElementById('todoList');
-  const openCount = currentTodos.filter(t => t.status === 'open').length;
-  const totalCount = currentTodos.length;
-  document.getElementById('todoCount').textContent =
-    totalCount > 0 ? `${openCount}/${totalCount}` : '0';
-
-  if (currentTodos.length === 0) {
-    container.innerHTML = '<p style="padding:8px 10px;color:var(--text-muted);font-size:12px;">Keine Todos vorhanden</p>';
-    return;
-  }
-
-  // Open items first, then done
-  const sorted = [...currentTodos].sort((a, b) => {
-    if (a.status === 'open' && b.status !== 'open') return -1;
-    if (a.status !== 'open' && b.status === 'open') return 1;
-    return 0;
-  });
-
-  container.innerHTML = sorted.map(t => {
-    const checked = t.status === 'done' ? 'checked' : '';
-    const doneClass = t.status === 'done' ? 'todo-item--done' : '';
-    return `
-      <div class="todo-item ${doneClass}" data-id="${t.id}" draggable="true">
-        <span class="todo-item__grip">⠿</span>
-        <label class="todo-item__check">
-          <input type="checkbox" ${checked} onchange="toggleTodo('${escapeAttr(t.id)}')" />
-        </label>
-        <span class="todo-item__text" data-tooltip="${escapeHtml(t.text)}">${escapeHtml(t.text)}</span>
-        <button class="todo-item__delete" onclick="deleteTodo('${escapeAttr(t.id)}')" data-tooltip="Löschen">✕</button>
-      </div>
-    `;
-  }).join('');
-
-  // Attach drag-and-drop handlers
-  initTodoDragDrop(container);
-}
-
-function initTodoDragDrop(container) {
-  let dragEl = null;
-
-  container.querySelectorAll('.todo-item[draggable]').forEach(el => {
-    el.addEventListener('dragstart', (e) => {
-      dragEl = el;
-      el.classList.add('todo-item--dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-
-    el.addEventListener('dragend', () => {
-      if (dragEl) dragEl.classList.remove('todo-item--dragging');
-      dragEl = null;
-      container.querySelectorAll('.todo-item--drag-over').forEach(x => x.classList.remove('todo-item--drag-over'));
-      // Persist new order
-      const orderedIds = [...container.querySelectorAll('.todo-item[data-id]')].map(x => x.dataset.id);
-      // Update local array to match new order
-      const byId = new Map(currentTodos.map(t => [t.id, t]));
-      currentTodos = orderedIds.map(id => byId.get(id)).filter(Boolean);
-      if (activeSessionId) {
-        copilot.todos.reorder(activeSessionId, orderedIds);
-      }
-    });
-
-    el.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (!dragEl || el === dragEl) return;
-      const rect = el.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      if (e.clientY < midY) {
-        container.insertBefore(dragEl, el);
-      } else {
-        container.insertBefore(dragEl, el.nextSibling);
-      }
-    });
-
-    el.addEventListener('dragenter', (e) => {
-      e.preventDefault();
-      if (el !== dragEl) el.classList.add('todo-item--drag-over');
-    });
-
-    el.addEventListener('dragleave', () => {
-      el.classList.remove('todo-item--drag-over');
-    });
-  });
-}
-
-async function addTodo() {
-  const input = document.getElementById('todoInput');
-  const text = input.value.trim();
-  if (!text || !activeSessionId) return;
-
-  try {
-    currentTodos = await copilot.todos.add(activeSessionId, { text }) || currentTodos;
-  } catch (e) {
-    console.warn('[todos] Hinzufügen fehlgeschlagen:', e.message);
-    showNotification('Todo konnte nicht hinzugefügt werden', 'error');
-    return;
-  }
-  input.value = '';
-  renderTodos();
-}
-
-async function toggleTodo(todoId) {
-  const todo = currentTodos.find(t => t.id === todoId);
-  if (!todo || !activeSessionId) return;
-  const newStatus = todo.status === 'done' ? 'open' : 'done';
-  try {
-    currentTodos = await copilot.todos.update(activeSessionId, todoId, { status: newStatus }) || currentTodos;
-  } catch (e) {
-    console.warn('[todos] Aktualisieren fehlgeschlagen:', e.message);
-    showNotification('Todo konnte nicht aktualisiert werden', 'error');
-    return;
-  }
-  renderTodos();
-}
-
-async function deleteTodo(todoId) {
-  if (!activeSessionId) return;
-  try {
-    currentTodos = await copilot.todos.delete(activeSessionId, todoId) || currentTodos;
-  } catch (e) {
-    console.warn('[todos] Löschen fehlgeschlagen:', e.message);
-    showNotification('Todo konnte nicht gelöscht werden', 'error');
-    return;
-  }
-  renderTodos();
-}
-
-// ── Image Gallery ────────────────────────────────────────────
-let currentImages = [];
-
-async function loadImages() {
-  try {
-    currentImages = await copilot.images.list() || [];
-  } catch (e) {
-    console.warn('[images] Laden fehlgeschlagen:', e.message);
-    currentImages = [];
-  }
-  document.getElementById('imageCount').textContent = currentImages.length;
-  renderImages();
-}
-
-function renderImages() {
-  const container = document.getElementById('imageGallery');
-  if (currentImages.length === 0) {
-    container.innerHTML = '<div class="image-gallery__empty">Keine Bilder/Videos vorhanden</div>';
-    return;
-  }
-
-  container.innerHTML = currentImages.map((img, i) => {
-    if (img.type === 'video') {
-      return `
-      <div class="image-gallery__thumb image-gallery__thumb--video" data-tooltip="${escapeHtml(img.name)}" data-index="${i}">
-        <div class="image-gallery__video-icon">🎬</div>
-        <span class="image-gallery__video-name">${escapeHtml(img.name.length > 15 ? img.name.slice(0, 12) + '…' : img.name)}</span>
-        <button class="image-gallery__thumb-extract" data-index="${i}" data-tooltip="Frames extrahieren">🖼️</button>
-        <button class="image-gallery__thumb-delete" data-index="${i}" data-tooltip="Löschen">✕</button>
-      </div>`;
-    }
-    return `
-    <div class="image-gallery__thumb" data-tooltip="${escapeHtml(img.name)}" data-index="${i}">
-      <img src="file:///${img.path.replace(/\\/g, '/')}" alt="${escapeHtml(img.name)}" loading="lazy" />
-      <button class="image-gallery__thumb-delete" data-index="${i}" data-tooltip="Löschen">✕</button>
-    </div>`;
-  }).join('');
-
-  // Event delegation
-  container.querySelectorAll('.image-gallery__thumb').forEach(el => {
-    el.addEventListener('click', (e) => {
-      if (e.target.classList.contains('image-gallery__thumb-delete')) return;
-      if (e.target.classList.contains('image-gallery__thumb-extract')) return;
-      const img = currentImages[el.dataset.index];
-      if (!img) return;
-      if (img.type === 'video') {
-        extractVideoFrames(img);
-      } else {
-        openLightbox(img.path, img.name);
-      }
-    });
-  });
-  container.querySelectorAll('.image-gallery__thumb-extract').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const img = currentImages[btn.dataset.index];
-      if (img) extractVideoFrames(img);
-    });
-  });
-  container.querySelectorAll('.image-gallery__thumb-delete').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const img = currentImages[btn.dataset.index];
-      if (img) deleteImage(img.path);
-    });
-  });
-}
-
-async function extractVideoFrames(video) {
-  showNotification('🎬 Frames werden extrahiert…', 'info');
-  try {
-    const result = await copilot.videos.extractFrames(video.path, { interval: 1, maxFrames: 30 });
-    if (!result.success) {
-      showNotification(`❌ ${result.error}`, 'error');
-      return;
-    }
-    const cached = result.cached ? ' (Cache)' : '';
-    showNotification(`✅ ${result.count} Frames extrahiert${cached} (${result.duration || '?'}s Video)`, 'success');
-    openFrameViewer(result.frames, video.name);
-  } catch (e) {
-    showNotification(`❌ Fehler: ${e.message}`, 'error');
-  }
-}
-
-function openFrameViewer(frames, videoName) {
-  const lb = document.getElementById('imageLightbox');
-  const img = document.getElementById('lightboxImg');
-  const info = document.getElementById('lightboxInfo');
-
-  let currentFrame = 0;
-
-  function showFrame(idx) {
-    currentFrame = Math.max(0, Math.min(idx, frames.length - 1));
-    img.src = 'file:///' + frames[currentFrame].replace(/\\/g, '/');
-    info.textContent = `${videoName} — Frame ${currentFrame + 1}/${frames.length}`;
-  }
-
-  showFrame(0);
-  lb.classList.add('image-lightbox--visible');
-
-  // Keyboard navigation for frames
-  function onKey(e) {
-    if (!lb.classList.contains('image-lightbox--visible')) {
-      document.removeEventListener('keydown', onKey);
-      return;
-    }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { showFrame(currentFrame + 1); e.preventDefault(); }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { showFrame(currentFrame - 1); e.preventDefault(); }
-    else if (e.key === 'Home') { showFrame(0); e.preventDefault(); }
-    else if (e.key === 'End') { showFrame(frames.length - 1); e.preventDefault(); }
-    else if (e.key === 'Escape') {
-      lb.classList.remove('image-lightbox--visible');
-      document.removeEventListener('keydown', onKey);
-    }
-  }
-  document.addEventListener('keydown', onKey);
-}
-
-function openLightbox(filePath, name) {
-  const lb = document.getElementById('imageLightbox');
-  const img = document.getElementById('lightboxImg');
-  const info = document.getElementById('lightboxInfo');
-  img.src = 'file:///' + filePath.replace(/\\/g, '/');
-  info.textContent = name;
-  lb.classList.add('image-lightbox--visible');
-}
-
-function closeLightbox(e) {
-  if (e && e.target !== document.getElementById('imageLightbox') && !e.target.classList.contains('image-lightbox__close')) return;
-  document.getElementById('imageLightbox').classList.remove('image-lightbox--visible');
-}
-
-async function deleteImage(filePath) {
-  try {
-    await copilot.images.delete(filePath);
-  } catch (e) {
-    console.warn('[images] Löschen fehlgeschlagen:', e.message);
-    showNotification('Bild konnte nicht gelöscht werden', 'error');
-    return;
-  }
-  await loadImages();
-}
-
-function openImagesFolder() {
-  copilot.images.openFolder();
-}
+// ── Image Gallery → modules/images.js ────────────────────────
 
 // ── Sessions ─────────────────────────────────────────────────
 
 async function loadSessions() {
-  let allSessions = [];
-  try {
-    allSessions = await copilot.sessions.list() || [];
-  } catch (e) {
-    console.warn('[sessions] Laden fehlgeschlagen:', e.message);
-    showNotification('Sessions konnten nicht geladen werden', 'error');
-  }
-  sessions = allSessions.filter(s => s.userNamed);
+  const all = getNamedSessions();
+  sessions = Object.entries(all)
+    .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '' }))
+    .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
   document.getElementById('sessionCount').textContent = sessions.length;
-  renderSessions(sessions);
+  renderSessions(filterSessions());
 }
 
 function renderSessions(list) {
   const container = document.getElementById('sessionList');
+  const query = document.getElementById('sessionSearch').value.trim();
+
   if (list.length === 0) {
-    container.innerHTML = '<p style="padding:10px;color:var(--text-muted);font-size:12px;">Keine Sessions gefunden</p>';
+    // If query looks like a session ID, offer to resume it directly
+    if (query && isSessionIdLike(query)) {
+      container.innerHTML = `
+        <div class="session-card session-card--id-resume">
+          <div class="session-card__row">
+            <div class="session-card__main" onclick="resumeSessionById('${escapeAttr(query)}')">
+              <div class="session-card__title" style="font-size:11px;color:var(--text-muted);">⏎ Session per ID öffnen:</div>
+              <div class="session-card__id" style="font-size:10px;font-family:monospace;color:var(--accent);word-break:break-all;">${escapeHtml(query)}</div>
+            </div>
+          </div>
+        </div>`;
+    } else {
+      container.innerHTML = '<p style="padding:10px;color:var(--text-muted);font-size:12px;">Keine Sessions gefunden</p>';
+    }
     return;
   }
 
   const openSessionIds = new Set([...tabs.values()].map(t => t.sessionId).filter(Boolean));
-  container.innerHTML = list.map(s => {
+  let html = list.map(s => {
     const isLive = openSessionIds.has(s.id);
-    const title = s.name || s.summary || truncatePath(s.cwd) || s.id.substring(0, 8);
+    const title = s.name;
 
     return `
-      <div class="session-card ${isLive ? 'session-card--live' : ''}" data-tooltip="${s.cwd}">
+      <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
             <div class="session-card__title">${escapeHtml(title)}</div>
@@ -1353,17 +1105,48 @@ function renderSessions(list) {
       </div>
     `;
   }).join('');
+
+  // If query looks like an ID and isn't already in the list, also offer direct resume
+  if (query && isSessionIdLike(query) && !list.find(s => s.id === query)) {
+    html += `
+      <div class="session-card session-card--id-resume" style="border-top:1px dashed var(--border);margin-top:4px;padding-top:4px;">
+        <div class="session-card__row">
+          <div class="session-card__main" onclick="resumeSessionById('${escapeAttr(query)}')">
+            <div class="session-card__title" style="font-size:11px;color:var(--text-muted);">⏎ Andere Session per ID öffnen:</div>
+            <div class="session-card__id" style="font-size:10px;font-family:monospace;color:var(--accent);word-break:break-all;">${escapeHtml(query)}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 async function resumeSession(sessionId) {
-  const session = sessions.find(s => s.id === sessionId);
-  const label = '🤖 ' + (session?.name || session?.summary || sessionId.substring(0, 8));
+  // Check if tab with this session is already open → just switch to it
+  for (const [tabId, tab] of tabs) {
+    if (tab.sessionId === sessionId) {
+      switchTab(tabId);
+      renderTabs();
+      return;
+    }
+  }
+
+  // Name kommt aus namedSessions (einzige Quelle)
+  const customName = getSessionName(sessionId);
+  const label = '🤖 ' + (customName || sessionId.substring(0, 8));
+
   const tabId = await createTab(label);
   const tab = tabs.get(tabId);
   if (!tab) return;
 
+  // Restore session denied tools from namedSessions
+  tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
+
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // Update lastUsed timestamp
+  touchSession(sessionId);
   // Start background terminal for instant /context access
   copilot.terminal.spawnBackground(tabId, sessionId).catch(e => {
     console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
@@ -1375,32 +1158,29 @@ async function resumeSession(sessionId) {
   renderSessions(filterSessions());
 
   // Load and display session context (checkpoints, plan) as history overview
-  await displaySessionContext(tab, session);
+  await displaySessionContext(tab, sessionId);
 }
 
-async function displaySessionContext(tab, session) {
-  if (!session) return;
+async function resumeSessionById(sessionId) {
+  // Resume a session by raw ID — add to namedSessions with short ID as placeholder name
+  const placeholderName = sessionId.substring(0, 12);
+  setSessionName(sessionId, placeholderName);
+  await loadSessions();
+  await resumeSession(sessionId);
+  // Clear search field
+  document.getElementById('sessionSearch').value = '';
+  renderSessions(filterSessions());
+}
 
-  const sessionId = session.id;
+async function displaySessionContext(tab, sessionId) {
+  if (!sessionId) return;
+
   const contextEl = document.createElement('div');
   contextEl.className = 'stream-session-context';
 
   // Header
-  const title = session.name || session.summary || sessionId.substring(0, 8);
+  const title = getSessionName(sessionId) || sessionId.substring(0, 8);
   let html = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
-
-  // Metadata
-  const meta = [];
-  if (session.updatedAt) {
-    const d = new Date(session.updatedAt);
-    meta.push(`Letzte Aktivität: ${d.toLocaleString('de-DE')}`);
-  }
-  if (session.checkpointCount > 0) {
-    meta.push(`${session.checkpointCount} Checkpoint(s)`);
-  }
-  if (meta.length) {
-    html += `<div class="stream-session-context__meta">${escapeHtml(meta.join(' · '))}</div>`;
-  }
 
   // Load checkpoints
   try {
@@ -1451,6 +1231,7 @@ function confirmDeleteSession(sessionId, title) {
 async function executeDeleteSession() {
   if (!pendingDeleteId) return;
   await copilot.sessions.delete(pendingDeleteId);
+  removeSessionName(pendingDeleteId);
   pendingDeleteId = null;
   document.getElementById('deleteOverlay').classList.remove('overlay--visible');
   await loadSessions();
@@ -1520,13 +1301,18 @@ function initResize() {
 
 // ── Search & Filter ──────────────────────────────────────────
 function filterSessions() {
-  const query = document.getElementById('sessionSearch').value.toLowerCase();
-  if (!query) return sessions;
+  const query = document.getElementById('sessionSearch').value.trim();
+  const lower = query.toLowerCase();
+  if (!lower) return sessions;
   return sessions.filter(s =>
-    (s.summary || '').toLowerCase().includes(query) ||
-    (s.cwd || '').toLowerCase().includes(query) ||
-    s.id.toLowerCase().includes(query)
+    (s.name || '').toLowerCase().includes(lower) ||
+    s.id.toLowerCase().includes(lower)
   );
+}
+
+function isSessionIdLike(str) {
+  // Session IDs are typically UUIDs or long hex/alphanum strings (8+ chars)
+  return str.length >= 8 && /^[a-z0-9_-]+$/i.test(str);
 }
 
 // ── Section Toggle ───────────────────────────────────────────
@@ -1558,473 +1344,17 @@ function formatDate(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function truncatePath(p) {
-  if (!p) return '';
-  const parts = p.replace(/\\/g, '/').split('/');
-  return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : p;
-}
+// truncatePath, escapeHtml, escapeAttr → modules/utils.js
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
+// ── Test Runner → modules/test-runner.js ─────────────────────
 
-function escapeAttr(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// ── Test Runner ──────────────────────────────────────────────
-function openTestRunner() {
-  let backdrop = document.getElementById('testRunnerBackdrop');
-  if (!backdrop) {
-    backdrop = document.createElement('div');
-    backdrop.id = 'testRunnerBackdrop';
-    backdrop.className = 'test-runner-backdrop';
-    backdrop.addEventListener('click', closeTestRunner);
-    document.body.appendChild(backdrop);
-  }
-  backdrop.style.display = 'block';
-  document.getElementById('testRunnerPopup').style.display = 'flex';
-}
-
-function closeTestRunner() {
-  document.getElementById('testRunnerPopup').style.display = 'none';
-  const backdrop = document.getElementById('testRunnerBackdrop');
-  if (backdrop) backdrop.style.display = 'none';
-}
-
-async function runTests() {
-  const body = document.getElementById('testRunnerBody');
-  body.innerHTML = '<div class="test-runner__loading">Tests werden ausgeführt…</div>';
-
-  try {
-    const result = await copilot.tests.run();
-    renderTestResults(result, body);
-  } catch (e) {
-    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function runCoverage() {
-  const body = document.getElementById('testRunnerBody');
-  body.innerHTML = '<div class="test-runner__loading">Coverage wird berechnet…</div>';
-
-  try {
-    const result = await copilot.tests.coverage();
-    renderCoverageResults(result, body);
-  } catch (e) {
-    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function runE2E() {
-  const body = document.getElementById('testRunnerBody');
-  body.innerHTML = '<div class="test-runner__loading">🎭 Playwright E2E Tests werden ausgeführt…</div>';
-
-  try {
-    const result = await copilot.tests.e2e();
-    renderTestResults(result, body);
-  } catch (e) {
-    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function renderTestResults(result, body) {
-  if (result.error) {
-    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">❌ ${escapeHtml(result.error)}</div>`;
-    return;
-  }
-
-  const icon = result.success ? '✅' : '❌';
-  const durationSec = (result.duration / 1000).toFixed(1);
-
-  let html = `<div class="test-runner__summary">
-    <span class="test-runner__stat test-runner__stat--total">${icon} ${result.numTotal} Tests</span>
-    <span class="test-runner__stat test-runner__stat--pass">✅ ${result.numPassed} bestanden</span>
-    <span class="test-runner__stat test-runner__stat--fail">❌ ${result.numFailed} fehlgeschlagen</span>
-    <span class="test-runner__stat test-runner__stat--time">⏱️ ${durationSec}s</span>
-  </div>`;
-
-  for (const suite of (result.testResults || [])) {
-    const suiteIcon = suite.status === 'passed' ? '✅' : '❌';
-    const suiteDuration = suite.duration ? `${suite.duration}ms` : '';
-
-    html += `<div class="test-runner__suite">
-      <div class="test-runner__suite-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
-        <span>${suiteIcon} ${escapeHtml(suite.name)}</span>
-        <span class="test-runner__test-duration">${suiteDuration}</span>
-      </div>
-      <ul class="test-runner__suite-tests">`;
-
-    for (const test of (suite.tests || [])) {
-      const testIcon = test.status === 'passed' ? '✅' : test.status === 'failed' ? '❌' : '⏭️';
-      const testClass = test.status === 'passed' ? 'test-runner__test--passed' : test.status === 'failed' ? 'test-runner__test--failed' : '';
-      const testDur = test.duration != null ? `${test.duration}ms` : '';
-
-      html += `<li class="test-runner__test ${testClass}">
-        <span>${testIcon} ${escapeHtml(test.title)}</span>
-        <span class="test-runner__test-duration">${testDur}</span>
-      </li>`;
-
-      if (test.failureMessages && test.failureMessages.length) {
-        html += `<li class="test-runner__test" style="color:#f38ba8;padding-left:36px;font-family:monospace;font-size:10px;white-space:pre-wrap;">${escapeHtml(test.failureMessages.join('\n'))}</li>`;
-      }
-    }
-
-    html += `</ul></div>`;
-  }
-
-  body.innerHTML = html;
-}
-
-function renderCoverageResults(result, body) {
-  if (result.error) {
-    body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">❌ ${escapeHtml(result.error)}</div>`;
-    return;
-  }
-
-  let html = `<div class="test-runner__summary">
-    <span class="test-runner__stat test-runner__stat--total">📊 Coverage</span>
-    <span class="test-runner__stat test-runner__stat--pass">✅ ${result.numPassed}/${result.numTotal} Tests</span>
-  </div>`;
-
-  if (result.files && result.files.length) {
-    html += '<div class="test-runner__suite"><div class="test-runner__suite-header" style="cursor:default;"><span>Datei</span><span>Statements</span></div><ul class="test-runner__suite-tests">';
-    for (const file of result.files) {
-      const color = file.stmts > 80 ? '#a6e3a1' : file.stmts > 50 ? '#fab387' : '#f38ba8';
-      html += `<li class="test-runner__test"><span>${escapeHtml(file.file)}</span><span style="color:${color};font-weight:600;">${file.stmts}%</span></li>`;
-    }
-    html += '</ul></div>';
-  }
-
-  body.innerHTML = html;
-}
-
-// ── Developer Console ──────────────────────────────────────
-const devConsoleLogs = [];
-const DEV_CONSOLE_MAX_ENTRIES = 1000;
-let devConsoleFilter = 'all';
-
-function addDevConsoleEntry(entry) {
-  devConsoleLogs.push(entry);
-  if (devConsoleLogs.length > DEV_CONSOLE_MAX_ENTRIES) devConsoleLogs.shift();
-
-  const body = document.getElementById('devConsoleBody');
-  const panel = document.getElementById('devConsolePanel');
-  if (!body || !panel || panel.style.display === 'none') return;
-  if (devConsoleFilter !== 'all' && entry.level !== devConsoleFilter) return;
-
-  appendDevConsoleRow(body, entry);
-}
-
-function appendDevConsoleRow(body, entry) {
-  const row = document.createElement('div');
-  row.className = `dev-console__entry dev-console__entry--${entry.level}`;
-  const time = new Date(entry.timestamp).toLocaleTimeString('de-DE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-  row.innerHTML = `<span class="dev-console__time">${time}</span><span class="dev-console__level dev-console__level--${entry.level}">${entry.level}</span><span class="dev-console__msg">${escapeHtml(entry.message)}</span>`;
-  body.appendChild(row);
-  body.scrollTop = body.scrollHeight;
-}
-
-function renderDevConsole() {
-  const body = document.getElementById('devConsoleBody');
-  if (!body) return;
-  body.innerHTML = '';
-  const filtered = devConsoleFilter === 'all' ? devConsoleLogs : devConsoleLogs.filter(e => e.level === devConsoleFilter);
-  filtered.forEach(entry => appendDevConsoleRow(body, entry));
-}
-
-function toggleDevConsole() {
-  const panel = document.getElementById('devConsolePanel');
-  if (!panel) return;
-  const visible = panel.style.display !== 'none';
-  panel.style.display = visible ? 'none' : '';
-  if (!visible) renderDevConsole();
-}
-
-function updateStatus(text, color) {
-  const badge = document.getElementById('statusBadge');
-  if (!badge) return;
-  badge.textContent = text;
-  badge.style.color = color || 'var(--green)';
-}
-
-function updateStatusbar(id, text) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = text;
-}
+// ── Developer Console → modules/dev-console.js ──────────────
 
 // ── Context Widget (opens terminal with /context) ────────────
 
-function toolIcon(name) {
-  const icons = {
-    view: '📄', edit: '✏️', create: '📝', grep: '🔍', glob: '📂',
-    powershell: '⚡', task: '🤖', ask_user: '❓', sql: '🗄️',
-    web_search: '🌐', web_fetch: '🌐',
-  };
-  return icons[name] || null;
-}
+// toolIcon, toolDisplayName, formatToolArgs → modules/utils.js
 
-function toolDisplayName(name) {
-  const names = {
-    grep: 'search', view: 'read', glob: 'find',
-    edit: 'edit', create: 'create', powershell: 'run',
-    task: 'task', ask_user: 'ask', sql: 'query',
-    web_search: 'web search', web_fetch: 'web fetch',
-  };
-  return names[name] || name;
-}
-
-function formatToolArgs(name, args) {
-  if (!args) return '';
-  if (args.path) return truncatePath(args.path);
-  if (args.pattern) return args.pattern;
-  if (args.command) return args.command.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.command.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
-  if (args.query) return args.query.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.query.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
-  if (args.prompt) return args.prompt.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.prompt.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
-  return '';
-}
-
-// ── Terminal Panel ────────────────────────────────────────────
-async function openTerminal(tabId, sessionId, slashCommand) {
-  const tab = tabs.get(tabId);
-  if (!tab) return;
-
-  // Check if node-pty is available
-  const available = await copilot.terminal.available();
-  if (!available) {
-    const errEl = document.createElement('div');
-    errEl.className = 'stream-error';
-    errEl.textContent = '⚠️ Terminal nicht verfügbar. Bitte "npm install" und "npx electron-rebuild" im copilot-desktop Ordner ausführen.';
-    tab.streamEl.insertBefore(errEl, tab.statusEl);
-    return;
-  }
-
-  // If this tab already has a terminal, just show it and send slash command
-  if (tab.terminal && tab.terminal.alive) {
-    const panel = document.getElementById('terminalPanel');
-    panel.classList.add('terminal-panel--open');
-    tab.terminalVisible = true;
-    tab.terminal.bodyEl.style.display = '';
-    requestAnimationFrame(() => tab.terminal.fitAddon.fit());
-    tab.terminal.instance.focus();
-    // Send slash command if provided
-    if (slashCommand) {
-      copilot.terminal.sendCommand(tabId, slashCommand);
-    }
-    return;
-  }
-
-  // Close previous terminal on this tab if dead
-  if (tab.terminal) {
-    if (tab.terminal.instance) tab.terminal.instance.dispose();
-    if (tab.terminal.bodyEl) tab.terminal.bodyEl.remove();
-    tab.terminal = null;
-  }
-
-  const panel = document.getElementById('terminalPanel');
-  const container = document.getElementById('terminalBody');
-
-  // Create a per-tab body element inside the shared terminal body container
-  const bodyEl = document.createElement('div');
-  bodyEl.className = 'terminal-tab-body';
-  bodyEl.style.width = '100%';
-  bodyEl.style.height = '100%';
-  container.appendChild(bodyEl);
-
-  // Hide other tabs' terminal bodies
-  tabs.forEach((t, id) => {
-    if (id !== tabId && t.terminal && t.terminal.bodyEl) {
-      t.terminal.bodyEl.style.display = 'none';
-    }
-  });
-
-  // Create xterm instance
-  const instance = new Terminal({
-    fontSize: 13,
-    fontFamily: "'Cascadia Mono', 'Consolas', monospace",
-    theme: {
-      background: '#1e1e2e',
-      foreground: '#cdd6f4',
-      cursor: '#f5e0dc',
-      cursorAccent: '#1e1e2e',
-      selectionBackground: 'rgba(137, 180, 250, 0.3)',
-      black: '#45475a',
-      red: '#f38ba8',
-      green: '#a6e3a1',
-      yellow: '#f9e2af',
-      blue: '#89b4fa',
-      magenta: '#f5c2e7',
-      cyan: '#94e2d5',
-      white: '#bac2de',
-      brightBlack: '#585b70',
-      brightRed: '#f38ba8',
-      brightGreen: '#a6e3a1',
-      brightYellow: '#f9e2af',
-      brightBlue: '#89b4fa',
-      brightMagenta: '#f5c2e7',
-      brightCyan: '#94e2d5',
-      brightWhite: '#a6adc8',
-    },
-    cursorBlink: true,
-    scrollback: TERMINAL_SCROLLBACK,
-  });
-
-  const fitAddon = new FitAddon.FitAddon();
-  instance.loadAddon(fitAddon);
-
-  // Store terminal state on the tab
-  tab.terminal = { instance, fitAddon, bodyEl, alive: true };
-  tab.terminalVisible = true;
-
-  // Show panel
-  panel.classList.add('terminal-panel--open');
-
-  // Mount xterm
-  instance.open(bodyEl);
-  requestAnimationFrame(() => {
-    fitAddon.fit();
-    setTimeout(() => fitAddon.fit(), TERMINAL_FIT_DELAY_MS);
-    setTimeout(() => fitAddon.fit(), 500);
-  });
-
-  // Wire up input → PTY
-  instance.onData((data) => {
-    copilot.terminal.input(tabId, data);
-  });
-
-  // Sync PTY size when xterm resizes
-  instance.onResize(({ cols, rows }) => {
-    copilot.terminal.resize(tabId, cols, rows);
-  });
-
-  // Spawn PTY (reuses background PTY if available)
-  const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand);
-  if (!result.success) {
-    instance.writeln(`\r\n\x1b[31m⚠️ ${result.error}\x1b[0m`);
-  }
-
-  // If reusing background PTY, replay buffered output
-  if (result.reused) {
-    const buffer = await copilot.terminal.getBuffer(tabId);
-    if (buffer && buffer.length > 0) {
-      for (const chunk of buffer) {
-        instance.write(chunk);
-      }
-    }
-  }
-
-  // Re-fit and sync terminal size after spawn
-  setTimeout(() => {
-    if (tab.terminal && tab.terminal.fitAddon) {
-      tab.terminal.fitAddon.fit();
-      copilot.terminal.resize(tabId, instance.cols, instance.rows);
-    }
-  }, 200);
-
-  instance.focus();
-
-  // Show in chat stream
-  const inputEl = document.createElement('div');
-  inputEl.className = 'stream-input';
-  inputEl.textContent = slashCommand ? `❯ ${slashCommand} (Terminal)` : '❯ Terminal geöffnet';
-  tab.streamEl.insertBefore(inputEl, tab.statusEl);
-}
-
-function closeTerminalForTab(tabId) {
-  const tab = tabs.get(tabId);
-  if (!tab || !tab.terminal) return;
-
-  copilot.terminal.close(tabId);
-
-  if (tab.terminal.instance) {
-    tab.terminal.instance.dispose();
-  }
-  if (tab.terminal.bodyEl) {
-    tab.terminal.bodyEl.remove();
-  }
-  tab.terminal = null;
-
-  // Hide panel if active tab has no terminal
-  if (tabId === activeTabId) {
-    document.getElementById('terminalPanel').classList.remove('terminal-panel--open');
-  }
-
-  document.getElementById('chatInput')?.focus();
-}
-
-function minimizeTerminal() {
-  document.getElementById('terminalPanel').classList.remove('terminal-panel--open');
-  const tab = tabs.get(activeTabId);
-  if (tab) tab.terminalVisible = false;
-  document.getElementById('chatInput')?.focus();
-}
-
-function closeTerminal() {
-  // Close terminal of the active tab
-  if (activeTabId != null) {
-    closeTerminalForTab(activeTabId);
-  }
-}
-
-function initTerminalIPC() {
-  // Receive data from PTY → route to correct tab's terminal
-  copilot.terminal.onData((tabId, data) => {
-    const tab = tabs.get(tabId);
-    if (tab && tab.terminal && tab.terminal.instance) {
-      tab.terminal.instance.write(data);
-    }
-  });
-
-  // Handle PTY exit
-  copilot.terminal.onExit((tabId, code) => {
-    const tab = tabs.get(tabId);
-    if (tab && tab.terminal && tab.terminal.instance) {
-      tab.terminal.instance.writeln(`\r\n\x1b[90m[Terminal beendet mit Code ${code}]\x1b[0m`);
-      tab.terminal.alive = false;
-      // Auto-close after a short delay
-      setTimeout(() => {
-        if (tab.terminal && !tab.terminal.alive) {
-          closeTerminalForTab(tabId);
-        }
-      }, 2000);
-    }
-  });
-}
-
-function initTerminalResize() {
-  const handle = document.getElementById('terminalResize');
-  const panel = document.getElementById('terminalPanel');
-  let isResizing = false;
-
-  handle.addEventListener('mousedown', (e) => {
-    isResizing = true;
-    handle.classList.add('dragging');
-    document.body.style.cursor = 'ns-resize';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!isResizing) return;
-    const container = panel.parentElement;
-    const containerRect = container.getBoundingClientRect();
-    const newHeight = containerRect.bottom - e.clientY;
-    const clamped = Math.min(Math.max(newHeight, 120), containerRect.height * 0.7);
-    panel.style.height = clamped + 'px';
-    const tab = tabs.get(activeTabId);
-    if (tab && tab.terminal && tab.terminal.fitAddon) tab.terminal.fitAddon.fit();
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!isResizing) return;
-    isResizing = false;
-    handle.classList.remove('dragging');
-    document.body.style.cursor = '';
-    const tab = tabs.get(activeTabId);
-    if (tab && tab.terminal && tab.terminal.fitAddon) tab.terminal.fitAddon.fit();
-  });
-}
+// ── Terminal Panel → modules/terminal.js ─────────────────────
 
 // ── Init ─────────────────────────────────────────────────────
 
@@ -2331,7 +1661,7 @@ function initSlashButtons() {
     if (result.success) {
       showNotification('Chat-Kontext geleert ✓', 'success');
       const ctxBtn = document.getElementById('btnSlashContext');
-      ctxBtn.textContent = '📊 Kontext';
+      ctxBtn.textContent = '📊 Context';
       const tab2 = tabs.get(activeTabId);
       if (tab2) tab2.contextPercent = null;
     } else {
@@ -2383,6 +1713,8 @@ function initSlashButtons() {
   });
 }
 
+// ── Session Tools Popup → modules/session-tools.js ───────────
+
 function initSettings() {
   const settingsOverlay = document.getElementById('settingsOverlay');
   const settTheme = document.getElementById('settTheme');
@@ -2390,7 +1722,6 @@ function initSettings() {
   const settFontSizeVal = document.getElementById('settFontSizeVal');
   const settSound = document.getElementById('settSound');
   const settDevMode = document.getElementById('settDevMode');
-  const settAutoApprove = document.getElementById('settAutoApprove');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
 
   document.querySelectorAll('.settings__tab').forEach(tab => {
@@ -2412,7 +1743,6 @@ function initSettings() {
   settSound.checked = savedSettings.soundEnabled !== false;
   settDevMode.checked = savedSettings.devMode === true;
   applyDevMode(savedSettings.devMode === true);
-  settAutoApprove.checked = savedSettings.autoApproveTools !== false;
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
 
   document.getElementById('btnSettings').addEventListener('click', () => {
@@ -2437,13 +1767,10 @@ function initSettings() {
   });
   settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
   settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
-  settAutoApprove.addEventListener('change', () => saveSetting('autoApproveTools', settAutoApprove.checked));
   settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
 
-  renderAllowedTools();
   renderDeniedTools();
   renderExtraDirs();
-  initTagInput('btnAddTool', 'settToolInput', addAllowedTool);
   initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
   initTagInput('btnAddDir', 'settDirInput', addExtraDir);
 
@@ -2856,6 +2183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initContextPopup();
   initCompactPopup();
   initSlashButtons();
+  initSessionTools();
   initSettings();
   initSidebar();
   initTestRunner();

@@ -35,7 +35,7 @@ function waitForReady(readyMap, tabId, { timeoutMs = 20000, checkIntervalMs = 20
 function collectPtyOutput(pty, stripFn, { quietMs = 3000, timeoutMs = 15000 } = {}) {
   const strip = stripFn || stripAnsi;
   return new Promise((resolve) => {
-    let chunks = [];
+    const chunks = [];
     let resolved = false;
     let quietTimer = null;
 

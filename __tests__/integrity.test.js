@@ -10,15 +10,23 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const HTML_PATH = path.join(ROOT, 'renderer', 'index.html');
 const CSS_PATH = path.join(ROOT, 'renderer', 'styles.css');
-const APP_JS_PATH = path.join(ROOT, 'renderer', 'app.js');
 const MAIN_JS_PATH = path.join(ROOT, 'main.js');
 const PRELOAD_PATH = path.join(ROOT, 'preload.js');
+const IPC_DIR = path.join(ROOT, 'src', 'ipc');
 
 const html = fs.readFileSync(HTML_PATH, 'utf-8');
 const css = fs.readFileSync(CSS_PATH, 'utf-8');
-const appJs = fs.readFileSync(APP_JS_PATH, 'utf-8');
 const mainJs = fs.readFileSync(MAIN_JS_PATH, 'utf-8');
 const preloadJs = fs.readFileSync(PRELOAD_PATH, 'utf-8');
+
+// Read all IPC module files and combine with mainJs for handler scanning
+let allBackendJs = mainJs;
+if (fs.existsSync(IPC_DIR)) {
+  const ipcFiles = fs.readdirSync(IPC_DIR).filter(f => f.endsWith('.js'));
+  for (const f of ipcFiles) {
+    allBackendJs += '\n' + fs.readFileSync(path.join(IPC_DIR, f), 'utf-8');
+  }
+}
 
 // ── Script-Tag Integrität ────────────────────────────────────
 
@@ -71,10 +79,10 @@ describe('IPC-Konsistenz (preload → main)', () => {
     invokeChannels.add(match[1]);
   }
 
-  // Extract all ipcMain.handle('channel') registrations from main
+  // Extract all ipcMain.handle('channel') registrations from main + IPC modules
   const handleRegex = /ipcMain\.handle\(['"]([^'"]+)['"]/g;
   const handleChannels = new Set();
-  while ((match = handleRegex.exec(mainJs)) !== null) {
+  while ((match = handleRegex.exec(allBackendJs)) !== null) {
     handleChannels.add(match[1]);
   }
 
@@ -100,10 +108,10 @@ describe('IPC-Konsistenz (preload ipcRenderer.send → main ipcMain.on)', () => 
     sendChannels.add(match[1]);
   }
 
-  // Extract ipcMain.on('channel') from main
+  // Extract ipcMain.on('channel') from main + IPC modules
   const onRegex = /ipcMain\.on\(['"]([^'"]+)['"]/g;
   const onChannels = new Set();
-  while ((match = onRegex.exec(mainJs)) !== null) {
+  while ((match = onRegex.exec(allBackendJs)) !== null) {
     onChannels.add(match[1]);
   }
 

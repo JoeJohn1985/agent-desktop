@@ -13,11 +13,11 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-console': 'off',
       'prefer-const': 'warn',
-      'eqeqeq': ['warn', 'always'],
+      'eqeqeq': ['warn', 'always', { null: 'ignore' }],
       'no-control-regex': 'off',
       'no-useless-escape': 'warn',
     },
@@ -38,11 +38,13 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': 'off',
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-console': 'off',
       'prefer-const': 'warn',
-      'eqeqeq': ['warn', 'always'],
+      'eqeqeq': ['warn', 'always', { null: 'ignore' }],
+      'no-undef': 'off',
+      'no-redeclare': 'off',
     },
   },
   {
@@ -57,9 +59,23 @@ export default [
     },
     rules: {
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-control-regex': 'off',
     },
   },
   {
-    ignores: ['node_modules/', 'coverage/', 'dist/'],
+    files: ['e2e/**/*.js', 'playwright.config.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    ignores: ['node_modules/', 'coverage/', 'dist/', 'vendor/'],
   },
 ];

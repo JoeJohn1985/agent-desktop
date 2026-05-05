@@ -38,7 +38,7 @@ function scanSessions(sessionsDir, yamlParse) {
 
       sessions.push({
         id: ws.id || entry.name,
-        name: ws.display_name || ws.name || null,
+        name: ws.name || null,
         userNamed: ws.user_named === true,
         summary: ws.summary || null,
         cwd: ws.cwd || '',

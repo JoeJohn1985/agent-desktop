@@ -2,7 +2,6 @@ const {
   shortenPath,
   contextColor,
   buildContextCategoryHtml,
-  defaultEscapeHtml,
 } = require('../src/frontend-helpers');
 
 // ── shortenPath ──────────────────────────────────────────────

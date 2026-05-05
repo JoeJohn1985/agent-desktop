@@ -64,7 +64,6 @@ contextBridge.exposeInMainWorld('copilot', {
     list: () => ipcRenderer.invoke('sessions:list'),
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
-    rename: (id, name) => ipcRenderer.invoke('sessions:rename', id, name),
     create: (name) => ipcRenderer.invoke('sessions:create', name),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
