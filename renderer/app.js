@@ -234,28 +234,6 @@ function removeExtraDir(idx) {
 
 function renderExtraDirs() { renderTagList('settExtraDirsList', getExtraDirs(), 'removeExtraDir'); }
 
-// ── Shell Exceptions (synced to copilot-instructions.md) ────
-let shellExceptions = [];
-
-async function loadShellExceptions() {
-  shellExceptions = await copilot.instructions.getShellExceptions();
-  renderShellExceptions();
-}
-
-function renderShellExceptions() { renderTagList('settShellExceptionsList', shellExceptions, 'removeShellException'); }
-
-async function addShellException(text) {
-  if (!text || shellExceptions.includes(text)) return;
-  shellExceptions.push(text);
-  await copilot.instructions.setShellExceptions(shellExceptions);
-  renderShellExceptions();
-}
-
-async function removeShellException(idx) {
-  shellExceptions.splice(idx, 1);
-  await copilot.instructions.setShellExceptions(shellExceptions);
-  renderShellExceptions();
-}
 
 function applyChatFontSize(size) {
   document.querySelectorAll('.stream-output').forEach(el => {
@@ -2465,11 +2443,9 @@ function initSettings() {
   renderAllowedTools();
   renderDeniedTools();
   renderExtraDirs();
-  loadShellExceptions();
   initTagInput('btnAddTool', 'settToolInput', addAllowedTool);
   initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
   initTagInput('btnAddDir', 'settDirInput', addExtraDir);
-  initTagInput('btnAddShellEx', 'settShellExInput', addShellException);
 
   // Folder settings
   async function loadFolderSettings() {

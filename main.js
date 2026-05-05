@@ -8,7 +8,7 @@ const { stripAnsi, safeSessionPath: _safeSessionPath, parseContextOutput, builti
 const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
 const { scanSessions: _scanSessions, scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
-const { processDroppedFile, getShellExceptions, setShellExceptions } = require('./src/file-processing');
+const { processDroppedFile } = require('./src/file-processing');
 
 // ── Dev Console Log Capture ─────────────────────────────────
 const _originalConsoleLog = console.log;
@@ -346,16 +346,7 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
   }
 });
 
-// Instructions — update shell exceptions
-const INSTRUCTIONS_PATH = path.join(COPILOT_CWD, 'copilot-instructions.md');
 
-ipcMain.handle('instructions:getShellExceptions', () => {
-  return getShellExceptions(INSTRUCTIONS_PATH);
-});
-
-ipcMain.handle('instructions:setShellExceptions', (_event, exceptions) => {
-  return setShellExceptions(INSTRUCTIONS_PATH, exceptions);
-});
 
 // Sessions
 ipcMain.handle('sessions:list', async () => {

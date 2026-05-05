@@ -43,38 +43,4 @@ function processDroppedFile(filePath, { cwd, filesDropDir, textExtensions, image
   return { type: 'copied', path: dest, originalPath: filePath };
 }
 
-/**
- * Parse shell exceptions from the copilot-instructions markdown file.
- */
-function getShellExceptions(instructionsPath) {
-  try {
-    const content = fs.readFileSync(instructionsPath, 'utf-8');
-    const match = content.match(/\*\*Ausnahmen\*\*[^\n]*\n([\s\S]*?)(?=\n(?:Bei \*\*allen|##|$))/);
-    if (!match) return [];
-    const items = match[1].match(/^- .+$/gm) || [];
-    return items.map(line => line.replace(/^- /, '').trim());
-  } catch (e) {
-    return [];
-  }
-}
-
-/**
- * Write shell exceptions back into the copilot-instructions markdown file.
- */
-function setShellExceptions(instructionsPath, exceptions) {
-  try {
-    let content = fs.readFileSync(instructionsPath, 'utf-8');
-    const exList = exceptions.map(e => `- ${e}`).join('\n');
-    const newSection = `**Ausnahmen** (diese dürfen ohne Rückfrage ausgeführt werden):\n${exList}\n`;
-    content = content.replace(
-      /\*\*Ausnahmen\*\*[^\n]*\n[\s\S]*?(?=\nBei \*\*allen)/,
-      newSection
-    );
-    fs.writeFileSync(instructionsPath, content, 'utf-8');
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-module.exports = { processDroppedFile, getShellExceptions, setShellExceptions };
+module.exports = { processDroppedFile };

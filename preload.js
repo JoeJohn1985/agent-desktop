@@ -105,11 +105,7 @@ contextBridge.exposeInMainWorld('copilot', {
     save: (config) => ipcRenderer.invoke('folders:save', config),
     browse: () => ipcRenderer.invoke('folders:browse'),
   },
-  // Instructions
-  instructions: {
-    getShellExceptions: () => ipcRenderer.invoke('instructions:getShellExceptions'),
-    setShellExceptions: (exceptions) => ipcRenderer.invoke('instructions:setShellExceptions', exceptions),
-  },
+
   // Skills
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
