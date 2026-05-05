@@ -2049,21 +2049,13 @@ function initTerminalResize() {
 }
 
 // ── Init ─────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  await loadPreferences();
-  applyTheme(getCurrentTheme());
-  initCopilotIPC();
-  initTerminalIPC();
-  initResize();
-  initTerminalResize();
 
-  // Load user home directory for path shortening
+async function initStatusbar() {
   try {
     const folders = await copilot.folders.read();
     userHomeDir = folders.homeDir || '';
   } catch (e) { console.warn('[app] Home-Verzeichnis nicht geladen:', e.message); }
 
-  // Show working directory in statusbar
   try {
     const cwd = await copilot.chat.getCwd();
     if (cwd) {
@@ -2072,7 +2064,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
 
-  // Show instruction files in statusbar
   try {
     const instrFiles = await copilot.chat.getInstructions();
     if (instrFiles && instrFiles.length > 0) {
@@ -2085,19 +2076,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (e) { console.warn('[app] Instructions nicht geladen:', e.message); }
 
-  // Load skills dynamically
-  try {
-    skills = await copilot.skills.list() || [];
-  } catch (e) {
-    console.warn('[skills] Laden fehlgeschlagen:', e.message);
-    skills = [];
-  }
-  // Restore active skills from settings
-  const savedActiveSkills = getSettings().activeSkills || [];
-  activeSkills = new Set(savedActiveSkills);
-  renderSkills();
-
-  // Show version in statusbar
   try {
     const ver = await copilot.chat.getVersions();
     const el = document.getElementById('sbVersion');
@@ -2106,22 +2084,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       el.setAttribute('data-tooltip', `App: v${ver.app}\nCLI: ${ver.cli}`);
     }
   } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
+}
+
+async function initDataLoad() {
+  try {
+    skills = await copilot.skills.list() || [];
+  } catch (e) {
+    console.warn('[skills] Laden fehlgeschlagen:', e.message);
+    skills = [];
+  }
+  const savedActiveSkills = getSettings().activeSkills || [];
+  activeSkills = new Set(savedActiveSkills);
+  renderSkills();
 
   await loadSessions();
-
-  // Load image gallery
   await loadImages();
-
-  // Auto-refresh images when folder changes
   copilot.images.onChanged(() => loadImages());
+}
 
-  // Restore previous tabs or create a new one
-  const restored = await restoreOpenTabs();
-  if (!restored) {
-    await createTab('🤖 Copilot');
-  }
-
-  // Input handling
+function initChatInput() {
   const chatInput = document.getElementById('chatInput');
   const btnSend = document.getElementById('btnSend');
 
@@ -2132,7 +2113,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       sendMessage();
     }
-    // History navigation — only for empty input or when already browsing history
     if (e.key === 'ArrowUp' && inputHistory.length > 0) {
       if (chatInput.value.length > 0 && historyIndex === -1) return;
       e.preventDefault();
@@ -2160,28 +2140,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Auto-resize textarea
   chatInput.addEventListener('input', () => {
     chatInput.style.height = 'auto';
     chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
   });
 
-  // Search
   document.getElementById('sessionSearch').addEventListener('input', () => {
     renderSessions(filterSessions());
   });
 
-  // + Button
   document.getElementById('btnAddTab').addEventListener('click', () => {
     createTab('🤖 Copilot');
   });
+}
 
-  // Window controls (titlebar)
+function initWindowControls() {
   document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
   document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
 
-  // Terminal button (toggle: open or minimize)
   document.getElementById('btnOpenTerminal').addEventListener('click', () => {
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
@@ -2198,42 +2175,52 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Export chat
   document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
+  document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
 
-  // Context widget — fetch context from background PTY and show in popup
+  document.getElementById('btnScrollBottom').addEventListener('click', () => {
+    const tab = tabs.get(activeTabId);
+    if (tab) {
+      tab.autoScrollEnabled = true;
+      tab.streamEl.scrollTop = tab.streamEl.scrollHeight;
+      document.getElementById('btnScrollBottom').style.display = 'none';
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    const tab = tabs.get(activeTabId);
+    if (tab && tab.terminal && tab.terminal.fitAddon) {
+      setTimeout(() => tab.terminal.fitAddon.fit(), RESIZE_FIT_DELAY_MS);
+    }
+  });
+}
+
+function initContextPopup() {
   const sbContextBtn = document.getElementById('btnSlashContext');
   const contextPopup = document.getElementById('contextPopup');
   const contextPopupBody = document.getElementById('contextPopupBody');
-  
-  // Close popup when clicking outside
+
   document.addEventListener('click', (e) => {
     if (contextPopup.style.display !== 'none' && !contextPopup.contains(e.target) && e.target !== sbContextBtn) {
       contextPopup.style.display = 'none';
     }
   });
-  
+
   sbContextBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    
-    // Toggle: if already visible, close
     if (contextPopup.style.display !== 'none') {
       contextPopup.style.display = 'none';
       return;
     }
-    
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
     if (!tab || !tab.sessionId) {
       showNotification('Keine aktive Session', 'warning');
       return;
     }
-    
-    // Show popup with loading state
     contextPopup.style.display = '';
     contextPopupBody.innerHTML = '<div class="context-popup__loading">⏳ Lade Kontext…</div>';
-    
-    // Fetch context from background PTY
+
     let result;
     try {
       result = await copilot.terminal.fetchContext(activeTabId);
@@ -2245,8 +2232,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
       return;
     }
-    
-    // Build formatted context display
     if (result.percent != null) {
       const color = contextColor(result.percent);
       let html = `<div style="margin-bottom:12px;">
@@ -2258,54 +2243,45 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div style="width:${result.percent}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
         </div>
       </div>`;
-      
       html += buildContextCategoryHtml(result.categories);
-      
       contextPopupBody.innerHTML = DOMPurify.sanitize(html);
+
+      const tab = tabs.get(activeTabId);
+      if (tab) tab.contextPercent = result.percent;
+      sbContextBtn.innerHTML = `📊 <span style="color:${color}">${result.percent}%</span>`;
     } else {
       contextPopupBody.textContent = result.raw;
     }
-
-    // Update statusbar button with percentage (per-tab)
-    if (result.percent != null) {
-      const tab = tabs.get(activeTabId);
-      if (tab) tab.contextPercent = result.percent;
-      const color = contextColor(result.percent);
-      sbContextBtn.innerHTML = `📊 <span style="color:${color}">${result.percent}%</span>`;
-    }
   });
+}
 
-  // Compact button — send /compact and show popup
+function initCompactPopup() {
   const compactBtn = document.getElementById('btnSlashCompact');
   const compactPopup = document.getElementById('compactPopup');
   const compactPopupBody = document.getElementById('compactPopupBody');
-  
-  // Close compact popup when clicking outside
+
   document.addEventListener('click', (e) => {
     if (compactPopup.style.display !== 'none' && !compactPopup.contains(e.target) && e.target !== compactBtn) {
       compactPopup.style.display = 'none';
     }
   });
-  
+
   compactBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    
     if (compactPopup.style.display !== 'none') {
       compactPopup.style.display = 'none';
       return;
     }
-    
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
     if (!tab || !tab.sessionId) {
       showNotification('Keine aktive Session', 'warning');
       return;
     }
-    
     compactPopup.style.display = '';
     compactPopupBody.innerHTML = '<div class="context-popup__loading">🗜️ Komprimiere Kontext…</div>';
     compactBtn.classList.add('session-actions__btn--loading');
-    
+
     let result;
     try {
       result = await copilot.terminal.sendSlash(activeTabId, '/compact');
@@ -2313,22 +2289,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       result = { success: false, error: err.message || 'Unbekannter Fehler' };
     }
     compactBtn.classList.remove('session-actions__btn--loading');
-    
+
     if (!result.success) {
       compactPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
       return;
     }
-    
-    // Show designed compact result
     if (result.percent != null) {
       const oldPct = tab.contextPercent;
       const newPct = result.percent;
       const color = contextColor(newPct);
       const saved = oldPct != null ? oldPct - newPct : null;
-      
+
       let html = '<div style="text-align:center;margin-bottom:12px;">';
       html += '<div style="font-size:11px;color:var(--text-secondary,#a6adc8);margin-bottom:4px;">Kontext komprimiert</div>';
-      
       if (saved != null && saved > 0) {
         html += `<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px;">
           <span style="font-size:16px;color:var(--text-secondary,#a6adc8);text-decoration:line-through;">${oldPct}%</span>
@@ -2339,34 +2312,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         html += `<div style="font-size:22px;font-weight:700;color:${color};margin-bottom:4px;">${newPct}%</div>`;
       }
-      
       html += `<div style="background:var(--bg-tertiary,#313244);border-radius:4px;height:8px;overflow:hidden;margin-top:8px;">
         <div style="width:${newPct}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
       </div>`;
-      
       if (result.usedTokens && result.totalTokens) {
         html += `<div style="font-size:10px;color:var(--text-secondary,#a6adc8);margin-top:4px;">${result.usedTokens} / ${result.totalTokens} Tokens</div>`;
       }
       html += '</div>';
-      
       html += buildContextCategoryHtml(result.categories);
-      
       compactPopupBody.innerHTML = html;
-      
-      // Update context button with new percentage
+
       tab.contextPercent = newPct;
       const ctxBtn = document.getElementById('btnSlashContext');
       ctxBtn.innerHTML = `📊 <span style="color:${color}">${newPct}%</span>`;
-      
       showNotification(`Kontext komprimiert: ${newPct}%`, 'success');
     } else {
-      // Fallback: show raw output if parsing failed
       compactPopupBody.innerHTML = `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escapeHtml(result.output)}</div>`;
       showNotification('Kontext komprimiert ✓', 'success');
     }
   });
+}
 
-  // Clear button — send /clear and show notification
+function initSlashButtons() {
   document.getElementById('btnSlashClear').addEventListener('click', async () => {
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
@@ -2374,10 +2341,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       showNotification('Keine aktive Session', 'warning');
       return;
     }
-    
     const btn = document.getElementById('btnSlashClear');
     btn.classList.add('session-actions__btn--loading');
-    
     let result;
     try {
       result = await copilot.terminal.sendSlash(activeTabId, '/clear');
@@ -2385,27 +2350,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       result = { success: false, error: err.message || 'Unbekannter Fehler' };
     }
     btn.classList.remove('session-actions__btn--loading');
-    
     if (result.success) {
       showNotification('Chat-Kontext geleert ✓', 'success');
-      // Reset the context button and stored value
       const ctxBtn = document.getElementById('btnSlashContext');
       ctxBtn.textContent = '📊 Kontext';
-      const tab = tabs.get(activeTabId);
-      if (tab) tab.contextPercent = null;
+      const tab2 = tabs.get(activeTabId);
+      if (tab2) tab2.contextPercent = null;
     } else {
       showNotification(`Fehler: ${result.error}`, 'error');
     }
   });
 
-  // Refresh
-  // Todos
   document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());
   document.getElementById('todoInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
   });
 
-  // Sync Todos → send next 5 open todos as chat prompt
   document.getElementById('btnSyncTodos').addEventListener('click', async () => {
     if (activeTabId == null) return;
     const tab = tabs.get(activeTabId);
@@ -2417,19 +2377,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       showNotification('Chat ist noch beschäftigt', 'warning');
       return;
     }
-
-    // Get first 5 open todos
     const openTodos = currentTodos.filter(t => t.status === 'open').slice(0, 5);
     if (openTodos.length === 0) {
       showNotification('Keine offenen Todos', 'info');
       return;
     }
-
-    // Build prompt
     const todoList = openTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
     const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
-
-    // Mark todos as done
     try {
       for (const todo of openTodos) {
         await copilot.todos.update(tab.sessionId, todo.id, { status: 'done' });
@@ -2439,22 +2393,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       showNotification(`Fehler: ${err.message}`, 'error');
       return;
     }
-
-    // Send as chat message
     document.getElementById('chatInput').value = prompt;
     sendMessage();
-
     showNotification(`${openTodos.length} Todos gesendet ✓`, 'success');
   });
 
-  // Delete session overlay
   document.getElementById('btnDeleteConfirm').addEventListener('click', () => executeDeleteSession());
   document.getElementById('btnDeleteCancel').addEventListener('click', () => cancelDeleteSession());
   document.getElementById('deleteOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'deleteOverlay') cancelDeleteSession();
   });
+}
 
-  // ── Settings Dialog ──────────────────────────────────
+function initSettings() {
   const settingsOverlay = document.getElementById('settingsOverlay');
   const settTheme = document.getElementById('settTheme');
   const settFontSize = document.getElementById('settFontSize');
@@ -2464,7 +2415,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settAutoApprove = document.getElementById('settAutoApprove');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
 
-  // Settings tab switching
   document.querySelectorAll('.settings__tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.settings__tab').forEach(t => t.classList.remove('settings__tab--active'));
@@ -2475,7 +2425,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Load saved settings
   const savedSettings = getSettings();
   settTheme.value = getCurrentTheme();
   const fontSize = savedSettings.chatFontSize || 16;
@@ -2493,60 +2442,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     settingsOverlay.classList.add('overlay--visible');
   });
 
-  // ── Test Runner Event Listeners ─────────────────────────
-  document.getElementById('btnTests')?.addEventListener('click', openTestRunner);
-  document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
-  document.getElementById('btnRunTests')?.addEventListener('click', runTests);
-  document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
-  document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
-
-  // ── Dev Console Event Listeners ────────────────────────
-  document.getElementById('btnDevConsole')?.addEventListener('click', toggleDevConsole);
-  document.getElementById('devConsoleClose')?.addEventListener('click', () => {
-    document.getElementById('devConsolePanel').style.display = 'none';
-  });
-  document.getElementById('devConsoleClear')?.addEventListener('click', () => {
-    devConsoleLogs.length = 0;
-    document.getElementById('devConsoleBody').innerHTML = '';
+  document.getElementById('btnSettingsClose').addEventListener('click', () => {
+    settingsOverlay.classList.remove('overlay--visible');
   });
 
-  // Filter buttons
-  document.querySelectorAll('.dev-console__filter').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.dev-console__filter').forEach(b => b.classList.remove('dev-console__filter--active'));
-      btn.classList.add('dev-console__filter--active');
-      devConsoleFilter = btn.dataset.level;
-      renderDevConsole();
-    });
+  settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) settingsOverlay.classList.remove('overlay--visible');
   });
 
-  // Main process logs via IPC
-  if (copilot.devConsole) {
-    copilot.devConsole.onLog((entry) => addDevConsoleEntry(entry));
-  }
+  settTheme.addEventListener('change', () => applyTheme(settTheme.value));
+  settFontSize.addEventListener('input', () => {
+    const size = parseInt(settFontSize.value);
+    settFontSizeVal.textContent = size + 'px';
+    saveSetting('chatFontSize', size);
+    applyChatFontSize(size);
+  });
+  settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
+  settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
+  settAutoApprove.addEventListener('change', () => saveSetting('autoApproveTools', settAutoApprove.checked));
+  settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
 
-  // Flush renderer logs that were captured before DOM ready
-  if (window._rendererLogs) {
-    window._rendererLogs.forEach(entry => addDevConsoleEntry(entry));
-    // Override renderer console to use addDevConsoleEntry directly
-    console.log = (...args) => {
-      _rendererOrigLog(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-    console.warn = (...args) => {
-      _rendererOrigWarn(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-    console.error = (...args) => {
-      _rendererOrigError(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-  }
+  renderAllowedTools();
+  renderDeniedTools();
+  renderExtraDirs();
+  loadShellExceptions();
+  initTagInput('btnAddTool', 'settToolInput', addAllowedTool);
+  initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
+  initTagInput('btnAddDir', 'settDirInput', addExtraDir);
+  initTagInput('btnAddShellEx', 'settShellExInput', addShellException);
 
-  // ── Folder Settings ────────────────────────────────────
+  // Folder settings
   async function loadFolderSettings() {
     const folders = await copilot.folders.read();
     document.getElementById('settFolderCwd').value = folders.cwd || '';
@@ -2563,7 +2488,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     { btn: 'btnBrowseSkills', input: 'settFolderSkills' },
     { btn: 'btnBrowseImages', input: 'settFolderImages' },
   ];
-
   folderFields.forEach(({ btn, input }) => {
     document.getElementById(btn).addEventListener('click', async () => {
       const folder = await copilot.folders.browse();
@@ -2598,8 +2522,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
+}
 
-  // Sidebar collapse toggle
+function initSidebar() {
   const collapseBtn = document.getElementById('btnCollapseSidebar');
   const sidebar = document.getElementById('sidebar');
   if (getPref('sidebarCollapsed', false)) {
@@ -2613,75 +2538,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     collapseBtn.setAttribute('data-tooltip', isCollapsed ? 'Sidebar erweitern' : 'Sidebar minimieren');
     setPref('sidebarCollapsed', isCollapsed);
   });
+}
 
-  document.getElementById('btnSettingsClose').addEventListener('click', () => {
-    settingsOverlay.classList.remove('overlay--visible');
+function initTestRunner() {
+  document.getElementById('btnTests')?.addEventListener('click', openTestRunner);
+  document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
+  document.getElementById('btnRunTests')?.addEventListener('click', runTests);
+  document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
+  document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
+}
+
+function initDevConsole() {
+  document.getElementById('btnDevConsole')?.addEventListener('click', toggleDevConsole);
+  document.getElementById('devConsoleClose')?.addEventListener('click', () => {
+    document.getElementById('devConsolePanel').style.display = 'none';
+  });
+  document.getElementById('devConsoleClear')?.addEventListener('click', () => {
+    devConsoleLogs.length = 0;
+    document.getElementById('devConsoleBody').innerHTML = '';
   });
 
-  settingsOverlay.addEventListener('click', (e) => {
-    if (e.target === settingsOverlay) settingsOverlay.classList.remove('overlay--visible');
+  document.querySelectorAll('.dev-console__filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.dev-console__filter').forEach(b => b.classList.remove('dev-console__filter--active'));
+      btn.classList.add('dev-console__filter--active');
+      devConsoleFilter = btn.dataset.level;
+      renderDevConsole();
+    });
   });
 
-  settTheme.addEventListener('change', () => {
-    applyTheme(settTheme.value);
-  });
+  if (copilot.devConsole) {
+    copilot.devConsole.onLog((entry) => addDevConsoleEntry(entry));
+  }
 
-  settFontSize.addEventListener('input', () => {
-    const size = parseInt(settFontSize.value);
-    settFontSizeVal.textContent = size + 'px';
-    saveSetting('chatFontSize', size);
-    applyChatFontSize(size);
-  });
+  if (window._rendererLogs) {
+    window._rendererLogs.forEach(entry => addDevConsoleEntry(entry));
+    console.log = (...args) => {
+      _rendererOrigLog(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+    console.warn = (...args) => {
+      _rendererOrigWarn(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+    console.error = (...args) => {
+      _rendererOrigError(...args);
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      addDevConsoleEntry({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
+    };
+  }
+}
 
-  settSound.addEventListener('change', () => {
-    saveSetting('soundEnabled', settSound.checked);
-  });
-
-  settDevMode.addEventListener('change', () => {
-    saveSetting('devMode', settDevMode.checked);
-    applyDevMode(settDevMode.checked);
-  });
-
-  settAutoApprove.addEventListener('change', () => {
-    saveSetting('autoApproveTools', settAutoApprove.checked);
-  });
-
-  settAllowAllPaths.addEventListener('change', () => {
-    saveSetting('allowAllPaths', settAllowAllPaths.checked);
-  });
-
-  // Tag lists in settings
-  renderAllowedTools();
-  renderDeniedTools();
-  renderExtraDirs();
-  loadShellExceptions();
-  initTagInput('btnAddTool', 'settToolInput', addAllowedTool);
-  initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
-  initTagInput('btnAddDir', 'settDirInput', addExtraDir);
-  initTagInput('btnAddShellEx', 'settShellExInput', addShellException);
-
-  // Terminal minimize button — hides panel, keeps PTY alive
-  document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
-
-  // Scroll-to-bottom button
-  document.getElementById('btnScrollBottom').addEventListener('click', () => {
-    const tab = tabs.get(activeTabId);
-    if (tab) {
-      tab.autoScrollEnabled = true;
-      tab.streamEl.scrollTop = tab.streamEl.scrollHeight;
-      document.getElementById('btnScrollBottom').style.display = 'none';
-    }
-  });
-
-  // Resize terminal on window resize
-  window.addEventListener('resize', () => {
-    const tab = tabs.get(activeTabId);
-    if (tab && tab.terminal && tab.terminal.fitAddon) {
-      setTimeout(() => tab.terminal.fitAddon.fit(), RESIZE_FIT_DELAY_MS);
-    }
-  });
-
-  // ── Chat Search ────────────────────────────────────────
+function initChatSearch() {
   const searchBar = document.getElementById('chatSearchBar');
   const searchInput = document.getElementById('chatSearchInput');
   const searchCount = document.getElementById('chatSearchCount');
@@ -2704,18 +2614,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!query || !activeTabId) return;
     const tab = tabs.get(activeTabId);
     if (!tab) return;
-
     const walker = document.createTreeWalker(tab.streamEl, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);
-
     const lowerQ = query.toLowerCase();
     for (const node of textNodes) {
       const text = node.textContent;
       const lower = text.toLowerCase();
       let idx = lower.indexOf(lowerQ);
       if (idx === -1) continue;
-
       const frag = document.createDocumentFragment();
       let lastIdx = 0;
       while (idx !== -1) {
@@ -2731,7 +2638,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       frag.appendChild(document.createTextNode(text.substring(lastIdx)));
       node.parentNode.replaceChild(frag, node);
     }
-
     searchCount.textContent = searchMarks.length ? `${searchMarks.length} Treffer` : 'Keine Treffer';
     if (searchMarks.length > 0) jumpToMatch(0);
   }
@@ -2760,6 +2666,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     searchInput.value = '';
   }
 
+  // Store openSearch globally for keyboard shortcut access
+  window._openSearch = openSearch;
+
   searchInput.addEventListener('input', () => highlightSearch(searchInput.value));
   searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -2772,47 +2681,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('chatSearchPrev').addEventListener('click', () => jumpToMatch(searchActiveIdx - 1));
   document.getElementById('chatSearchNext').addEventListener('click', () => jumpToMatch(searchActiveIdx + 1));
   document.getElementById('chatSearchClose').addEventListener('click', () => closeSearch());
+}
 
-  // ── Keyboard Shortcuts ───────────────────────────────
+function initKeyboardShortcuts() {
+  const searchBar = document.getElementById('chatSearchBar');
+
   document.addEventListener('keydown', (e) => {
-    // Ctrl+T — new tab
     if (e.ctrlKey && e.key === 't') {
       e.preventDefault();
       createTab('🤖 Copilot');
     }
-    // Ctrl+W — close active tab
     if (e.ctrlKey && e.key === 'w') {
       e.preventDefault();
       if (activeTabId != null) closeTab(activeTabId);
     }
-    // Ctrl+1-9 — switch to tab by index
     if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
       e.preventDefault();
       const idx = parseInt(e.key) - 1;
       const tabIds = [...tabs.keys()];
       if (idx < tabIds.length) switchTab(tabIds[idx]);
     }
-    // Ctrl+L — focus chat input
     if (e.ctrlKey && e.key === 'l') {
       e.preventDefault();
       document.getElementById('chatInput')?.focus();
     }
-    // Ctrl+E — export chat
     if (e.ctrlKey && e.key === 'e') {
       e.preventDefault();
       exportChat();
     }
-    // Ctrl+F — search in chat
     if (e.ctrlKey && e.key === 'f') {
       e.preventDefault();
-      openSearch();
+      if (window._openSearch) window._openSearch();
     }
-    // Ctrl+B — toggle sidebar
     if (e.ctrlKey && e.key === 'b') {
       e.preventDefault();
       document.getElementById('btnCollapseSidebar').click();
     }
-    // Escape — close lightbox, search, test runner, or stop processing
     if (e.key === 'Escape') {
       const testPopup = document.getElementById('testRunnerPopup');
       if (testPopup && testPopup.style.display !== 'none') {
@@ -2823,7 +2727,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (lb.classList.contains('image-lightbox--visible')) {
         lb.classList.remove('image-lightbox--visible');
       } else if (searchBar.classList.contains('chat-search--visible')) {
-        closeSearch();
+        if (window._openSearch) {
+          document.getElementById('chatSearchBar').classList.remove('chat-search--visible');
+          document.getElementById('chatSearchInput').value = '';
+        }
       } else if (activeTabId != null) {
         const tab = tabs.get(activeTabId);
         if (tab && tab.isProcessing) {
@@ -2832,8 +2739,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
+}
 
-  // ── Drag & Drop ──────────────────────────────────────
+function initDragDrop() {
   const streamArea = document.getElementById('streamArea');
   const dropOverlay = document.getElementById('dropOverlay');
   let dragCounter = 0;
@@ -2871,7 +2779,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     for (const file of files) {
       let filePath;
-      try { filePath = copilot.files.getPath(file); } catch (e) { console.warn('[files] getPath fehlgeschlagen:', e.message); continue; }
+      try { filePath = copilot.files.getPath(file); } catch (err) { console.warn('[files] getPath fehlgeschlagen:', err.message); continue; }
       if (!filePath) continue;
 
       const result = await copilot.files.processDropped(filePath);
@@ -2902,57 +2810,82 @@ document.addEventListener('DOMContentLoaded', async () => {
       chatInput.focus();
     }
   });
+}
 
-  // ── Global JS Tooltip System ─────────────────────────────
-  (function initTooltips() {
-    const tooltip = document.createElement('div');
-    tooltip.className = 'js-tooltip';
-    document.body.appendChild(tooltip);
-    let showTimeout = null;
-    let currentTarget = null;
+function initTooltips() {
+  const tooltip = document.createElement('div');
+  tooltip.className = 'js-tooltip';
+  document.body.appendChild(tooltip);
+  let showTimeout = null;
+  let currentTarget = null;
 
-    document.addEventListener('mouseover', (e) => {
-      const target = e.target.closest('[data-tooltip]');
-      if (!target || target === currentTarget) return;
-      const text = target.getAttribute('data-tooltip');
-      if (!text) return;
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target || target === currentTarget) return;
+    const text = target.getAttribute('data-tooltip');
+    if (!text) return;
 
-      currentTarget = target;
-      clearTimeout(showTimeout);
-      showTimeout = setTimeout(() => {
-        const rect = target.getBoundingClientRect();
-        tooltip.textContent = text;
-        tooltip.style.visibility = 'hidden';
-        tooltip.classList.add('js-tooltip--visible');
+    currentTarget = target;
+    clearTimeout(showTimeout);
+    showTimeout = setTimeout(() => {
+      const rect = target.getBoundingClientRect();
+      tooltip.textContent = text;
+      tooltip.style.visibility = 'hidden';
+      tooltip.classList.add('js-tooltip--visible');
 
-        requestAnimationFrame(() => {
-          const ttWidth = tooltip.offsetWidth;
-          const ttHeight = tooltip.offsetHeight;
+      requestAnimationFrame(() => {
+        const ttWidth = tooltip.offsetWidth;
+        const ttHeight = tooltip.offsetHeight;
+        let left = rect.left + rect.width / 2 - ttWidth / 2;
+        left = Math.max(4, Math.min(left, window.innerWidth - ttWidth - 4));
+        tooltip.style.left = left + 'px';
+        tooltip.style.transform = 'none';
+        if (rect.top - ttHeight - 8 > 0) {
+          tooltip.style.top = (rect.top - ttHeight - 8) + 'px';
+        } else {
+          tooltip.style.top = (rect.bottom + 8) + 'px';
+        }
+        tooltip.style.visibility = '';
+      });
+    }, SESSION_REFRESH_DELAY_MS);
+  });
 
-          // Horizontal: centered, clamped to viewport
-          let left = rect.left + rect.width / 2 - ttWidth / 2;
-          left = Math.max(4, Math.min(left, window.innerWidth - ttWidth - 4));
-          tooltip.style.left = left + 'px';
-          tooltip.style.transform = 'none';
+  document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target) return;
+    if (target === currentTarget) currentTarget = null;
+    clearTimeout(showTimeout);
+    tooltip.classList.remove('js-tooltip--visible');
+  });
+}
 
-          // Vertical: prefer above, fall back to below
-          if (rect.top - ttHeight - 8 > 0) {
-            tooltip.style.top = (rect.top - ttHeight - 8) + 'px';
-          } else {
-            tooltip.style.top = (rect.bottom + 8) + 'px';
-          }
-          tooltip.style.visibility = '';
-        });
-      }, SESSION_REFRESH_DELAY_MS);
-    });
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadPreferences();
+  applyTheme(getCurrentTheme());
+  initCopilotIPC();
+  initTerminalIPC();
+  initResize();
+  initTerminalResize();
 
-    document.addEventListener('mouseout', (e) => {
-      const target = e.target.closest('[data-tooltip]');
-      if (!target) return;
-      if (target === currentTarget) currentTarget = null;
-      clearTimeout(showTimeout);
-      tooltip.classList.remove('js-tooltip--visible');
-    });
-  })();
+  await initStatusbar();
+  await initDataLoad();
 
+  const restored = await restoreOpenTabs();
+  if (!restored) {
+    await createTab('🤖 Copilot');
+  }
+
+  initChatInput();
+  initWindowControls();
+  initContextPopup();
+  initCompactPopup();
+  initSlashButtons();
+  initSettings();
+  initSidebar();
+  initTestRunner();
+  initDevConsole();
+  initChatSearch();
+  initKeyboardShortcuts();
+  initDragDrop();
+  initTooltips();
 });

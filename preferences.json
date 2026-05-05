@@ -3,7 +3,15 @@
   "openTabs": [
     {
       "sessionId": "8c205927-6dbd-42aa-9a42-e7e8551a3ee0",
-      "label": "🤖 CD: Copilot Desktop Weiterentwicklung"
+      "label": "🤖 CD: Copilot Desktop"
+    },
+    {
+      "sessionId": "c39d1888-ae23-4249-896e-05a5a9845f63",
+      "label": "🤖 RP: Retail Plattform"
+    },
+    {
+      "sessionId": "f66d3ad9-13f0-43ae-8c4f-0abfa3117d3c",
+      "label": "🤖 KPID: Dashboard Weiterentwicklung"
     }
   ],
   "settings": {
@@ -17,5 +25,6 @@
       "C:\\Users\\MSchneider\\Copilot"
     ]
   },
-  "sidebarWidth": 248
+  "sidebarWidth": 248,
+  "sidebarCollapsed": false
 }
