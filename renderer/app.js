@@ -137,6 +137,8 @@ async function restoreOpenTabs() {
         tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
+        // Render pinned tools now that sessionDeniedTools are loaded
+        renderPinnedTools();
         // Start background terminal for restored tab
         if (t.sessionId) {
           copilot.terminal.spawnBackground(tabId, t.sessionId).catch(e => {
@@ -1053,6 +1055,83 @@ window.resumeSession = resumeSession;
 window.confirmDeleteSession = confirmDeleteSession;
 window.toggleTodo = toggleTodo;
 window.deleteTodo = deleteTodo;
+
+// ── Model Switcher ────────────────────────────────────────────
+// NOTE: `/model` without argument opens an interactive TUI picker that crashes
+// the background terminal. We use a preferences-stored model list instead.
+const DEFAULT_MODELS = [
+  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
+  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex' },
+  { id: 'gpt-4.1', label: 'GPT-4.1' },
+];
+
+function getAvailableModels() {
+  return DEFAULT_MODELS;
+}
+
+function initModelSwitcher() {
+  const sbModel = document.getElementById('sbModel');
+  if (!sbModel) return;
+
+  sbModel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close existing dropdown if any
+    const existing = document.querySelector('.model-dropdown');
+    if (existing) { existing.remove(); return; }
+
+    const models = getAvailableModels();
+    const tab = tabs.get(activeTabId);
+    const currentModel = tab?.context?.model || '';
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'model-dropdown';
+
+    models.forEach(m => {
+      const isActive = currentModel === m.id || currentModel === m.label
+        || currentModel.includes(m.id);
+      const item = document.createElement('div');
+      item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
+      item.innerHTML = `<span class="model-dropdown__check">${isActive ? '✓' : ''}</span><span class="model-dropdown__label">${escapeHtml(m.label)}</span><span class="model-dropdown__id">${escapeHtml(m.id)}</span>`;
+      item.addEventListener('click', () => switchModel(m));
+      dropdown.appendChild(item);
+    });
+
+    const statusbar = document.getElementById('sessionStatusbar');
+    statusbar.appendChild(dropdown);
+
+    // Close on outside click
+    const closeHandler = (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== sbModel) {
+        dropdown.remove();
+        document.removeEventListener('click', closeHandler, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+  });
+}
+
+async function switchModel(model) {
+  // Close dropdown
+  const dropdown = document.querySelector('.model-dropdown');
+  if (dropdown) dropdown.remove();
+
+  if (!activeTabId) return;
+  const tab = tabs.get(activeTabId);
+  if (!tab) return;
+
+  // Optimistically update display
+  tab.context.model = model.id;
+  updateStatusbar('sbModel', `🧠 ${model.label}`);
+
+  // Send slash command — `/model <id>` (with argument) outputs text, no TUI
+  try {
+    await copilot.terminal.sendSlash(activeTabId, `/model ${model.id}`);
+  } catch (err) {
+    console.error('[ModelSwitcher] Failed to switch model:', err);
+  }
+}
 
 // ── Session Export ──────────────────────────────────────────
 function openCwd() {
@@ -2294,4 +2373,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   initKeyboardShortcuts();
   initDragDrop();
   initTooltips();
+  initModelSwitcher();
 });
