@@ -9,6 +9,17 @@
     ],
     "activeSkills": [
       "task-router"
+    ],
+    "deniedTools": [],
+    "adminDeniedTools": [
+      "shell(git push --prune)",
+      "shell(git push --mirror)",
+      "shell(git push -d)",
+      "shell(git push --delete)",
+      "shell(git push --force-if-includes)",
+      "shell(git push --force)",
+      "shell(git push -f)",
+      "shell(git push --force-with-lease)"
     ]
   },
   "deniedTools": [],
@@ -18,16 +29,16 @@
       "deniedTools": [
         {
           "name": "shell(git push)",
-          "enabled": true,
+          "enabled": false,
           "pinned": true
         },
         {
           "name": "shell(git commit)",
-          "enabled": true,
+          "enabled": false,
           "pinned": true
         }
       ],
-      "lastUsed": "2026-05-05T23:33:30.792Z"
+      "lastUsed": "2026-05-06T08:02:42.883Z"
     },
     "f66d3ad9-13f0-43ae-8c4f-0abfa3117d3c": {
       "name": "KPID: Dashboard Weiterentwicklung",
@@ -49,12 +60,9 @@
     {
       "sessionId": "8c205927-6dbd-42aa-9a42-e7e8551a3ee0",
       "label": "🤖 CD: Copilot Desktop"
-    },
-    {
-      "sessionId": "4a48d5f8-24ab-43e4-b447-d48f93d4c50b",
-      "label": "🤖 Copilot"
     }
   ],
   "sidebarCollapsed": false,
-  "sidebarWidth": 240
+  "sidebarWidth": 240,
+  "adminDeniedTools": []
 }

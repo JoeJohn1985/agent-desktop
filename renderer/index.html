@@ -295,6 +295,16 @@
               <button class="action-btn" id="btnAddDeniedTool" data-tooltip="Tool blockieren">+</button>
             </div>
           </div>
+          <div class="settings__group settings__dev-only" id="settAdminToolsGroup" style="display:none;">
+            <div class="settings__separator"></div>
+            <label class="settings__label">🔒 Admin-Verbote (unveränderbar für User)</label>
+            <div class="settings__hint">Diese Tools werden in allen Sessions blockiert und können nur hier verwaltet werden.</div>
+            <div class="settings__tool-list" id="settAdminDeniedToolsList"></div>
+            <div class="settings__tool-add">
+              <input type="text" class="settings__tool-input" id="settAdminDeniedToolInput" placeholder="z.B. git push --force" />
+              <button class="action-btn" id="btnAddAdminDeniedTool" data-tooltip="Admin-Tool blockieren">+</button>
+            </div>
+          </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
             <div class="settings__row">

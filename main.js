@@ -452,6 +452,7 @@ const PREFS_DEFAULTS = {
   theme: 'dark',
   settings: { allowAllPaths: false },
   deniedTools: [],
+  adminDeniedTools: [],
   namedSessions: {},
   openTabs: [],
 };
