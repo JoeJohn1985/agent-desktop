@@ -6,58 +6,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// ── scanSessions ─────────────────────────────────────────────
-
-function scanSessions(sessionsDir, yamlParse) {
-  if (!fs.existsSync(sessionsDir)) return [];
-
-  const sessions = [];
-  const entries = fs.readdirSync(sessionsDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const wsPath = path.join(sessionsDir, entry.name, 'workspace.yaml');
-    if (!fs.existsSync(wsPath)) continue;
-
-    try {
-      const raw = fs.readFileSync(wsPath, 'utf-8');
-      const ws = yamlParse(raw);
-      const sessionDir = path.join(sessionsDir, entry.name);
-
-      // Checkpoint-Anzahl ermitteln
-      const cpDir = path.join(sessionDir, 'checkpoints');
-      let checkpointCount = 0;
-      if (fs.existsSync(cpDir)) {
-        checkpointCount = fs.readdirSync(cpDir)
-          .filter(f => f.match(/^\d{3}-.*\.md$/)).length;
-      }
-
-      const hasPlan = fs.existsSync(path.join(sessionDir, 'plan.md'));
-      const isActive = fs.readdirSync(sessionDir)
-        .some(f => f.startsWith('inuse.'));
-
-      sessions.push({
-        id: ws.id || entry.name,
-        name: ws.name || null,
-        userNamed: ws.user_named === true,
-        summary: ws.summary || null,
-        cwd: ws.cwd || '',
-        createdAt: ws.created_at || '',
-        updatedAt: ws.updated_at || '',
-        summaryCount: ws.summary_count || 0,
-        checkpointCount,
-        hasPlan,
-        isActive,
-      });
-    } catch (e) {
-      console.warn('[sessions:scan] Fehler:', e.message || e);
-    }
-  }
-
-  sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  return sessions;
-}
-
 // ── scanSkillDirectory ───────────────────────────────────────
 
 function scanSkillDirectory(dir, source, iconFn, yamlParse) {
@@ -108,7 +56,6 @@ function writeFolderConfig(configPath, config) {
 }
 
 module.exports = {
-  scanSessions,
   scanSkillDirectory,
   readFolderConfig,
   writeFolderConfig,

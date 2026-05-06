@@ -61,7 +61,6 @@ contextBridge.exposeInMainWorld('copilot', {
   },
   // Sessions
   sessions: {
-    list: () => ipcRenderer.invoke('sessions:list'),
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
     create: (name) => ipcRenderer.invoke('sessions:create', name),
@@ -89,10 +88,6 @@ contextBridge.exposeInMainWorld('copilot', {
   videos: {
     extractFrames: (videoPath, options) => ipcRenderer.invoke('videos:extractFrames', videoPath, options),
   },
-  // Config
-  config: {
-    read: () => ipcRenderer.invoke('config:read'),
-  },
   // Preferences (file-based persistent settings)
   preferences: {
     read: () => ipcRenderer.invoke('preferences:read'),
@@ -103,6 +98,13 @@ contextBridge.exposeInMainWorld('copilot', {
     read: () => ipcRenderer.invoke('folders:read'),
     save: (config) => ipcRenderer.invoke('folders:save', config),
     browse: () => ipcRenderer.invoke('folders:browse'),
+    browseFile: (filters) => ipcRenderer.invoke('folders:browse-file', filters),
+  },
+
+  // Instructions
+  instructions: {
+    read: () => ipcRenderer.invoke('instructions:read'),
+    write: (content) => ipcRenderer.invoke('instructions:write', content),
   },
 
   // Skills

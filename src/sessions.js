@@ -41,22 +41,6 @@ function readPlan(sessionDir) {
 }
 
 /**
- * Liest config.json aus dem Copilot-Verzeichnis.
- * @param {string} copilotDir - Absoluter Pfad zum Copilot-Verzeichnis
- * @returns {object}
- */
-function readConfig(copilotDir) {
-  const cfgPath = path.join(copilotDir, 'config.json');
-  if (!fs.existsSync(cfgPath)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-  } catch (e) {
-    console.warn('[config:read] Fehler:', e.message || e);
-    return {};
-  }
-}
-
-/**
  * Liest todos.json aus dem Session-Verzeichnis.
  * @param {string} sessionDir - Absoluter Pfad zum Session-Verzeichnis
  * @returns {Array}
@@ -82,4 +66,4 @@ function writeTodos(sessionDir, todos) {
   fs.writeFileSync(path.join(sessionDir, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
 }
 
-module.exports = { readCheckpoints, readPlan, readConfig, readTodos, writeTodos };
+module.exports = { readCheckpoints, readPlan, readTodos, writeTodos };

@@ -6,10 +6,9 @@ jest.mock('fs');
 
 const fs = require('fs');
 const path = require('path');
-const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('../src/sessions');
+const { readCheckpoints, readPlan, readTodos, writeTodos } = require('../src/sessions');
 
 const SESSION_DIR = path.join('C:', 'test', 'sessions', 'abc-123');
-const COPILOT_DIR = path.join('C:', 'test', '.copilot');
 
 beforeEach(() => {
   jest.restoreAllMocks();
@@ -112,41 +111,6 @@ describe('readPlan', () => {
     fs.readFileSync.mockReturnValue('Einfacher Text');
     const result = readPlan(SESSION_DIR);
     expect(typeof result).toBe('string');
-  });
-});
-
-// ── readConfig ───────────────────────────────────────────────
-
-describe('readConfig', () => {
-  const cfgPath = path.join(COPILOT_DIR, 'config.json');
-
-  test('gibt leeres Objekt zurück wenn config.json nicht existiert', () => {
-    fs.existsSync.mockReturnValue(false);
-    expect(readConfig(COPILOT_DIR)).toEqual({});
-    expect(fs.existsSync).toHaveBeenCalledWith(cfgPath);
-  });
-
-  test('parst gültiges JSON korrekt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockReturnValue('{"theme":"dark","lang":"de"}');
-    expect(readConfig(COPILOT_DIR)).toEqual({ theme: 'dark', lang: 'de' });
-  });
-
-  test('gibt leeres Objekt bei JSON-Parse-Fehler zurück', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockReturnValue('{ ungültiges json !!!');
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readConfig(COPILOT_DIR)).toEqual({});
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  test('gibt leeres Objekt bei Lesefehler zurück', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readConfig(COPILOT_DIR)).toEqual({});
-    warnSpy.mockRestore();
   });
 });
 

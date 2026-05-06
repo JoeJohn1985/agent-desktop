@@ -3,10 +3,7 @@
   "settings": {
     "allowAllPaths": false,
     "devMode": true,
-    "extraDirs": [
-      "C:\\Users\\MSchneider\\.copilot\\skills",
-      "C:\\Users\\MSchneider\\.copilot\\copilot-instructions.md"
-    ],
+    "extraDirs": [],
     "activeSkills": [
       "task-router"
     ],
@@ -38,7 +35,7 @@
           "pinned": true
         }
       ],
-      "lastUsed": "2026-05-06T08:02:42.883Z"
+      "lastUsed": "2026-05-06T11:09:19.344Z"
     },
     "f66d3ad9-13f0-43ae-8c4f-0abfa3117d3c": {
       "name": "KPID: Dashboard Weiterentwicklung",

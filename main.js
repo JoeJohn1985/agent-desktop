@@ -5,9 +5,9 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const yaml = require('yaml');
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
-const { readCheckpoints, readPlan, readConfig, readTodos, writeTodos } = require('./src/sessions');
+const { readCheckpoints, readPlan, readTodos, writeTodos } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
-const { scanSessions: _scanSessions, scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
+const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { processDroppedFile } = require('./src/file-processing');
 
 // ── Dev Console Log Capture ─────────────────────────────────
@@ -60,8 +60,7 @@ const terminalProcesses = new Map(); // tabId → pty process
 const terminalBuffers = new Map(); // tabId → string[]
 const terminalReady = new Map(); // tabId → boolean (Copilot TUI is ready for commands)
 let nextTabId = 1;
-let COPILOT_DIR = folderConfig.copilotDir || path.join(os.homedir(), '.copilot');
-let SESSIONS_DIR = folderConfig.sessionsDir || path.join(COPILOT_DIR, 'session-state');
+let SESSIONS_DIR = folderConfig.sessionsDir || path.join(os.homedir(), '.copilot', 'session-state');
 const COPILOT_BIN = 'copilot';
 let COPILOT_CWD = folderConfig.cwd;
 let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
@@ -342,10 +341,6 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
 
 
 // Sessions
-ipcMain.handle('sessions:list', async () => {
-  return scanSessions();
-});
-
 ipcMain.handle('sessions:readCheckpoints', async (_event, sessionId) => {
   return readCheckpoints(safeSessionPath(sessionId));
 });
@@ -436,11 +431,6 @@ ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
 const { registerImagesIPC } = require('./src/ipc/images-ipc');
 const { startImageWatcher, stopImageWatcher } = registerImagesIPC({ IMAGES_DIR, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, sendToRenderer });
 
-// Config
-ipcMain.handle('config:read', async () => {
-  return readConfig(COPILOT_DIR);
-});
-
 // Preferences (persistent file-based settings)
 // In test mode, use a separate file to avoid polluting real preferences
 const PREFS_PATH = process.env.NODE_ENV === 'test'
@@ -519,10 +509,10 @@ ipcMain.handle('folders:read', () => {
   const config = readFolderConfig();
   return {
     cwd: COPILOT_CWD,
-    copilotDir: COPILOT_DIR,
     sessionsDir: SESSIONS_DIR,
-    skillsDir: config.skillsDir || path.join(COPILOT_DIR, 'skills'),
+    skillsDir: config.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
     imagesDir: IMAGES_DIR,
+    instructionsFile: config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md'),
     homeDir: os.homedir(),
   };
 });
@@ -531,7 +521,6 @@ ipcMain.handle('folders:save', async (_event, newConfig) => {
   try {
     writeFolderConfig(newConfig);
     if (newConfig.cwd) COPILOT_CWD = newConfig.cwd;
-    if (newConfig.copilotDir) COPILOT_DIR = newConfig.copilotDir;
     if (newConfig.sessionsDir) SESSIONS_DIR = newConfig.sessionsDir;
     if (newConfig.imagesDir) IMAGES_DIR = newConfig.imagesDir;
     return { success: true, requiresRestart: true };
@@ -548,6 +537,38 @@ ipcMain.handle('folders:browse', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('folders:browse-file', async (_event, filters) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: filters || [{ name: 'Markdown', extensions: ['md'] }],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('instructions:read', async () => {
+  const config = readFolderConfig();
+  const filePath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
+  try {
+    if (!fs.existsSync(filePath)) return { success: true, content: '', path: filePath };
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, content, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message, path: filePath };
+  }
+});
+
+ipcMain.handle('instructions:write', async (_event, content) => {
+  const config = readFolderConfig();
+  const filePath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Window controls
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
@@ -555,11 +576,6 @@ ipcMain.on('window:maximize', () => {
   else mainWindow?.maximize();
 });
 ipcMain.on('window:close', () => mainWindow?.close());
-
-// ── Session Scanner ──────────────────────────────────────────
-function scanSessions() {
-  return _scanSessions(SESSIONS_DIR, yaml.parse);
-}
 
 // ── Skill Icon Mapping ─────────────────────────────────────---
 // SKILL_ICON_MAP, builtinSkillIcon, userSkillIcon imported from ./src/utils
@@ -595,7 +611,7 @@ function scanSkills() {
   }
 
   // 2) User skills from ~/.copilot/skills/
-  const userSkillsDir = folderConfig.skillsDir || path.join(COPILOT_DIR, 'skills');
+  const userSkillsDir = folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
   skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
 
   return skills;

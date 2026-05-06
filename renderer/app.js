@@ -225,6 +225,20 @@ function getExtraDirs() {
   return getSettings().extraDirs || [];
 }
 
+// Merges user-configured extraDirs with auto-derived paths from folder settings
+let _cachedFolders = null;
+function getEffectiveExtraDirs() {
+  const userDirs = getExtraDirs();
+  if (!_cachedFolders) return userDirs;
+  const autoDirs = [];
+  if (_cachedFolders.skillsDir) autoDirs.push(_cachedFolders.skillsDir);
+  if (_cachedFolders.instructionsFile) {
+    const dir = _cachedFolders.instructionsFile.replace(/[\\/][^\\/]+$/, '');
+    if (dir) autoDirs.push(dir);
+  }
+  return [...new Set([...userDirs, ...autoDirs])];
+}
+
 function addDeniedTool(toolName) {
   const wrapped = toolName.startsWith('shell(') ? toolName : `shell(${toolName})`;
   const tools = getDeniedTools();
@@ -722,7 +736,7 @@ function sendMessage() {
     allowedTools: [],
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
-    addDirs: getExtraDirs(),
+    addDirs: getEffectiveExtraDirs(),
   });
 
   // Update lastUsed for sorting
@@ -1804,16 +1818,16 @@ function initSettings() {
   // Folder settings
   async function loadFolderSettings() {
     const folders = await copilot.folders.read();
+    _cachedFolders = folders;
     document.getElementById('settFolderCwd').value = folders.cwd || '';
-    document.getElementById('settFolderCopilotDir').value = folders.copilotDir || '';
     document.getElementById('settFolderSessions').value = folders.sessionsDir || '';
     document.getElementById('settFolderSkills').value = folders.skillsDir || '';
     document.getElementById('settFolderImages').value = folders.imagesDir || '';
+    document.getElementById('settFolderInstructions').value = folders.instructionsFile || '';
   }
 
   const folderFields = [
     { btn: 'btnBrowseCwd', input: 'settFolderCwd' },
-    { btn: 'btnBrowseCopilotDir', input: 'settFolderCopilotDir' },
     { btn: 'btnBrowseSessions', input: 'settFolderSessions' },
     { btn: 'btnBrowseSkills', input: 'settFolderSkills' },
     { btn: 'btnBrowseImages', input: 'settFolderImages' },
@@ -1825,13 +1839,29 @@ function initSettings() {
     });
   });
 
+  // Instructions file browse (file dialog, not folder)
+  document.getElementById('btnBrowseInstructions').addEventListener('click', async () => {
+    const file = await copilot.folders.browseFile([{ name: 'Markdown', extensions: ['md'] }]);
+    if (file) document.getElementById('settFolderInstructions').value = file;
+  });
+
+  // Instructions editor
+  document.getElementById('btnEditInstructions').addEventListener('click', async () => {
+    const result = await copilot.instructions.read();
+    if (!result.success) {
+      showNotification(`Fehler: ${result.error}`, 'error');
+      return;
+    }
+    openInstructionsEditor(result.content, result.path);
+  });
+
   document.getElementById('btnFoldersSave').addEventListener('click', async () => {
     const config = {
       cwd: document.getElementById('settFolderCwd').value || undefined,
-      copilotDir: document.getElementById('settFolderCopilotDir').value || undefined,
       sessionsDir: document.getElementById('settFolderSessions').value || undefined,
       skillsDir: document.getElementById('settFolderSkills').value || undefined,
       imagesDir: document.getElementById('settFolderImages').value || undefined,
+      instructionsFile: document.getElementById('settFolderInstructions').value || undefined,
     };
     Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
     const result = await copilot.folders.save(config);
@@ -1852,6 +1882,51 @@ function initSettings() {
 
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
+}
+
+// ── Instructions Editor Modal ──────────────────────────────────────
+function openInstructionsEditor(content, filePath) {
+  // Create modal overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'instructions-editor-overlay';
+  overlay.innerHTML = `
+    <div class="instructions-editor">
+      <div class="instructions-editor__header">
+        <span class="instructions-editor__title">📝 Copilot Instructions</span>
+        <span class="instructions-editor__path">${filePath}</span>
+        <button class="instructions-editor__close" data-tooltip="Schließen">✕</button>
+      </div>
+      <textarea class="instructions-editor__textarea" spellcheck="false">${escapeHtml(content)}</textarea>
+      <div class="instructions-editor__footer">
+        <button class="action-btn" id="btnInstructionsCancel">Abbrechen</button>
+        <button class="action-btn action-btn--primary" id="btnInstructionsSave">💾 Speichern</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const textarea = overlay.querySelector('.instructions-editor__textarea');
+  const closeBtn = overlay.querySelector('.instructions-editor__close');
+  const cancelBtn = overlay.querySelector('#btnInstructionsCancel');
+  const saveBtn = overlay.querySelector('#btnInstructionsSave');
+
+  function close() { overlay.remove(); }
+  closeBtn.addEventListener('click', close);
+  cancelBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  saveBtn.addEventListener('click', async () => {
+    const result = await copilot.instructions.write(textarea.value);
+    if (result.success) {
+      showNotification('Instructions gespeichert', 'success');
+      close();
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
+  });
+
+  // Focus textarea
+  setTimeout(() => textarea.focus(), 100);
 }
 
 function initSidebar() {
