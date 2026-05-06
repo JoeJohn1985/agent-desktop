@@ -1075,11 +1075,20 @@ function initModelSwitcher() {
   const sbModel = document.getElementById('sbModel');
   if (!sbModel) return;
 
+  let activeCloseHandler = null;
+
   sbModel.addEventListener('click', (e) => {
     e.stopPropagation();
     // Close existing dropdown if any
     const existing = document.querySelector('.model-dropdown');
-    if (existing) { existing.remove(); return; }
+    if (existing) {
+      existing.remove();
+      if (activeCloseHandler) {
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
+      }
+      return;
+    }
 
     const models = getAvailableModels();
     const tab = tabs.get(activeTabId);
@@ -1102,13 +1111,14 @@ function initModelSwitcher() {
     statusbar.appendChild(dropdown);
 
     // Close on outside click
-    const closeHandler = (ev) => {
+    activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== sbModel) {
         dropdown.remove();
-        document.removeEventListener('click', closeHandler, true);
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
       }
     };
-    setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+    setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
   });
 }
 
@@ -1121,6 +1131,10 @@ async function switchModel(model) {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
 
+  // Save previous state for rollback
+  const prevModel = tab.context.model;
+  const prevLabel = document.getElementById('sbModel')?.textContent || '';
+
   // Optimistically update display
   tab.context.model = model.id;
   updateStatusbar('sbModel', `🧠 ${model.label}`);
@@ -1130,6 +1144,9 @@ async function switchModel(model) {
     await copilot.terminal.sendSlash(activeTabId, `/model ${model.id}`);
   } catch (err) {
     console.error('[ModelSwitcher] Failed to switch model:', err);
+    // Rollback on error
+    tab.context.model = prevModel;
+    document.getElementById('sbModel').textContent = prevLabel;
   }
 }
 
@@ -1972,7 +1989,7 @@ function openInstructionsEditor(content, filePath) {
     <div class="instructions-editor">
       <div class="instructions-editor__header">
         <span class="instructions-editor__title">📝 Copilot Instructions</span>
-        <span class="instructions-editor__path">${filePath}</span>
+        <span class="instructions-editor__path">${escapeHtml(filePath)}</span>
         <button class="instructions-editor__close" data-tooltip="Schließen">✕</button>
       </div>
       <textarea class="instructions-editor__textarea" spellcheck="false">${escapeHtml(content)}</textarea>
