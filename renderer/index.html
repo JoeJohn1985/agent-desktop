@@ -59,6 +59,16 @@
         </div>
       </div>
 
+      <!-- Agents Section -->
+      <div class="sidebar__section" data-icon="🤖">
+        <div class="sidebar__header" onclick="toggleSection('agents')">
+          <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
+        </div>
+        <div class="sidebar__content" id="agentsContent">
+          <div class="sidebar__list" id="agentList"></div>
+        </div>
+      </div>
+
       <!-- Todos Section -->
       <div class="sidebar__section" id="todosSection" style="display:none;" data-icon="✅">
         <div class="sidebar__header" onclick="toggleSection('todos')">
@@ -354,6 +364,14 @@
             <div class="settings__folder-row">
               <input type="text" class="settings__folder-input" id="settFolderSkills" placeholder="z.B. C:\Users\Name\.copilot\skills" readonly />
               <button class="action-btn" id="btnBrowseSkills" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">🤖 Agents</label>
+            <div class="settings__hint">Ordner mit .agent.md Dateien für KI-Agents.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderAgents" placeholder="z.B. C:\Users\Name\.copilot\agents" readonly />
+              <button class="action-btn" id="btnBrowseAgents" data-tooltip="Ordner auswählen">📁</button>
             </div>
           </div>
           <div class="settings__group">

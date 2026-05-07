@@ -111,6 +111,10 @@ contextBridge.exposeInMainWorld('copilot', {
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
   },
+  // Agents
+  agents: {
+    list: () => ipcRenderer.invoke('agents:list'),
+  },
   // Tests
   tests: {
     run: () => ipcRenderer.invoke('tests:run'),

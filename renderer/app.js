@@ -26,10 +26,14 @@ console.error = (...args) => {
 // ── Skills Definition ────────────────────────────────────────
 let skills = []; // dynamically loaded from main process
 
+// ── Agents Definition ────────────────────────────────────────
+let agents = []; // dynamically loaded from main process
+
 // ── State ────────────────────────────────────────────────────
 let sessions = [];
 let activeSessionId = null;
 let activeSkills = new Set();
+let activeAgents = new Set();
 let userHomeDir = ''; // loaded from main process at startup
 const inputHistory = [];
 let historyIndex = -1;
@@ -234,6 +238,7 @@ function getEffectiveExtraDirs() {
   if (!_cachedFolders) return userDirs;
   const autoDirs = [];
   if (_cachedFolders.skillsDir) autoDirs.push(_cachedFolders.skillsDir);
+  if (_cachedFolders.agentsDir) autoDirs.push(_cachedFolders.agentsDir);
   if (_cachedFolders.instructionsFile) {
     const dir = _cachedFolders.instructionsFile.replace(/[\\/][^\\/]+$/, '');
     if (dir) autoDirs.push(dir);
@@ -711,6 +716,25 @@ function sendMessage() {
     }
   }
 
+  // Build agent instructions prefix for active agents
+  let agentPrefix = '';
+  const activeAgentInfos = [];
+  if (activeAgents.size > 0) {
+    for (const id of activeAgents) {
+      const a = agents.find(ag => ag.id === id);
+      if (a) {
+        activeAgentInfos.push({ name: a.name, icon: a.icon || '🤖' });
+      }
+    }
+    if (activeAgentInfos.length > 0) {
+      const agentNames = [...activeAgents].map(id => {
+        const a = agents.find(ag => ag.id === id);
+        return a ? `/agent ${a.name}` : null;
+      }).filter(Boolean);
+      agentPrefix = `${agentNames.join('\n')}\n\n`;
+    }
+  }
+
   // Show skill indicator tags below user message
   if (activeSkillInfos.length > 0) {
     const skillBar = document.createElement('div');
@@ -719,6 +743,16 @@ function sendMessage() {
       `<span class="stream-input__skill-tag">${si.icon} ${escapeHtml(si.name)}</span>`
     ).join('');
     tab.streamEl.insertBefore(skillBar, tab.statusEl);
+  }
+
+  // Show agent indicator tags below user message
+  if (activeAgentInfos.length > 0) {
+    const agentBar = document.createElement('div');
+    agentBar.className = 'stream-input__skills';
+    agentBar.innerHTML = activeAgentInfos.map(ai =>
+      `<span class="stream-input__skill-tag">${ai.icon} ${escapeHtml(ai.name)}</span>`
+    ).join('');
+    tab.streamEl.insertBefore(agentBar, tab.statusEl);
   }
 
   // Show thinking indicator
@@ -732,7 +766,7 @@ function sendMessage() {
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
   const mergedDenied = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
 
-  copilot.chat.send(activeTabId, skillPrefix + text, {
+  copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
     allowedTools: [],
@@ -1384,7 +1418,7 @@ function renderSkills() {
     const isActive = activeSkills.has(s.id);
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''}"
-           onclick="toggleSkill('${s.id}')" data-tooltip="${escapeHtml(s.description)}">
+           onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${s.icon}</span>
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}</div>
@@ -1400,6 +1434,31 @@ function toggleSkill(skillId) {
   else activeSkills.add(skillId);
   saveSetting('activeSkills', [...activeSkills]);
   renderSkills();
+}
+
+// ── Agents ───────────────────────────────────────────────────
+function renderAgents() {
+  const container = document.getElementById('agentList');
+  container.innerHTML = agents.map(a => {
+    const isActive = activeAgents.has(a.id);
+    return `
+      <div class="agent-card ${isActive ? 'agent-card--active' : ''}"
+           onclick="toggleAgent('${escapeAttr(a.id)}')" data-tooltip="${escapeAttr(a.description)}">
+        <span class="agent-card__icon">${a.icon}</span>
+        <div class="agent-card__info">
+          <div class="agent-card__name">${escapeHtml(a.name)}</div>
+        </div>
+        <div class="agent-card__toggle"></div>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleAgent(agentId) {
+  if (activeAgents.has(agentId)) activeAgents.delete(agentId);
+  else activeAgents.add(agentId);
+  saveSetting('activeAgents', [...activeAgents]);
+  renderAgents();
 }
 
 // ── Sidebar Resize ───────────────────────────────────────────
@@ -1539,6 +1598,16 @@ async function initDataLoad() {
   const savedActiveSkills = getSettings().activeSkills || [];
   activeSkills = new Set(savedActiveSkills);
   renderSkills();
+
+  try {
+    agents = await copilot.agents.list() || [];
+  } catch (e) {
+    console.warn('[agents] Laden fehlgeschlagen:', e.message);
+    agents = [];
+  }
+  const savedActiveAgents = getSettings().activeAgents || [];
+  activeAgents = new Set(savedActiveAgents);
+  renderAgents();
 
   await loadSessions();
   await loadImages();
@@ -1918,6 +1987,7 @@ function initSettings() {
     document.getElementById('settFolderCwd').value = folders.cwd || '';
     document.getElementById('settFolderSessions').value = folders.sessionsDir || '';
     document.getElementById('settFolderSkills').value = folders.skillsDir || '';
+    document.getElementById('settFolderAgents').value = folders.agentsDir || '';
     document.getElementById('settFolderImages').value = folders.imagesDir || '';
     document.getElementById('settFolderInstructions').value = folders.instructionsFile || '';
   }
@@ -1926,6 +1996,7 @@ function initSettings() {
     { btn: 'btnBrowseCwd', input: 'settFolderCwd' },
     { btn: 'btnBrowseSessions', input: 'settFolderSessions' },
     { btn: 'btnBrowseSkills', input: 'settFolderSkills' },
+    { btn: 'btnBrowseAgents', input: 'settFolderAgents' },
     { btn: 'btnBrowseImages', input: 'settFolderImages' },
   ];
   folderFields.forEach(({ btn, input }) => {
@@ -1956,6 +2027,7 @@ function initSettings() {
       cwd: document.getElementById('settFolderCwd').value || undefined,
       sessionsDir: document.getElementById('settFolderSessions').value || undefined,
       skillsDir: document.getElementById('settFolderSkills').value || undefined,
+      agentsDir: document.getElementById('settFolderAgents').value || undefined,
       imagesDir: document.getElementById('settFolderImages').value || undefined,
       instructionsFile: document.getElementById('settFolderInstructions').value || undefined,
     };

@@ -502,6 +502,46 @@ body {
   background: #fff;
 }
 
+/* ── Agent Cards ─────────────────────────────────────────── */
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.agent-card:hover { background: var(--bg-hover); }
+.agent-card__icon { font-size: 16px; width: 22px; text-align: center; }
+.agent-card__info { flex: 1; min-width: 0; }
+.agent-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card__toggle {
+  width: 32px; height: 18px;
+  background: var(--bg-active);
+  border-radius: 9px;
+  position: relative;
+  transition: background 0.25s ease;
+  flex-shrink: 0;
+}
+.agent-card__toggle::after {
+  content: '';
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  top: 2px; left: 2px;
+  transition: transform 0.25s ease, background 0.25s ease;
+}
+.agent-card--active .agent-card__toggle {
+  background: var(--accent);
+}
+.agent-card--active .agent-card__toggle::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+
 /* ── Status Panel ─────────────────────────────────────── */
 .status-panel { padding: 12px 14px; font-size: 16px; }
 .status-panel__empty { color: var(--text-muted); font-style: italic; font-size: 16px; }

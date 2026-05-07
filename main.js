@@ -8,6 +8,7 @@ const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkil
 const { readCheckpoints, readPlan, readTodos, writeTodos } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
+const { scanAgentsDirectory } = require('./src/agents');
 const { processDroppedFile } = require('./src/file-processing');
 
 // ── Dev Console Log Capture ─────────────────────────────────
@@ -500,6 +501,11 @@ ipcMain.handle('skills:list', async () => {
   return scanSkills();
 });
 
+// Agents
+ipcMain.handle('agents:list', async () => {
+  return scanAgents();
+});
+
 // Tests → src/ipc/tests-ipc.js
 const { registerTestsIPC } = require('./src/ipc/tests-ipc');
 registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOUT_MS });
@@ -511,6 +517,7 @@ ipcMain.handle('folders:read', () => {
     cwd: COPILOT_CWD,
     sessionsDir: SESSIONS_DIR,
     skillsDir: config.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
+    agentsDir: config.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),
     imagesDir: IMAGES_DIR,
     instructionsFile: config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md'),
     homeDir: os.homedir(),
@@ -615,6 +622,13 @@ function scanSkills() {
   skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
 
   return skills;
+}
+
+// ── Agents Scanner ────────────────────────────────────────────
+function scanAgents() {
+  const config = readFolderConfig();
+  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+  return scanAgentsDirectory(agentsDir, yaml.parse);
 }
 
 // Terminal → src/ipc/terminal-ipc.js
