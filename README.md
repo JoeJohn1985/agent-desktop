@@ -1,23 +1,29 @@
 # Copilot Desktop
 
-**Copilot Desktop** is an Electron-based desktop app that wraps the GitHub Copilot CLI in a polished chat interface. It supports multiple named sessions, toggleable AI skills with unique icons, markdown rendering, file drag & drop, and automatic task routing to sub-agents based on complexity — all in a clean, themeable UI.
+**Copilot Desktop** is an Electron-based desktop app that wraps the GitHub Copilot CLI in a polished chat interface. It supports multiple named sessions, toggleable AI skills and agents, markdown rendering, file drag & drop, model switching, and automatic task routing to sub-agents based on complexity — all in a clean, themeable UI.
 
 ## Features
 
 - 💬 **Multi-Session Management** — Create, rename, and switch between named sessions
 - 🧠 **Skill Toggles** — Enable/disable AI skills per session; active skills are injected into prompts automatically
-- 🔍 **Skill Tags** — Visual indicators under each message showing which skills were active
+- 🤖 **Agent Toggles** — Enable/disable custom agents per session; active agents are injected as `/agent <name>` prefix automatically
+- 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were active
 - 📝 **Markdown Rendering** — Full markdown support including code blocks with syntax highlighting
 - 🎨 **Themes** — Multiple built-in color themes
 - 🔒 **Permission System** — Configurable tool permissions (read, write, shell, etc.)
 - 📂 **File Drag & Drop** — Drop files directly into the chat
 - 🔎 **Chat Search** — Search through conversation history
-- ⚙️ **Settings Dialog** — Model selection, permissions, and preferences
+- ⚙️ **Settings Dialog** — Model selection, permissions, folder paths, and preferences
+- 🔀 **Model Switcher** — Switch between AI models directly from the status bar
 - 🤖 **Sub-Agent Routing** — Automatic task complexity classification and delegation to specialized sub-agents
 
 ## Skills
 
 The app dynamically loads skills from your local Copilot installation (`~/.copilot/skills/`). Skills can be toggled on/off per session — active skills are automatically injected into prompts and shown as tags below each message.
+
+## Agents
+
+The app dynamically loads custom agents from `~/.copilot/agents/` (configurable in Settings → Folders). Agent files follow the `*.agent.md` format with YAML frontmatter (`name`, `description`, `tools`). Active agents are injected as `/agent <name>` prefix per message.
 
 ## Requirements
 
@@ -97,11 +103,17 @@ npm start
 
 ```
 copilot-desktop/
-├── main.js              # Electron main process, skill scanner, session management
+├── main.js              # Electron main process, IPC handlers, skill/agent scanner
+├── src/
+│   ├── agents.js        # Agent directory scanner (*.agent.md)
+│   ├── scanners.js      # Skill directory scanner
+│   └── ipc/             # IPC handler modules
 ├── renderer/
-│   ├── app.js           # Frontend logic, chat UI, skill toggles
+│   ├── app.js           # Frontend logic, chat UI, skill/agent toggles
 │   └── styles.css       # Styles and themes
-├── preload.js           # Electron preload script
+├── preload.js           # Electron preload script (IPC bridge)
+├── __tests__/           # Vitest test suites
+├── CHANGELOG.md         # Version history
 └── package.json
 ```
 
