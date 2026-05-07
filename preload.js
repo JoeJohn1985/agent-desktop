@@ -141,6 +141,10 @@ contextBridge.exposeInMainWorld('copilot', {
       return () => ipcRenderer.removeListener('dev-console:log', handler);
     },
   },
+  // Logging (renderer → main → file)
+  log: {
+    write: (level, message) => ipcRenderer.send('log:write', level, message),
+  },
   // Terminal (interactive PTY for slash commands)
   terminal: {
     available: () => ipcRenderer.invoke('terminal:available'),

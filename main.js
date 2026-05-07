@@ -10,6 +10,10 @@ const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOut
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
 const { processDroppedFile } = require('./src/file-processing');
+const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
+
+// ── File Logger Init ────────────────────────────────────────
+initLogger();
 
 // ── Dev Console Log Capture ─────────────────────────────────
 const _originalConsoleLog = console.log;
@@ -25,9 +29,9 @@ function _sendDevLog(level, args) {
   } catch (_) { /* ignore serialization errors */ }
 }
 
-console.log = (...args) => { _originalConsoleLog(...args); _sendDevLog('info', args); };
-console.warn = (...args) => { _originalConsoleWarn(...args); _sendDevLog('warn', args); };
-console.error = (...args) => { _originalConsoleError(...args); _sendDevLog('error', args); };
+console.log = (...args) => { _originalConsoleLog(...args); writeLog('info', args); _sendDevLog('info', args); };
+console.warn = (...args) => { _originalConsoleWarn(...args); writeLog('warn', args); _sendDevLog('warn', args); };
+console.error = (...args) => { _originalConsoleError(...args); writeLog('error', args); _sendDevLog('error', args); };
 
 // ── PTY (optional, for interactive terminal) ─────────────────
 let pty;
@@ -279,6 +283,15 @@ ipcMain.handle('copilot:getCwd', () => {
 
 ipcMain.handle('copilot:openCwd', () => {
   shell.openPath(COPILOT_CWD);
+});
+
+ipcMain.handle('copilot:openLogDir', () => {
+  shell.openPath(getLogDir());
+});
+
+// Renderer → file log bridge
+ipcMain.on('log:write', (_event, level, message) => {
+  writeLog(level || 'info', [message]);
 });
 
 ipcMain.handle('copilot:getVersions', async () => {
@@ -648,6 +661,7 @@ registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers, termina
 
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
+  console.log(`[app] Copilot Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
   createWindow();
   startImageWatcher();
 });
@@ -658,6 +672,7 @@ app.on('window-all-closed', () => {
   terminalProcesses.forEach(p => p.kill());
   terminalProcesses.clear();
   stopImageWatcher();
+  closeLogger();
   app.quit();
 });
 

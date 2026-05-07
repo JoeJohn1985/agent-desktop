@@ -1,23 +1,18 @@
-// Capture renderer console for dev console
+// Capture renderer console for dev console + file logging
 const _rendererOrigLog = console.log;
 const _rendererOrigWarn = console.warn;
 const _rendererOrigError = console.error;
 window._rendererLogs = [];
-console.log = (...args) => {
-  _rendererOrigLog(...args);
+
+function _rendererLog(level, args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  window._rendererLogs.push({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
-};
-console.warn = (...args) => {
-  _rendererOrigWarn(...args);
-  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  window._rendererLogs.push({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
-};
-console.error = (...args) => {
-  _rendererOrigError(...args);
-  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  window._rendererLogs.push({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
-};
+  window._rendererLogs.push({ level, message: '[renderer] ' + msg, timestamp: Date.now() });
+  try { window.copilot.log.write(level, '[renderer] ' + msg); } catch (_) { /* bridge not ready */ }
+}
+
+console.log = (...args) => { _rendererOrigLog(...args); _rendererLog('info', args); };
+console.warn = (...args) => { _rendererOrigWarn(...args); _rendererLog('warn', args); };
+console.error = (...args) => { _rendererOrigError(...args); _rendererLog('error', args); };
 
 // ── Terminal Panel State ──────────────────────────────────────
 // Per-tab terminal state is stored in the tab object:
