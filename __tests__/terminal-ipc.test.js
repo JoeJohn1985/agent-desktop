@@ -244,7 +244,23 @@ describe('registerTerminalIPC', () => {
     readyCb('Session may already be in use');
 
     jest.advanceTimersByTime(600);
-    expect(mockPtyProcess.write).toHaveBeenCalledWith('1');
+    expect(mockPtyProcess.write).toHaveBeenCalledWith('1\r');
+  });
+
+  test('terminal:spawn-background auto-confirms folder trust prompt', () => {
+    const onDataCallbacks = [];
+    mockPtyProcess.onData = jest.fn((cb) => {
+      onDataCallbacks.push(cb);
+      return { dispose: jest.fn() };
+    });
+    registerFresh();
+    getHandle('terminal:spawn-background')({}, 'tab1', null);
+
+    const readyCb = onDataCallbacks[1];
+    readyCb('Confirm folder trust\n? Yes');
+
+    jest.advanceTimersByTime(600);
+    expect(mockPtyProcess.write).toHaveBeenCalledWith('2\r');
   });
 
   test('terminal:spawn-background readyFallback setzt ready nach Timeout', () => {
@@ -324,7 +340,7 @@ describe('registerTerminalIPC', () => {
     getHandle('terminal:spawn')({}, 'tab1', null, null);
 
     exitCb({ exitCode: 1 });
-    expect(deps.cleanupPty).toHaveBeenCalledWith('tab1', 1);
+    expect(deps.cleanupPty).toHaveBeenCalledWith('tab1', 1, expect.any(Function));
   });
 
   test('terminal:spawn mit slashCommand sendet nach quiet-Periode', () => {

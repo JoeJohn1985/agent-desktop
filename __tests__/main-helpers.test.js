@@ -4,6 +4,8 @@ const {
   collectPtyOutput,
   cleanupPty,
   buildEnv,
+  detectCopilotPrompt,
+  isCopilotTuiReady,
 } = require('../src/main-helpers');
 const path = require('path');
 const os = require('os');
@@ -410,5 +412,88 @@ describe('buildEnv', () => {
       expect(env.MY_VAR).toBe('overridden');
       delete process.env.MY_VAR;
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// detectCopilotPrompt
+// ═══════════════════════════════════════════════════════════════
+describe('detectCopilotPrompt', () => {
+  it('liefert null bei leerem Buffer', () => {
+    expect(detectCopilotPrompt('', new Set())).toBeNull();
+    expect(detectCopilotPrompt(undefined, new Set())).toBeNull();
+  });
+
+  it('liefert null wenn kein bekannter Prompt enthalten ist', () => {
+    expect(detectCopilotPrompt('Loading environment...', new Set())).toBeNull();
+  });
+
+  it('erkennt "Confirm folder trust" und sendet 2 + Enter', () => {
+    const result = detectCopilotPrompt('... Confirm folder trust ...', new Set());
+    expect(result).toEqual({ name: 'trust', input: '2\r' });
+  });
+
+  it('erkennt "Do you trust the files in this folder"', () => {
+    const result = detectCopilotPrompt(
+      'Do you trust the files in this folder?',
+      new Set()
+    );
+    expect(result).toEqual({ name: 'trust', input: '2\r' });
+  });
+
+  it('erkennt Session-Konflikt ("already be in use")', () => {
+    const result = detectCopilotPrompt(
+      'This session may already be in use',
+      new Set()
+    );
+    expect(result).toEqual({ name: 'conflict', input: '1\r' });
+  });
+
+  it('erkennt "conflict" als Session-Konflikt', () => {
+    const result = detectCopilotPrompt('Resume conflict detected', new Set());
+    expect(result).toEqual({ name: 'conflict', input: '1\r' });
+  });
+
+  it('priorisiert Trust-Prompt über Conflict bei beiden gleichzeitig', () => {
+    const buf = 'Confirm folder trust ... already be in use';
+    expect(detectCopilotPrompt(buf, new Set())).toEqual({ name: 'trust', input: '2\r' });
+  });
+
+  it('liefert null wenn Prompt bereits behandelt wurde', () => {
+    const handled = new Set(['trust']);
+    expect(detectCopilotPrompt('Confirm folder trust', handled)).toBeNull();
+  });
+
+  it('erkennt zweiten Prompt nachdem erster behandelt wurde', () => {
+    const buf = 'Confirm folder trust ... already be in use';
+    const handled = new Set(['trust']);
+    expect(detectCopilotPrompt(buf, handled)).toEqual({ name: 'conflict', input: '1\r' });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// isCopilotTuiReady
+// ═══════════════════════════════════════════════════════════════
+describe('isCopilotTuiReady', () => {
+  it('false bei leerem Buffer', () => {
+    expect(isCopilotTuiReady('')).toBe(false);
+    expect(isCopilotTuiReady(undefined)).toBe(false);
+  });
+
+  it('false bei Loading-Output', () => {
+    expect(isCopilotTuiReady('Loading environment...')).toBe(false);
+  });
+
+  it('true bei "/ commands"', () => {
+    expect(isCopilotTuiReady('foo / commands · ? help bar')).toBe(true);
+  });
+
+  it('true bei "? help" allein', () => {
+    expect(isCopilotTuiReady('Type ? help for shortcuts')).toBe(true);
+  });
+
+  it('true im echten TUI-Footer-Ausschnitt', () => {
+    const realFooter = '/ commands · ? help                                            Claude Opus 4.6';
+    expect(isCopilotTuiReady(realFooter)).toBe(true);
   });
 });

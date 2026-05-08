@@ -35,6 +35,43 @@ function buildEnv(extraEnv = {}) {
   return { ...process.env, ...extraEnv, PATH: augmentedPath };
 }
 
+// ── Copilot CLI prompt detection ─────────────────────────────
+/**
+ * Detects interactive prompts shown by the Copilot CLI on startup
+ * and returns the keys that should be sent to dismiss them.
+ *
+ * Returns null if no prompt is detected (or if the prompt has
+ * already been seen — the second arg is a Set of already-handled
+ * prompt names).
+ */
+function detectCopilotPrompt(buffer, alreadyHandled = new Set()) {
+  if (!buffer) return null;
+
+  // Folder trust prompt: "Do you trust the files in this folder?"
+  // Option 2 = "Yes, and remember this folder for future sessions"
+  if (!alreadyHandled.has('trust') &&
+      (buffer.includes('Confirm folder trust') ||
+       buffer.includes('Do you trust the files in this folder'))) {
+    return { name: 'trust', input: '2\r' };
+  }
+
+  // Session conflict prompt — appears when --resume conflicts with
+  // an existing session. Option 1 = "Use this session anyway".
+  if (!alreadyHandled.has('conflict') &&
+      (buffer.includes('already be in use') ||
+       buffer.includes('conflict'))) {
+    return { name: 'conflict', input: '1\r' };
+  }
+
+  return null;
+}
+
+/** True once the Copilot TUI is interactive (slash commands accepted). */
+function isCopilotTuiReady(buffer) {
+  if (!buffer) return false;
+  return buffer.includes('/ commands') || buffer.includes('? help');
+}
+
 // ── sendToRenderer Factory ───────────────────────────────────
 function createSendToRenderer(getWindow) {
   return function sendToRenderer(channel, ...args) {
@@ -108,6 +145,8 @@ function cleanupPty(maps, tabId, exitCode, { extraCleanup, sendFn } = {}) {
 
 module.exports = {
   buildEnv,
+  detectCopilotPrompt,
+  isCopilotTuiReady,
   createSendToRenderer,
   waitForReady,
   collectPtyOutput,
