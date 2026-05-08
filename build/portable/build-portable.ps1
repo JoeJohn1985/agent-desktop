@@ -81,7 +81,17 @@ Invoke-Step 'Clean stage directory' {
 }
 
 # --- 3. electron-builder ----------------------------------------------------
+# NOTE: native modules (e.g. node-pty) need to match the Electron ABI.
+# On CI the workflow runs `electron-builder install-app-deps` first
+# (Windows runners have VS Build Tools). Locally without VS Build Tools
+# we rely on `npmRebuild: false` and accept that some native features may
+# not be functional until the bundle is built on CI. The packaging step
+# itself still works and validates the pipeline.
 Invoke-Step 'Run electron-builder --win dir' {
+    # Disable code-signing toolchain; we ship unsigned for internal distribution.
+    # (winCodeSign cache extraction otherwise needs symlink privileges on Windows.)
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+    $env:WIN_CSC_LINK = ''
     & npx --no-install electron-builder --win dir 2>&1 |
         ForEach-Object { Write-Log $_ }
     if ($LASTEXITCODE -ne 0) { throw "electron-builder exited with $LASTEXITCODE" }

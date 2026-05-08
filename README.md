@@ -121,6 +121,25 @@ copilot-desktop/
 
 - 📐 **[Technische Architektur](docs/ARCHITECTURE.md)** — Architektur-Diagramm, IPC-Channels, Datenflüsse, Persistenz, Security
 - 📘 **[Benutzerhandbuch](docs/USER-GUIDE.md)** — UI-Übersicht, Features, Erste Schritte, Tastenkombinationen
+- 📦 **[Portable Distribution](docs/PORTABLE-DISTRIBUTION.md)** — Maintainer-Doku zu Bundle-Layout, Build-Pipeline und Auto-Update-Mechanismus für die GEBIT-interne ZIP-Distribution
+
+## Portable Distribution (GEBIT-internal)
+
+For internal distribution we ship Copilot Desktop as a signature-free
+portable ZIP — no installer, no admin rights, no certificate cost.
+Build locally:
+
+```powershell
+npm install
+npm run dist:portable
+# → dist-portable\copilot-desktop-vX.Y.Z-portable.zip
+```
+
+End-users extract the ZIP and double-click `start.bat`. The app
+auto-detects new releases in the background and presents a
+Firefox-style "Restart to apply" notification. See
+[`docs/PORTABLE-DISTRIBUTION.md`](docs/PORTABLE-DISTRIBUTION.md)
+for the full Bundle-Layout, Update-Mechanismus, and Test-Procedure.
 
 ## License
 
