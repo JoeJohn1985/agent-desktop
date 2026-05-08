@@ -63,7 +63,7 @@ const terminalReady = new Map(); // tabId → boolean (Copilot TUI is ready for 
 let nextTabId = 1;
 let SESSIONS_DIR = folderConfig.sessionsDir || path.join(os.homedir(), '.copilot', 'session-state');
 const COPILOT_BIN = 'copilot';
-let COPILOT_CWD = folderConfig.cwd;
+let COPILOT_CWD = folderConfig.cwd || process.cwd();
 let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
 const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
 

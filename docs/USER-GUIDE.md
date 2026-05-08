@@ -240,6 +240,8 @@ Ziehe Dateien direkt in den Chat-Bereich:
 Skills sind KI-Erweiterungen, die Copilot spezialisierte Fähigkeiten verleihen.
 
 - Skills liegen als `SKILL.md`-Dateien im Verzeichnis `~/.copilot/skills/`.
+  (Wird vom Setup-Skript automatisch angelegt; bei manueller Installation
+  ggf. selbst erstellen: `mkdir ~/.copilot/skills`.)
 - In der Sidebar kannst du Skills per **Toggle-Schalter** aktivieren und deaktivieren.
 - Aktive Skills werden als Prompt-Präfix in jede Nachricht injiziert.
 - **Skill-Tags** unter jeder Chat-Nachricht zeigen, welche Skills zum Zeitpunkt des Sendens aktiv waren.

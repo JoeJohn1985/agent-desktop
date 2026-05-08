@@ -82,7 +82,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Dependencies installed successfully."
 
-# ── 6. Auth check ────────────────────────────────────────────
+# ── 6. Ensure required Copilot user directories exist ───────
+# The Copilot CLI errors with "Directory does not exist or cannot be
+# accessed" if any of these is missing on first launch. Create them
+# idempotently here so the very first prompt succeeds.
+Write-Step "Ensuring Copilot user directories exist..."
+$copilotDirs = @(
+    (Join-Path $HOME ".copilot\skills"),
+    (Join-Path $HOME ".copilot\agents")
+)
+foreach ($dir in $copilotDirs) {
+    if (Test-Path $dir) {
+        Write-OK "Directory already present: $dir"
+    } else {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Write-OK "Created directory: $dir"
+    }
+}
+
+# ── 7. Auth check ────────────────────────────────────────────
 Write-Step "Checking GitHub authentication..."
 $authStatus = gh auth status 2>&1
 if ($LASTEXITCODE -eq 0) {
