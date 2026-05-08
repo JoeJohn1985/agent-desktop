@@ -3,6 +3,7 @@
 'use strict';
 
 const { ipcMain } = require('electron');
+const { buildEnv } = require('../main-helpers');
 
 function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers, terminalReady, terminalBusy, sendToRenderer, waitForTerminalReady, collectPtyOutput, cleanupPty, COPILOT_CWD, PTY_BUFFER_MAX_CHUNKS, PTY_READY_TIMEOUT_MS, PTY_WRITE_DELAY_MS, PTY_SLASH_QUIET_THRESHOLD_MS, PTY_SLASH_CHECK_INTERVAL_MS, PTY_SLASH_FALLBACK_TIMEOUT_MS }) {
 
@@ -19,7 +20,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       cols: 80,
       rows: 24,
       cwd: COPILOT_CWD,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: buildEnv({ TERM: 'xterm-256color' }),
     });
 
     terminalProcesses.set(tabId, ptyProcess);
@@ -153,7 +154,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       cols: 80,
       rows: 24,
       cwd: COPILOT_CWD,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: buildEnv({ TERM: 'xterm-256color' }),
     });
 
     terminalProcesses.set(tabId, ptyProcess);

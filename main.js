@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const yaml = require('yaml');
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
-const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
+const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
 const { processDroppedFile } = require('./src/file-processing');
@@ -211,7 +211,7 @@ function spawnCopilot(tabId, prompt, options = {}) {
 
   const proc = spawn(COPILOT_BIN, args, {
     cwd: options.cwd || COPILOT_CWD,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: buildEnv({ NO_COLOR: '1' }),
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -299,7 +299,7 @@ ipcMain.handle('copilot:getVersions', async () => {
   let cliVersion = '?';
   try {
     const { execSync } = require('child_process');
-    cliVersion = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS }).toString().trim();
+    cliVersion = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS, env: buildEnv() }).toString().trim();
   } catch (e) {
     console.warn('[copilot:getVersions] Fehler:', e.message || e);
   }
