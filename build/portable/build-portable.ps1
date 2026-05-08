@@ -77,6 +77,7 @@ Write-Log "Stage dir   : $stage"
 Invoke-Step 'Clean stage directory' {
     if (Test-Path $stage)            { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage 'current') | Out-Null
 }
 
 # --- 3. electron-builder ----------------------------------------------------
@@ -88,12 +89,12 @@ Invoke-Step 'Run electron-builder --win dir' {
     $ebOut = Join-Path $repoRoot 'dist\win-unpacked'
     if (-not (Test-Path $ebOut)) { throw "electron-builder output not found: $ebOut" }
 
-    Copy-Item -Recurse -Force $ebOut (Join-Path $stage 'app')
+    Copy-Item -Recurse -Force $ebOut (Join-Path $stage 'current\app')
 }
 
 # --- 4. Portable gh ---------------------------------------------------------
 Invoke-Step "Fetch portable gh v$GhVersion" {
-    $ghStage = Join-Path $stage 'tools\gh'
+    $ghStage = Join-Path $stage 'current\tools\gh'
     New-Item -ItemType Directory -Force -Path $ghStage | Out-Null
 
     if ($SkipGh) {
@@ -132,7 +133,7 @@ Invoke-Step "Fetch portable gh v$GhVersion" {
 Invoke-Step 'Copy start.bat, README, VERSION.txt' {
     Copy-Item -Force (Join-Path $PSScriptRoot 'start.bat')           (Join-Path $stage 'start.bat')
     Copy-Item -Force (Join-Path $PSScriptRoot 'PORTABLE_README.txt') (Join-Path $stage 'PORTABLE_README.txt')
-    Set-Content -Path (Join-Path $stage 'VERSION.txt') -Value @"
+    Set-Content -Path (Join-Path $stage 'current\VERSION.txt') -Value @"
 copilot-desktop $version
 built  : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ssK')
 host   : $env:COMPUTERNAME

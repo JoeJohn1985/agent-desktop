@@ -24,10 +24,18 @@ sobald sie einmal eingerichtet sind.
 
 UPDATE
 ------
-1. Neue ZIP-Datei herunterladen.
-2. Alten Ordner loeschen (oder umbenennen) und die neue ZIP entpacken.
-3. "start.bat" doppelklicken - Login bleibt erhalten, weil er im
-   Benutzerprofil unter "%APPDATA%\GitHub CLI\" liegt.
+Updates passieren automatisch im Hintergrund. Sobald die App eine neuere
+Version im internen GitHub-Repository findet:
+1. Wird sie still im Hintergrund heruntergeladen und entpackt
+   (in den Unterordner "_staged\vX.Y.Z\" Deines Bundle-Ordners).
+2. Erscheint in der App ein Hinweis "Update bereit - Neustart erforderlich"
+   mit einem Button.
+3. Beim Neustart aktiviert "start.bat" die neue Version atomar
+   (Umbenennung "current" -> "_old", "_staged\vX.Y.Z" -> "current").
+4. Die alte Version unter "_old\" wird im Hintergrund aufgeraeumt.
+
+Manuelles Update geht weiterhin: einfach die neue ZIP herunterladen,
+in einen leeren Ordner entpacken, "start.bat" doppelklicken.
 
 DEINSTALLATION
 --------------

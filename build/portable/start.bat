@@ -7,7 +7,12 @@ REM  Bootstraps gh auth + gh-copilot extension, then starts app.
 REM  All steps are logged to %LOCALAPPDATA%\copilot-desktop\logs\
 REM ============================================================
 
-set "APP_ROOT=%~dp0"
+set "BUNDLE_ROOT=%~dp0"
+set "CURRENT_DIR=%BUNDLE_ROOT%current"
+set "STAGED_DIR=%BUNDLE_ROOT%_staged"
+set "OLD_DIR=%BUNDLE_ROOT%_old"
+set "PENDING_FILE=%STAGED_DIR%\pending-update.json"
+set "APP_ROOT=%CURRENT_DIR%\"
 set "GH_BIN=%APP_ROOT%tools\gh\bin"
 set "PATH=%GH_BIN%;%PATH%"
 
@@ -25,22 +30,31 @@ set "LOG_FILE=%LOG_DIR%\start-%TS%.log"
 
 call :log "==== Copilot Desktop Portable Launcher ===="
 call :log "Timestamp     : %DATE% %TIME%"
-call :log "App root      : %APP_ROOT%"
+call :log "Bundle root   : %BUNDLE_ROOT%"
+call :log "Current dir   : %CURRENT_DIR%"
+call :log "Staged dir    : %STAGED_DIR%"
 call :log "Log file      : %LOG_FILE%"
 call :log "User          : %USERNAME%"
 call :log "Computer      : %COMPUTERNAME%"
 call :log "OS            : %OS%"
+
+REM --- Apply pending update (atomic switch) ---------------------------------
+REM If the in-app updater has staged a new version under _staged\, swap it
+REM into place BEFORE starting the app. Layout stays atomic: at any moment
+REM either the old or the new "current" exists; never a half-written state.
+if exist "%PENDING_FILE%" call :apply_pending_update
+
 call :log "PATH (head)   : %GH_BIN%"
 
 REM --- Sanity checks --------------------------------------------------------
 if not exist "%APP_ROOT%app\copilot-desktop.exe" (
     call :log "[ERROR] app\copilot-desktop.exe not found under %APP_ROOT%app\"
-    call :fail "Bundle scheint unvollstaendig: app\copilot-desktop.exe fehlt."
+    call :fail "Bundle scheint unvollstaendig: current\app\copilot-desktop.exe fehlt."
     goto :end
 )
 if not exist "%GH_BIN%\gh.exe" (
     call :log "[ERROR] gh.exe not found under %GH_BIN%"
-    call :fail "Bundle scheint unvollstaendig: tools\gh\bin\gh.exe fehlt."
+    call :fail "Bundle scheint unvollstaendig: current\tools\gh\bin\gh.exe fehlt."
     goto :end
 )
 
@@ -108,6 +122,42 @@ echo Vollstaendiges Log: %LOG_FILE%
 echo.
 pause
 exit /b 1
+
+:apply_pending_update
+call :log "---- Pending update detected ----"
+type "%PENDING_FILE%" >> "%LOG_FILE%" 2>&1
+
+set "STAGED_VER_DIR="
+for /d %%D in ("%STAGED_DIR%\v*") do set "STAGED_VER_DIR=%%~fD"
+if not defined STAGED_VER_DIR (
+    call :log "[WARN] pending-update.json present but no v*\ folder under _staged\ - clearing marker."
+    del /q "%PENDING_FILE%" >nul 2>&1
+    exit /b 0
+)
+call :log "Staged version dir: %STAGED_VER_DIR%"
+
+if exist "%OLD_DIR%" (
+    call :log "Removing leftover _old\"
+    rmdir /s /q "%OLD_DIR%" >nul 2>&1
+)
+
+if exist "%CURRENT_DIR%" (
+    ren "%CURRENT_DIR%" "_old"
+    if errorlevel 1 (
+        call :log "[ERROR] Failed to rename current\ to _old\ (file lock?). Aborting switch."
+        exit /b 1
+    )
+)
+move /y "%STAGED_VER_DIR%" "%CURRENT_DIR%" >nul 2>&1
+if errorlevel 1 (
+    call :log "[ERROR] Failed to promote staged version. Rolling back."
+    if exist "%OLD_DIR%" ren "%OLD_DIR%" "current"
+    exit /b 1
+)
+del /q "%PENDING_FILE%" >nul 2>&1
+call :log "[OK] Switch complete. Cleaning up _old\ in background."
+start "" /b cmd /c "timeout /t 2 >nul & rmdir /s /q "%OLD_DIR%" >nul 2>&1"
+exit /b 0
 
 :end
 endlocal
