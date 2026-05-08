@@ -453,57 +453,38 @@ const { registerImagesIPC } = require('./src/ipc/images-ipc');
 const { startImageWatcher, stopImageWatcher } = registerImagesIPC({ IMAGES_DIR, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, sendToRenderer });
 
 // Preferences (persistent file-based settings)
-// In test mode, use a separate file to avoid polluting real preferences
+// Production: stored in app.getPath('userData') so packaged builds
+//   (read-only asar) can still write. On Linux this is
+//   ~/.config/copilot-desktop/, on Windows %APPDATA%\copilot-desktop\,
+//   on macOS ~/Library/Application Support/copilot-desktop/.
+// Test: kept next to source for easy cleanup.
+// Migration: if an old file from < v0.15.6 exists at __dirname, move it.
+const { createPreferencesManager, PREFS_DEFAULTS } = require('./src/preferences');
+
 const PREFS_PATH = process.env.NODE_ENV === 'test'
   ? path.join(__dirname, 'preferences.test.json')
-  : path.join(__dirname, 'preferences.json');
+  : path.join(app.getPath('userData'), 'preferences.json');
 const PREFS_BAK_PATH = PREFS_PATH + '.bak';
 
-const PREFS_DEFAULTS = {
-  theme: 'dark',
-  settings: { allowAllPaths: false },
-  deniedTools: [],
-  adminDeniedTools: [],
-  namedSessions: {},
-  openTabs: [],
-};
+const _prefsManager = createPreferencesManager(PREFS_PATH);
+
+if (process.env.NODE_ENV !== 'test') {
+  const legacyPath = path.join(__dirname, 'preferences.json');
+  const migrated = _prefsManager.migrateFromIfExists(legacyPath);
+  if (migrated) {
+    writeLog('info', [`[preferences] Migrated legacy preferences from ${legacyPath} to ${PREFS_PATH}`]);
+  }
+}
 
 function readPreferences() {
-  if (!fs.existsSync(PREFS_PATH)) return { ...PREFS_DEFAULTS };
-  try {
-    const raw = fs.readFileSync(PREFS_PATH, 'utf-8').trim();
-    if (!raw || raw === '{}') return { ...PREFS_DEFAULTS };
-    const prefs = JSON.parse(raw);
-    // Ensure critical defaults exist
-    for (const [key, val] of Object.entries(PREFS_DEFAULTS)) {
-      if (prefs[key] === undefined) prefs[key] = val;
-    }
-    return prefs;
-  } catch (e) {
-    console.warn('[preferences:read] Fehler — versuche Backup:', e.message || e);
-    // Try to restore from backup
-    if (fs.existsSync(PREFS_BAK_PATH)) {
-      try {
-        const bak = JSON.parse(fs.readFileSync(PREFS_BAK_PATH, 'utf-8'));
-        console.info('[preferences:read] Backup wiederhergestellt');
-        fs.writeFileSync(PREFS_PATH, JSON.stringify(bak, null, 2), 'utf-8');
-        return bak;
-      } catch (_) { /* backup also corrupt */ }
-    }
-    return { ...PREFS_DEFAULTS };
-  }
+  return _prefsManager.read();
 }
 
 function writePreferences(prefs) {
   try {
-    // Create backup of current file before overwriting
-    if (fs.existsSync(PREFS_PATH)) {
-      try { fs.copyFileSync(PREFS_PATH, PREFS_BAK_PATH); } catch (_) {}
-    }
-    fs.writeFileSync(PREFS_PATH, JSON.stringify(prefs, null, 2), 'utf-8');
-    return true;
+    return _prefsManager.write(prefs);
   } catch (e) {
-    console.warn('[preferences:write] Fehler:', e.message || e);
+    writeLog('error', [`[preferences:write] failed at ${e.prefsPath || PREFS_PATH}:`, e.message || String(e)]);
     return false;
   }
 }

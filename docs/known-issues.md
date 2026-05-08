@@ -4,21 +4,9 @@ Liste bekannter Probleme und offener Punkte. Bitte beim Beheben den Eintrag entf
 
 ## Linux
 
-### Preferences-Initialisierung auf Linux überprüfen
+### ~~Preferences-Initialisierung auf Linux überprüfen~~ (gefixt in v0.15.6)
 
-Beim ersten Start auf Linux scheinen die Preferences nicht korrekt initialisiert zu werden.
-
-**Untersuchen:**
-- `preferences.json` Defaults (`PREFS_DEFAULTS` in `src/preferences.js`)
-- Pfad-Auflösung der Preferences-Datei
-- Ob beim ersten Start ein sauberer Default-Zustand entsteht
-
-**Reproduktion:**
-```bash
-rm -rf ~/.copilot-desktop
-rm preferences.json preferences.json.bak
-npm start
-```
+Logik selbst war korrekt: `read()` ohne Datei liefert `{ ...PREFS_DEFAULTS }`, Renderer nutzt überall Fallbacks. Die eigentlichen Probleme — falscher Speicherpfad und nicht-versionierte Datei im Repo — sind unter "Erstinstallation" und "Repo-Hygiene" behandelt und in v0.15.6 gefixt.
 
 ---
 
@@ -36,37 +24,29 @@ npm start
 
 ---
 
-### Erstinstallation: `preferences.json` wird neben `main.js` abgelegt
+### ~~Erstinstallation: `preferences.json` wird neben `main.js` abgelegt~~ (gefixt in v0.15.6)
 
-`PREFS_PATH` ist in `main.js` als `path.join(__dirname, 'preferences.json')` definiert.
+Bisher war `PREFS_PATH = path.join(__dirname, 'preferences.json')`. In gepackten Builds (Electron asar / System-Install nach `/opt/...`) ist `__dirname` schreibgeschützt → der erste `write()` schlug **still** fehl. Folge: Defaults beim Erststart, aber **keine Preference wurde je persistiert** — Theme, Tab-Layout, Sidebar-Breite gingen bei jedem Neustart verloren.
 
-**Problem:**
-- In gepackten Builds (Electron asar / System-Install nach `/opt/...`) ist `__dirname` schreibgeschützt → der erste `write()` schlägt **still** fehl (Fehler wird nur in einem `try/catch` gefangen und ignoriert).
-- Folge: Beim Erststart erhält der User korrekt die Defaults (`PREFS_DEFAULTS`), aber **keine Preference wird je persistiert**. Theme, Tab-Layout, Sidebar-Breite gehen bei jedem Neustart verloren.
-- Kein Hinweis in der UI, dass das Speichern fehlschlägt.
-
-**Lösung:**
-- `PREFS_PATH` auf `app.getPath('userData')` umstellen (Standard-Ort für Electron-Apps, z.B. `~/.config/copilot-desktop/preferences.json` auf Linux)
-- Beim Schreiben fehlende Verzeichnisse mit `mkdir -p` anlegen
-- Schreibfehler wenigstens loggen (`writeLog('error', ...)`), nicht stumm verschlucken
-
-**Logik selbst ist korrekt:**
-- `read()` ohne Datei liefert `{ ...PREFS_DEFAULTS }` ✓
-- Renderer nutzt überall Fallbacks (`getPref(key, default)`, `chatFontSize || 16`) ✓
+**Fix (v0.15.6):**
+- `PREFS_PATH` jetzt unter `app.getPath('userData')` (Linux: `~/.config/copilot-desktop/`, Windows: `%APPDATA%\copilot-desktop\`, macOS: `~/Library/Application Support/copilot-desktop/`).
+- `createPreferencesManager` legt das Zielverzeichnis automatisch mit `mkdir -p` an.
+- Schreibfehler werfen jetzt einen aussagekräftigen Error mit `prefsPath` — `main.js` loggt ihn via `writeLog('error', ...)` statt stumm zu schlucken.
+- Migrations-Helfer `migrateFromIfExists(legacyPath)` kopiert eine alte `__dirname/preferences.json` (inkl. `.bak`) beim ersten Start nach v0.15.6 an den neuen Ort.
+- 8 neue Unit-Tests (Verzeichnis-Anlage, Fehler-Werfen, Migration).
 
 ---
 
 ## Repo-Hygiene
 
-### `preferences.json` aus dem Repo entfernen
+### ~~`preferences.json` aus dem Repo entfernen~~ (gefixt in v0.15.6)
 
-`preferences.json` ist benutzerspezifischer Laufzeit-State (Theme, offene Tabs, Sidebar-Breite usw.) und sollte nicht im Repo liegen.
+`preferences.json` war benutzerspezifischer Laufzeit-State (Theme, offene Tabs, Sidebar-Breite usw.) und sollte nicht im Repo liegen.
 
-**Zu tun:**
-- `preferences.json` und `preferences.json.bak` in `.gitignore` aufnehmen
-- Aktuelle Datei mit `git rm --cached preferences.json` aus dem Index entfernen
-- Sinnvolle Default-Datei als `preferences.example.json` o.ä. mitliefern, falls Erstinstallation davon abhängt
-- Dokumentieren, dass `PREFS_DEFAULTS` aus `src/preferences.js` greift, wenn die Datei fehlt
+**Fix (v0.15.6):**
+- `preferences.json` und `preferences.json.bak` sind seit längerem in `.gitignore`.
+- Datei mit `git rm --cached preferences.json` aus dem Index entfernt (lokale Datei bleibt unangetastet).
+- Defaults kommen aus `PREFS_DEFAULTS` in `src/preferences.js` — keine Beispieldatei nötig.
 
-**Hintergrund:** Beim Commit auf `fix/linux-path` ging der lokale State (Theme `gebit`, offener Tab) kurzzeitig verloren, weil `preferences.json` versioniert ist und sich beim `git checkout -- preferences.json` versehentlich resettete. Wiederherstellung war nur dank automatischem `.bak` möglich.
+**Hintergrund:** Beim Commit auf `fix/linux-path` ging der lokale State (Theme `gebit`, offener Tab) kurzzeitig verloren, weil `preferences.json` versioniert war und sich beim `git checkout -- preferences.json` versehentlich resettete. Wiederherstellung war nur dank automatischem `.bak` möglich.
 
