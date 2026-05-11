@@ -1,23 +1,19 @@
-# Release Notes v0.16.0
+# Release Notes v0.16.1
 
 ## Was ist neu?
 
-### Plugin-Manager 🔌
-Der Plugin-Manager unterstützt jetzt das **Hinzufügen und Entfernen von Marketplaces** direkt in der UI — mit visuellem Spinner-Feedback während der Verarbeitung. Neue Marketplaces erscheinen automatisch oben in der Liste. Das Plugin-Panel lässt sich jetzt per erneutem Klick auf den Plugin-Button wieder schließen (Toggle-Verhalten).
+### Tab-Unlock Fallback ⏱️
+Wenn ein Sub-Agent hängt und kein `onDone`-Event kommt, greift jetzt ein mehrstufiger Fallback:
 
-### Session-Wiederaufnahme 🔄
-Beim Fortsetzen einer Session werden Plan und letzte Nachrichten jetzt als **normale Chat-Nachrichten** angezeigt, statt in einem separaten Textblock. Checkpoints wurden entfernt — die Darstellung ist jetzt einheitlich und übersichtlich.
-
-### Startup-Optimierung ⚡
-`loadPlugins()` läuft jetzt non-blocking im Hintergrund. Die App startet sofort, Plugins werden asynchron nachgeladen.
+- **Nach 30 Sekunden Inaktivität**: Ein manueller „⏱ Hängt? Entsperren"-Button erscheint — der Nutzer kann den Tab sofort freigeben.
+- **Nach 180 Sekunden Inaktivität**: Der Tab wird **automatisch entsperrt** mit einer Info-Nachricht im Chat.
+- **Activity-Tracking**: Alle Stream-Events aktualisieren `lastActivityAt` — echte Aktivität resettet den Timer.
 
 ## Bug Fixes
-- **getInstructions**: Nutzt jetzt den konfigurierten Pfad aus `readFolderConfig()` — die Instructions-Anzeige im Footer funktioniert wieder korrekt
-- **CSS Selector Injection**: `CSS.escape()` schützt vor Injection in `installPlugin`, `uninstallPlugin`, `updatePlugin` und `removeMarketplace`
+- **Backend-Stop bei Force-Unlock**: `copilot.chat.stop()` wird jetzt auch bei manuellem und automatischem Unlock aufgerufen. Das verhindert, dass Backend-Prozesse nach dem Entsperren weiterlaufen.
+- **Markdown-Timer Leak**: `_mdTimer` wird in `forceUnlockTab` korrekt aufgeräumt — kein Memory-Leak mehr bei wiederholtem Unlock.
 
 ## Technische Details
-- sbInstructions-Anzeige aus Statusbar entfernt (redundant)
-- Tote CSS-Klassen bereinigt
-- 37 neue Tests (616 total, alle grün)
-- Neues IPC-Modul: `src/ipc/plugins-ipc.js`
+- 51 neue Tests (`inactivity-monitor.test.js` + 2 QA-Fixes), 667 Tests total — alle grün
+- Inactivity-Monitor als eigenständiges Modul mit konfigurierbaren Timeouts
 - Electron + Node.js Architektur unverändert

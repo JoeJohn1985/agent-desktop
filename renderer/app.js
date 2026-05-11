@@ -442,6 +442,10 @@ async function createTab(label) {
     label: tabLabel,
     sessionId: null,    // filled after first response
     isProcessing: false,
+    lastActivityAt: null,
+    _inactivityTimer: null,
+    _unlockBtnTimer: null,
+    _unlockBtnEl: null,
     allowedTools: new Set(),
     sessionDeniedTools: [],  // per-session denied tools [{name, enabled}]
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
@@ -514,6 +518,7 @@ function closeTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
+  stopInactivityMonitor(tabId);
   try { copilot.chat.stop(tabId); } catch (_) {}
   tab.streamEl.remove();
 
@@ -672,6 +677,88 @@ function setTabStatus(tabId, status) {
   renderTabs();
 }
 
+// ── Inactivity Timeout & Force Unlock ────────────────────────
+const INACTIVITY_TIMEOUT_MS = 180_000;
+const INACTIVITY_CHECK_INTERVAL_MS = 10_000;
+const UNLOCK_BTN_DELAY_MS = 30_000;
+
+function startInactivityMonitor(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  tab.lastActivityAt = Date.now();
+  stopInactivityMonitor(tabId);
+
+  tab._inactivityTimer = setInterval(() => {
+    if (!tab.isProcessing) { stopInactivityMonitor(tabId); return; }
+    const elapsed = Date.now() - (tab.lastActivityAt || 0);
+    if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+      forceUnlockTab(tabId, true);
+    } else if (elapsed >= UNLOCK_BTN_DELAY_MS && !tab._unlockBtnEl) {
+      showUnlockButton(tabId);
+    } else if (elapsed < UNLOCK_BTN_DELAY_MS && tab._unlockBtnEl) {
+      hideUnlockButton(tabId);
+    }
+  }, INACTIVITY_CHECK_INTERVAL_MS);
+
+  tab._unlockBtnTimer = setTimeout(() => {
+    if (tab.isProcessing && !tab._unlockBtnEl) {
+      const elapsed = Date.now() - (tab.lastActivityAt || 0);
+      if (elapsed >= UNLOCK_BTN_DELAY_MS) showUnlockButton(tabId);
+    }
+  }, UNLOCK_BTN_DELAY_MS);
+}
+
+function stopInactivityMonitor(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  if (tab._inactivityTimer) { clearInterval(tab._inactivityTimer); tab._inactivityTimer = null; }
+  if (tab._unlockBtnTimer) { clearTimeout(tab._unlockBtnTimer); tab._unlockBtnTimer = null; }
+  hideUnlockButton(tabId);
+}
+
+function forceUnlockTab(tabId, isAutomatic) {
+  const tab = tabs.get(tabId);
+  if (!tab || !tab.isProcessing) return;
+
+  try { copilot.chat.stop(tabId); } catch (_) {}
+  tab.isProcessing = false;
+  tab._responseEl = null;
+  tab._thinkingEl = null;
+  tab._thinkingDetails = null;
+  if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
+  tab.statusEl.style.display = 'none';
+  setTabStatus(tabId, 'done');
+  stopInactivityMonitor(tabId);
+
+  const infoEl = document.createElement('div');
+  infoEl.className = 'stream-unlock-info';
+  infoEl.textContent = isAutomatic
+    ? '⏱ Keine Aktivität — Tab automatisch entsperrt'
+    : '⏱ Tab manuell entsperrt';
+  tab.streamEl.insertBefore(infoEl, tab.statusEl);
+  scrollToBottom(tab.streamEl);
+}
+
+function showUnlockButton(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab || tab._unlockBtnEl) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'stream-unlock-btn';
+  btn.textContent = '⏱ Hängt? Entsperren';
+  btn.addEventListener('click', () => forceUnlockTab(tabId, false));
+  tab.streamEl.insertBefore(btn, tab.statusEl);
+  tab._unlockBtnEl = btn;
+  scrollToBottom(tab.streamEl);
+}
+
+function hideUnlockButton(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab || !tab._unlockBtnEl) return;
+  tab._unlockBtnEl.remove();
+  tab._unlockBtnEl = null;
+}
+
 // ── Send Message ─────────────────────────────────────────────
 function sendMessage() {
   const input = document.getElementById('chatInput');
@@ -767,6 +854,7 @@ function sendMessage() {
   tab.statusEl.style.display = 'block';
   tab.isProcessing = true;
   setTabStatus(activeTabId, 'working');
+  startInactivityMonitor(activeTabId);
 
   // Send to Copilot via JSON API
   const settings = getSettings();
@@ -801,6 +889,7 @@ function initCopilotIPC() {
     switch (event.type) {
       // ── Reasoning / Thinking ──────────────────────────────
       case 'assistant.reasoning_delta': {
+        tab.lastActivityAt = Date.now();
         if (!tab._thinkingEl) {
           const details = document.createElement('details');
           details.className = 'stream-thinking';
@@ -833,6 +922,7 @@ function initCopilotIPC() {
 
       // ── Streaming response text ───────────────────────────
       case 'assistant.message_delta': {
+        tab.lastActivityAt = Date.now();
         // Finalize thinking label if still open
         if (tab._thinkingDetails) {
           const summary = tab._thinkingDetails.querySelector('summary');
@@ -861,6 +951,7 @@ function initCopilotIPC() {
       }
 
       case 'assistant.turn_start':
+        tab.lastActivityAt = Date.now();
         tab.statusEl.textContent = '● Thinking…';
         tab.statusEl.style.display = 'block';
         break;
@@ -898,6 +989,7 @@ function initCopilotIPC() {
 
       // ── Tool execution ────────────────────────────────────
       case 'tool.execution_start': {
+        tab.lastActivityAt = Date.now();
         // Track tool call info for denied messages
         if (event.data.toolCallId) {
           pendingToolCalls.set(event.data.toolCallId, {
@@ -927,6 +1019,7 @@ function initCopilotIPC() {
       }
 
       case 'tool.execution_complete': {
+        tab.lastActivityAt = Date.now();
         // Detect permission denied → show info, don't kill process
         if (event.data.success === false && event.data.error && event.data.error.code === 'denied') {
           const toolInfo = pendingToolCalls.get(event.data.toolCallId) || {};
@@ -1054,6 +1147,7 @@ function initCopilotIPC() {
     const tab = tabs.get(tabId);
     if (!tab) return;
 
+    stopInactivityMonitor(tabId);
     tab.isProcessing = false;
     tab._responseEl = null;
     tab._thinkingEl = null;

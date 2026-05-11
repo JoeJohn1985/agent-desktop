@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.1] - 2025-06-17
+
+### Added
+- Tab-Unlock Fallback bei hängenden Sub-Agents:
+  - Nach 30s Inaktivität: Manueller „⏱ Hängt? Entsperren"-Button erscheint
+  - Nach 180s Inaktivität: Tab wird automatisch entsperrt mit Info-Nachricht
+  - Activity-Tracking bei allen Stream-Events (`lastActivityAt`)
+- 51 neue Tests (`inactivity-monitor.test.js` + 2 QA-Fixes), 667 Tests total
+
+### Fixed
+- Backend-Stop bei Force-Unlock: `copilot.chat.stop()` wird jetzt auch bei manuellem/automatischem Unlock aufgerufen (verhindert weiterlaufende Backend-Prozesse)
+- Markdown-Timer Leak: `_mdTimer` wird in `forceUnlockTab` korrekt aufgeräumt
+
 ## [0.16.0] - 2025-06-16
 
 ### Added
