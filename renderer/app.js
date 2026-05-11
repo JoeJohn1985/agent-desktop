@@ -29,6 +29,10 @@ let skills = []; // dynamically loaded from main process
 // ── Agents Definition ────────────────────────────────────────
 let agents = []; // dynamically loaded from main process
 
+// ── Plugins State ────────────────────────────────────────────
+let marketplaces = [];
+let installedPlugins = [];
+
 // ── State ────────────────────────────────────────────────────
 let sessions = [];
 let activeSessionId = null;
@@ -450,6 +454,9 @@ async function createTab(label) {
 }
 
 function switchTab(tabId) {
+  // If plugins view is active, switch back to chat view
+  switchToChatView();
+
   const panel = document.getElementById('terminalPanel');
   const body = document.getElementById('terminalBody');
 
@@ -533,7 +540,7 @@ function renderTabs() {
   const bar = document.getElementById('tabBar');
   const addBtn = document.getElementById('btnAddTab');
 
-  bar.querySelectorAll('.tab').forEach(el => el.remove());
+  bar.querySelectorAll('.tab:not(.tab--fixed)').forEach(el => el.remove());
 
   tabs.forEach((tab, id) => {
     const el = document.createElement('div');
@@ -1004,13 +1011,6 @@ function initCopilotIPC() {
       case 'user.message': {
         // Extract from transformedContent
         const tc = event.data.transformedContent || '';
-        // Count instructions
-        const instructionMatches = tc.match(/<custom_instruction>|<copilot-instructions>/gi);
-        const instrCount = instructionMatches ? instructionMatches.length : 0;
-        if (instrCount > 0) {
-          updateStatusbar('sbInstructions', `📜 ${instrCount} Instructions`);
-          tab.context.instructions = instrCount;
-        }
         // Extract working directory
         const cwdMatch = tc.match(/Current working directory:\s*(.+)/i);
         if (cwdMatch) {
@@ -1095,6 +1095,7 @@ window.deleteTodo = deleteTodo;
 // the background terminal. We use a preferences-stored model list instead.
 const DEFAULT_MODELS = [
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
   { id: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex' },
@@ -1344,47 +1345,57 @@ async function resumeSessionById(sessionId) {
 async function displaySessionContext(tab, sessionId) {
   if (!sessionId) return;
 
-  const contextEl = document.createElement('div');
-  contextEl.className = 'stream-session-context';
-
-  // Header
   const title = getSessionName(sessionId) || sessionId.substring(0, 8);
-  let html = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
 
-  // Load checkpoints
-  try {
-    const checkpoints = await copilot.sessions.readCheckpoints(sessionId);
-    if (checkpoints && checkpoints.length > 0) {
-      html += '<div class="stream-session-context__section">';
-      html += '<div class="stream-session-context__label">🔖 Checkpoints</div>';
-      html += '<ul class="stream-session-context__list">';
-      // Show last 5 checkpoints
-      const recent = checkpoints.slice(-5);
-      for (const cp of recent) {
-        html += `<li>${escapeHtml(cp.title)}</li>`;
-      }
-      if (checkpoints.length > 5) {
-        html += `<li class="stream-session-context__more">… und ${checkpoints.length - 5} weitere</li>`;
-      }
-      html += '</ul></div>';
-    }
-  } catch (e) { console.warn('[sessions] Checkpoints nicht verfügbar:', e.message); }
+  // Helper: insert a bubble element before the status element
+  function insertBefore(el) {
+    tab.streamEl.insertBefore(el, tab.statusEl);
+  }
 
-  // Load plan
+  // Header block (nur Titel)
+  const headerEl = document.createElement('div');
+  headerEl.className = 'stream-session-context';
+  headerEl.innerHTML = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
+  insertBefore(headerEl);
+
+  // 1. Plan zuerst
   try {
     const plan = await copilot.sessions.readPlan(sessionId);
     if (plan) {
-      html += '<div class="stream-session-context__section">';
-      html += '<div class="stream-session-context__label">📝 Plan</div>';
-      html += `<div class="stream-session-context__plan markdown-body">${window.markdown.render(plan)}</div>`;
-      html += '</div>';
+      const planEl = document.createElement('div');
+      planEl.className = 'stream-session-context';
+      planEl.innerHTML = `
+        <div class="stream-session-context__section">
+          <div class="stream-session-context__label">📝 Plan</div>
+          <div class="stream-session-context__plan markdown-body">${window.markdown ? window.markdown.render(plan) : escapeHtml(plan)}</div>
+        </div>`;
+      insertBefore(planEl);
     }
   } catch (e) { console.warn('[sessions] Plan nicht verfügbar:', e.message); }
 
-  html += '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
+  // 2. Letzte Nachrichten als echte Chat-Bubbles
+  try {
+    const messages = await copilot.sessions.readRecentMessages(sessionId);
+    if (messages && messages.length > 0) {
+      for (const msg of messages) {
+        const el = document.createElement('div');
+        if (msg.role === 'user') {
+          el.className = 'stream-input stream-input--history';
+          el.textContent = msg.content;
+        } else {
+          el.className = 'stream-response markdown-body stream-response--history';
+          el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+        }
+        insertBefore(el);
+      }
+    }
+  } catch (e) { console.warn('[sessions] Nachrichten nicht verfügbar:', e.message); }
 
-  contextEl.innerHTML = html;
-  tab.streamEl.insertBefore(contextEl, tab.statusEl);
+  // Footer
+  const footerEl = document.createElement('div');
+  footerEl.className = 'stream-session-context';
+  footerEl.innerHTML = '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
+  insertBefore(footerEl);
 }
 
 // ── Delete Session ────────────────────────────────────────────
@@ -1459,6 +1470,437 @@ function toggleAgent(agentId) {
   else activeAgents.add(agentId);
   saveSetting('activeAgents', [...activeAgents]);
   renderAgents();
+}
+
+// ── Plugins ─────────────────────────────────────────────────
+async function loadPlugins() {
+  console.log('[plugins] Lade Plugin-Liste und Marketplaces…');
+  try {
+    const result = await copilot.plugins.list();
+    installedPlugins = (result && result.success) ? result.plugins : [];
+    console.log(`[plugins] Installierte Plugins: ${installedPlugins.length}`, installedPlugins.map(p => p.name));
+  } catch (e) {
+    console.warn('[plugins] Liste laden fehlgeschlagen:', e.message);
+    installedPlugins = [];
+  }
+
+  let mpList = [];
+  try {
+    const listResult = await copilot.plugins.listMarketplaces();
+    mpList = (listResult && listResult.success) ? listResult.marketplaces : [];
+    console.log('[plugins] Marketplaces:', mpList.map(m => m.name));
+  } catch (e) {
+    console.warn('[plugins] Marketplace-Liste fehlgeschlagen:', e.message);
+  }
+
+  const results = await Promise.allSettled(
+    mpList.map(mp => copilot.plugins.browseMarketplace(mp.name))
+  );
+
+  marketplaces = results.map((r, i) => {
+    const mpInfo = mpList[i];
+    if (r.status === 'fulfilled' && r.value && r.value.success) {
+      console.log(`[plugins] "${mpInfo.name}": ${r.value.plugins.length} Plugins`);
+      return {
+        success: true,
+        marketplace: mpInfo.source || mpInfo.name,
+        name: mpInfo.name,
+        plugins: r.value.plugins,
+      };
+    }
+    const err = r.status === 'rejected' ? r.reason?.message : (r.value?.error || 'Unbekannter Fehler');
+    console.warn(`[plugins] "${mpInfo.name}" fehlgeschlagen:`, err);
+    return {
+      success: false,
+      marketplace: mpInfo.source || mpInfo.name,
+      name: mpInfo.name,
+      plugins: [],
+      error: err,
+    };
+  });
+
+  const countEl = document.getElementById('pluginCount');
+  if (countEl) countEl.textContent = String(installedPlugins.length);
+
+  renderPlugins();
+}
+
+function getPluginStatus(pluginName) {
+  const installed = installedPlugins.find(p => p.name.toLowerCase() === pluginName.toLowerCase());
+  if (!installed) return 'not-installed';
+  return installed.updateAvailable ? 'update-available' : 'installed';
+}
+
+function getInstalledVersion(pluginName) {
+  const installed = installedPlugins.find(p => p.name.toLowerCase() === pluginName.toLowerCase());
+  return installed ? installed.version : '';
+}
+
+function renderPlugins() {
+  const container = document.getElementById('pluginList');
+  const sidebar = document.getElementById('pluginSidebar');
+  if (!container) return;
+
+  const searchEl = document.getElementById('pluginSearch');
+  const query = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+  function matchesQuery(plugin) {
+    if (!query) return true;
+    return (plugin.name || '').toLowerCase().includes(query) ||
+           (plugin.description || '').toLowerCase().includes(query) ||
+           (plugin.author || '').toLowerCase().includes(query);
+  }
+
+  if (marketplaces.length === 0 && installedPlugins.length === 0) {
+    container.innerHTML = `
+      <div class="plugin-empty-state">
+        <div class="plugin-empty-state__icon">🧩</div>
+        <div class="plugin-empty-state__title">Keine Marketplaces konfiguriert</div>
+        <div class="plugin-empty-state__desc">Füge einen Marketplace hinzu um Plugins zu entdecken.</div>
+        <button class="plugin-btn plugin-btn--install" onclick="document.getElementById('btnAddPlugin').click()">+ Marketplace hinzufügen</button>
+      </div>`;
+    if (sidebar) sidebar.innerHTML = '';
+    return;
+  }
+
+  let html = '';
+  let sidebarHtml = '';
+
+  const visibleInstalled = installedPlugins.filter(matchesQuery);
+  const installedSectionId = 'plugin-section-installed';
+  sidebarHtml += `<div class="plugins-sidebar__item ${visibleInstalled.length > 0 ? '' : 'plugins-sidebar__item--empty'}" onclick="document.getElementById('${installedSectionId}').scrollIntoView({behavior:'smooth'})">
+    <span class="plugins-sidebar__icon">✓</span>
+    <span class="plugins-sidebar__label">Installiert</span>
+    <span class="plugins-sidebar__badge">${installedPlugins.length}</span>
+  </div>`;
+
+  html += `<section class="plugin-section" id="${installedSectionId}">`;
+  html += `<div class="plugin-section__header">`;
+  html += `<h3 class="plugin-section__title">Installierte Plugins</h3>`;
+  html += `<span class="plugin-section__count">${installedPlugins.length}</span>`;
+  html += `</div>`;
+
+  if (visibleInstalled.length > 0) {
+    html += `<div class="plugin-grid">`;
+    for (const plugin of visibleInstalled) {
+      const version = plugin.version || '';
+      html += renderPluginTile({ name: plugin.name, version, description: '', author: '' }, 'installed', '');
+    }
+    html += `</div>`;
+  } else if (installedPlugins.length === 0) {
+    html += `<div class="plugin-section__empty">Noch keine Plugins installiert.</div>`;
+  } else {
+    html += `<div class="plugin-section__empty">Keine Ergebnisse für „${escapeHtml(query)}"</div>`;
+  }
+  html += `</section>`;
+
+  for (let i = 0; i < marketplaces.length; i++) {
+    const mp = marketplaces[i];
+    const sectionId = `plugin-section-mp-${i}`;
+    const mpParts = (mp.marketplace || '').split('/');
+    const mpDisplayName = mpParts[mpParts.length - 1] || mp.marketplace;
+    const mpSubtitle = mp.marketplace || '';
+    const filteredPlugins = (mp.plugins || []).filter(matchesQuery);
+    const totalCount = (mp.plugins || []).length;
+
+    sidebarHtml += `<div class="plugins-sidebar__item" onclick="document.getElementById('${sectionId}').scrollIntoView({behavior:'smooth'})">
+      <span class="plugins-sidebar__icon">🏪</span>
+      <span class="plugins-sidebar__label">${escapeHtml(mpDisplayName)}</span>
+      <span class="plugins-sidebar__badge">${totalCount}</span>
+    </div>`;
+
+    html += `<section class="plugin-section" id="${sectionId}">`;
+    html += `<div class="plugin-section__header">`;
+    html += `<div class="plugin-section__header-text">`;
+    html += `<h3 class="plugin-section__title">${escapeHtml(mpDisplayName)}</h3>`;
+    html += `<span class="plugin-section__subtitle">${escapeHtml(mpSubtitle)}</span>`;
+    html += `</div>`;
+    html += `<span class="plugin-section__count">${totalCount}</span>`;
+    html += `<button class="plugin-section__remove-btn" onclick="removeMarketplace('${escapeAttr(mp.name || mp.marketplace)}')" title="Marketplace entfernen">✕</button>`;
+    html += `</div>`;
+
+    if (mp.error) {
+      html += `<div class="plugin-section__error">⚠️ ${escapeHtml(mp.error)}</div>`;
+    }
+
+    if (filteredPlugins.length > 0) {
+      html += `<div class="plugin-grid">`;
+      for (const plugin of filteredPlugins) {
+        const status = getPluginStatus(plugin.name);
+        const target = `${escapeAttr(plugin.name)}@${escapeAttr(mp.name || mp.marketplace)}`;
+        html += renderPluginTile(plugin, status, target);
+      }
+      html += `</div>`;
+    } else if (totalCount > 0) {
+      html += `<div class="plugin-section__empty">Keine Ergebnisse für „${escapeHtml(query)}"</div>`;
+    } else if (!mp.error) {
+      html += `<div class="plugin-section__empty">Keine Plugins in diesem Marketplace.</div>`;
+    }
+
+    html += `</section>`;
+  }
+
+  container.innerHTML = html;
+  if (sidebar) sidebar.innerHTML = sidebarHtml;
+}
+
+function renderPluginTile(plugin, status, target) {
+  const version = getInstalledVersion(plugin.name) || plugin.version || '';
+  const desc = plugin.description || '';
+  const author = plugin.author || '';
+  const name = plugin.name || '';
+
+  let badgeHtml = '';
+  if (status === 'installed') {
+    badgeHtml = `<span class="plugin-tile__badge plugin-tile__badge--installed">✓ Installiert</span>`;
+  } else if (status === 'update-available') {
+    badgeHtml = `<span class="plugin-tile__badge plugin-tile__badge--update">● Update</span>`;
+  }
+
+  let actionsHtml = '';
+  if (status === 'not-installed') {
+    actionsHtml = `<button class="plugin-btn plugin-btn--install" onclick="installPlugin('${escapeAttr(target)}')">Installieren</button>`;
+  } else if (status === 'installed') {
+    actionsHtml = `<button class="plugin-btn plugin-btn--remove" onclick="uninstallPlugin('${escapeAttr(name)}')">Entfernen</button>`;
+  } else if (status === 'update-available') {
+    actionsHtml = `<button class="plugin-btn plugin-btn--update-available" onclick="updatePlugin('${escapeAttr(name)}')">Updaten</button>`;
+    actionsHtml += `<button class="plugin-btn plugin-btn--remove" onclick="uninstallPlugin('${escapeAttr(name)}')">✕</button>`;
+  }
+
+  const meta = [author ? `👤 ${escapeHtml(author)}` : '', version ? `v${escapeHtml(version)}` : ''].filter(Boolean).join(' · ');
+
+  return `<div class="plugin-tile plugin-tile--${status}" data-plugin="${escapeAttr(name)}">
+    <div class="plugin-tile__top">
+      <span class="plugin-tile__icon">🧩</span>
+      <div class="plugin-tile__title-area">
+        <span class="plugin-tile__name">${escapeHtml(name)}</span>
+        ${badgeHtml}
+      </div>
+    </div>
+    <div class="plugin-tile__desc">${desc ? escapeHtml(desc) : '<span class="plugin-tile__no-desc">Keine Beschreibung</span>'}</div>
+    ${meta ? `<div class="plugin-tile__meta">${meta}</div>` : ''}
+    <div class="plugin-tile__actions">${actionsHtml}</div>
+  </div>`;
+}
+
+window.installPlugin = async function(target) {
+  const pluginName = target.split('@')[0];
+  const card = document.querySelector(`.plugin-tile[data-plugin="${CSS.escape(pluginName)}"]`);
+  if (card) {
+    const actions = card.querySelector('.plugin-tile__actions');
+    if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
+  }
+  try {
+    const result = await copilot.plugins.install(target);
+    if (result && result.success) {
+      showNotification('Plugin installiert', 'success');
+    } else {
+      showNotification(result?.error || 'Installation fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showNotification('Installation fehlgeschlagen: ' + e.message, 'error');
+  }
+  await loadPlugins();
+};
+
+window.uninstallPlugin = async function(name) {
+  const card = document.querySelector(`.plugin-tile[data-plugin="${CSS.escape(name)}"]`);
+  if (card) {
+    const actions = card.querySelector('.plugin-tile__actions');
+    if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
+  }
+  try {
+    const result = await copilot.plugins.uninstall(name);
+    if (result && result.success) {
+      showNotification('Plugin deinstalliert', 'success');
+    } else {
+      showNotification(result?.error || 'Deinstallation fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showNotification('Deinstallation fehlgeschlagen: ' + e.message, 'error');
+  }
+  await loadPlugins();
+};
+
+window.updatePlugin = async function(name) {
+  const card = document.querySelector(`.plugin-tile[data-plugin="${CSS.escape(name)}"]`);
+  if (card) {
+    const actions = card.querySelector('.plugin-tile__actions');
+    if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
+  }
+  try {
+    const result = await copilot.plugins.update(name);
+    if (result && result.success) {
+      showNotification('Plugin aktualisiert', 'success');
+    } else {
+      showNotification(result?.error || 'Update fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showNotification('Update fehlgeschlagen: ' + e.message, 'error');
+  }
+  await loadPlugins();
+};
+
+function showAddPluginDialog() {
+  const container = document.getElementById('pluginList');
+  if (!container) return;
+
+  const existing = container.querySelector('.plugin-add-dialog');
+  if (existing) { existing.remove(); return; }
+
+  const dialog = document.createElement('div');
+  dialog.className = 'plugin-add-dialog';
+  dialog.innerHTML = `
+    <div class="plugin-add-dialog__fields">
+      <input type="text" class="plugin-add-dialog__input" placeholder="Marketplace-URL oder Plugin-Name…" />
+    </div>
+    <div class="plugin-add-dialog__buttons">
+      <button class="plugin-btn plugin-btn--install" id="pluginDialogAdd">Hinzufügen</button>
+      <button class="plugin-btn plugin-btn--remove" id="pluginDialogCancel">Abbrechen</button>
+    </div>
+  `;
+  container.prepend(dialog);
+
+  const input = dialog.querySelector('.plugin-add-dialog__input');
+  input.focus();
+
+  dialog.querySelector('#pluginDialogAdd').addEventListener('click', async () => {
+    const value = input.value.trim();
+    if (!value) return;
+
+    const isUrl = value.startsWith('http://') || value.startsWith('https://');
+    const isOwnerRepo = !isUrl && value.includes('/');
+
+    if (isUrl || isOwnerRepo) {
+      // Show spinner inside dialog
+      const addBtn = dialog.querySelector('#pluginDialogAdd');
+      const cancelBtn = dialog.querySelector('#pluginDialogCancel');
+      addBtn.disabled = true;
+      cancelBtn.disabled = true;
+      input.disabled = true;
+      addBtn.innerHTML = '<span class="plugin-spinner"></span> Wird hinzugefügt…';
+      try {
+        const result = await copilot.plugins.addMarketplace(value);
+        dialog.remove();
+        if (result && result.success) {
+          showNotification('Marketplace hinzugefügt', 'success');
+        } else {
+          showNotification(result?.error || 'Marketplace hinzufügen fehlgeschlagen', 'error');
+        }
+      } catch (e) {
+        dialog.remove();
+        showNotification('Marketplace hinzufügen fehlgeschlagen: ' + e.message, 'error');
+      }
+      await loadPlugins();
+    } else {
+      dialog.remove();
+      await installPlugin(value);
+    }
+  });
+
+  const handleKeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      dialog.querySelector('#pluginDialogAdd').click();
+    }
+    if (e.key === 'Escape') {
+      dialog.remove();
+    }
+  };
+  input.addEventListener('keydown', handleKeydown);
+
+  dialog.querySelector('#pluginDialogCancel').addEventListener('click', () => {
+    dialog.remove();
+  });
+}
+
+function initPluginButtons() {
+  const btnAdd = document.getElementById('btnAddPlugin');
+  if (btnAdd) btnAdd.addEventListener('click', () => showAddPluginDialog());
+
+  const btnRefresh = document.getElementById('btnRefreshPlugins');
+  if (btnRefresh) btnRefresh.addEventListener('click', () => loadPlugins());
+
+  const searchEl = document.getElementById('pluginSearch');
+  if (searchEl) searchEl.addEventListener('input', () => renderPlugins());
+}
+
+// ── Plugin View Switching ────────────────────────────────────
+window.pluginsViewActive = false;
+
+window.removeMarketplace = async function(name) {
+  console.log(`[plugins] removeMarketplace: "${name}"`);
+
+  // Show spinner on the clicked remove button
+  const btn = document.querySelector(`.plugin-section__remove-btn[onclick*="${CSS.escape(name)}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="plugin-spinner plugin-spinner--sm"></span>';
+  }
+
+  try {
+    const result = await copilot.plugins.removeMarketplace(name);
+    console.log('[plugins] removeMarketplace result:', result);
+    if (result && result.success) {
+      showNotification('Marketplace entfernt', 'success');
+    } else {
+      showNotification(result?.error || 'Marketplace entfernen fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    console.error('[plugins] removeMarketplace error:', e);
+    showNotification('Marketplace entfernen fehlgeschlagen: ' + (e?.message || JSON.stringify(e)), 'error');
+  }
+  loadPlugins().catch(e => console.error('[plugins] loadPlugins nach removeMarketplace:', e));
+};
+
+window.switchToPluginsView = function() {
+  window.pluginsViewActive = true;
+  const pluginsView = document.getElementById('pluginsView');
+  const sessionActions = document.getElementById('sessionActions');
+  const streamArea = document.getElementById('streamArea');
+  const terminalPanel = document.getElementById('terminalPanel');
+  const chatInputBar = document.querySelector('.chat-input-bar');
+  const sessionStatusbar = document.getElementById('sessionStatusbar');
+  const tabPlugins = document.getElementById('tabPlugins');
+
+  // Hide chat content, show plugin view (both inside terminal-container)
+  if (sessionActions) sessionActions.style.display = 'none';
+  if (streamArea) streamArea.style.display = 'none';
+  if (terminalPanel) terminalPanel.style.display = 'none';
+  if (chatInputBar) chatInputBar.style.display = 'none';
+  if (sessionStatusbar) sessionStatusbar.style.display = 'none';
+  if (pluginsView) pluginsView.style.display = 'flex';
+
+  // Deactivate all chat tabs, activate plugin tab
+  document.querySelectorAll('#tabBar .tab:not(.tab--fixed)').forEach(el => {
+    el.classList.remove('tab--active');
+  });
+  if (tabPlugins) tabPlugins.classList.add('tab--active');
+
+  renderPlugins();
+};
+
+function switchToChatView() {
+  if (!window.pluginsViewActive) return;
+  window.pluginsViewActive = false;
+  const pluginsView = document.getElementById('pluginsView');
+  const sessionActions = document.getElementById('sessionActions');
+  const streamArea = document.getElementById('streamArea');
+  const terminalPanel = document.getElementById('terminalPanel');
+  const chatInputBar = document.querySelector('.chat-input-bar');
+  const sessionStatusbar = document.getElementById('sessionStatusbar');
+  const tabPlugins = document.getElementById('tabPlugins');
+
+  if (pluginsView) pluginsView.style.display = 'none';
+  if (sessionActions) sessionActions.style.display = '';
+  if (streamArea) streamArea.style.display = '';
+  if (chatInputBar) chatInputBar.style.display = '';
+  if (sessionStatusbar) sessionStatusbar.style.display = '';
+  // terminalPanel nur zeigen wenn es vorher sichtbar war (collapsed state respektieren)
+  const terminalCollapsed = terminalPanel && terminalPanel.classList.contains('terminal-panel--collapsed');
+  if (terminalPanel && !terminalCollapsed) terminalPanel.style.display = '';
+
+  if (tabPlugins) tabPlugins.classList.remove('tab--active');
 }
 
 // ── Sidebar Resize ───────────────────────────────────────────
@@ -1567,18 +2009,6 @@ async function initStatusbar() {
   } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
 
   try {
-    const instrFiles = await copilot.chat.getInstructions();
-    if (instrFiles && instrFiles.length > 0) {
-      const tooltip = instrFiles.map(f => f.path).join('\n');
-      const el = document.getElementById('sbInstructions');
-      if (el) {
-        el.textContent = `📜 ${instrFiles.length} Instruction${instrFiles.length > 1 ? 's' : ''}`;
-        el.setAttribute('data-tooltip', tooltip);
-      }
-    }
-  } catch (e) { console.warn('[app] Instructions nicht geladen:', e.message); }
-
-  try {
     const ver = await copilot.chat.getVersions();
     const el = document.getElementById('sbVersion');
     if (el) {
@@ -1612,6 +2042,8 @@ async function initDataLoad() {
   await loadSessions();
   await loadImages();
   copilot.images.onChanged(() => loadImages());
+
+  loadPlugins().catch(e => console.warn('[plugins] Hintergrundladen fehlgeschlagen:', e.message));
 }
 
 function initChatInput() {
@@ -2456,6 +2888,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSessionTools();
   initSettings();
   initSidebar();
+  initPluginButtons();
   initTestRunner();
   initDevConsole();
   initChatSearch();

@@ -66,4 +66,94 @@ function writeTodos(sessionDir, todos) {
   fs.writeFileSync(path.join(sessionDir, 'todos.json'), JSON.stringify(todos, null, 2), 'utf-8');
 }
 
-module.exports = { readCheckpoints, readPlan, readTodos, writeTodos };
+/**
+ * Liest die letzten `limit` Nachrichten (user/assistant) aus events.jsonl.
+ * Liest effizient von hinten in Chunks, um große Dateien nicht komplett zu laden.
+ * @param {string} sessionDir - Absoluter Pfad zum Session-Verzeichnis
+ * @param {number} limit - Maximale Anzahl Nachrichten (default 5)
+ * @returns {Array<{role: string, content: string, timestamp: string}>}
+ */
+function readRecentMessages(sessionDir, limit = 5) {
+  const eventsPath = path.join(sessionDir, 'events.jsonl');
+  if (!fs.existsSync(eventsPath)) return [];
+
+  try {
+    const stat = fs.statSync(eventsPath);
+    const fileSize = stat.size;
+    if (fileSize === 0) return [];
+
+    const fd = fs.openSync(eventsPath, 'r');
+    const CHUNK_SIZE = 32 * 1024;
+    const messages = [];
+    let remainder = '';
+    let position = fileSize;
+
+    try {
+      while (position > 0 && messages.length < limit) {
+        const readSize = Math.min(CHUNK_SIZE, position);
+        position -= readSize;
+        const buffer = Buffer.alloc(readSize);
+        fs.readSync(fd, buffer, 0, readSize, position);
+
+        const chunk = buffer.toString('utf-8') + remainder;
+        const lines = chunk.split('\n');
+        remainder = lines.shift();
+
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          try {
+            const event = JSON.parse(line);
+            if (event.type === 'user.message' || event.type === 'assistant.message') {
+              const role = event.type === 'user.message' ? 'user' : 'assistant';
+              let content = '';
+              const rawContent = event.data && event.data.content;
+              if (typeof rawContent === 'string') {
+                content = rawContent;
+              } else if (Array.isArray(rawContent)) {
+                content = rawContent
+                  .filter(p => typeof p === 'string' || (p && p.type === 'text'))
+                  .map(p => typeof p === 'string' ? p : p.text || '')
+                  .join('');
+              }
+              messages.push({ role, content, timestamp: event.timestamp || '' });
+              if (messages.length >= limit) break;
+            }
+          } catch (_) { /* skip malformed lines */ }
+        }
+      }
+
+      // Check remainder (first line of file)
+      if (messages.length < limit && remainder.trim()) {
+        try {
+          const event = JSON.parse(remainder.trim());
+          if (event.type === 'user.message' || event.type === 'assistant.message') {
+            const role = event.type === 'user.message' ? 'user' : 'assistant';
+            let content = '';
+            const rawContent = event.data && event.data.content;
+            if (typeof rawContent === 'string') {
+              content = rawContent;
+            } else if (Array.isArray(rawContent)) {
+              content = rawContent
+                .filter(p => typeof p === 'string' || (p && p.type === 'text'))
+                .map(p => typeof p === 'string' ? p : p.text || '')
+                .join('');
+            }
+            messages.push({ role, content, timestamp: event.timestamp || '' });
+          }
+        } catch (_) { /* skip */ }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // Reverse to chronological order (oldest first)
+    return messages.reverse();
+  } catch (e) {
+    console.warn('[sessions:readRecentMessages] Fehler:', e.message || e);
+    return [];
+  }
+}
+
+module.exports = { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages };

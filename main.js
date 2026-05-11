@@ -5,7 +5,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const yaml = require('yaml');
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
-const { readCheckpoints, readPlan, readTodos, writeTodos } = require('./src/sessions');
+const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
@@ -295,12 +295,15 @@ ipcMain.handle('copilot:getVersions', async () => {
 
 ipcMain.handle('copilot:getInstructions', () => {
   const cwd = COPILOT_CWD;
+  const config = readFolderConfig();
+  const configuredPath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
   const found = [];
   const candidates = [
+    configuredPath,
     path.join(cwd, 'copilot-instructions.md'),
     path.join(cwd, '.github', 'copilot-instructions.md'),
     path.join(os.homedir(), '.github', 'copilot-instructions.md'),
-  ];
+  ].filter((p, i, arr) => arr.indexOf(p) === i); // Deduplizieren
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
@@ -348,6 +351,10 @@ ipcMain.handle('sessions:readCheckpoints', async (_event, sessionId) => {
 
 ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
   return readPlan(safeSessionPath(sessionId));
+});
+
+ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
+  return readRecentMessages(safeSessionPath(sessionId), 5);
 });
 
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
@@ -509,6 +516,10 @@ ipcMain.handle('agents:list', async () => {
 // Tests → src/ipc/tests-ipc.js
 const { registerTestsIPC } = require('./src/ipc/tests-ipc');
 registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOUT_MS });
+
+// Plugins → src/ipc/plugins-ipc.js
+const { registerPluginsIPC } = require('./src/ipc/plugins-ipc');
+registerPluginsIPC();
 
 // Folders
 ipcMain.handle('folders:read', () => {

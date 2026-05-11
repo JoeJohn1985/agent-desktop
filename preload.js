@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('copilot', {
   sessions: {
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
+    readRecentMessages: (id) => ipcRenderer.invoke('sessions:readRecentMessages', id),
     create: (name) => ipcRenderer.invoke('sessions:create', name),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
@@ -120,6 +121,17 @@ contextBridge.exposeInMainWorld('copilot', {
     run: () => ipcRenderer.invoke('tests:run'),
     e2e: () => ipcRenderer.invoke('tests:e2e'),
     coverage: () => ipcRenderer.invoke('tests:coverage'),
+  },
+  // Plugins
+  plugins: {
+    list: () => ipcRenderer.invoke('plugin:list'),
+    install: (target) => ipcRenderer.invoke('plugin:install', target),
+    uninstall: (name) => ipcRenderer.invoke('plugin:uninstall', name),
+    update: (name) => ipcRenderer.invoke('plugin:update', name),
+    listMarketplaces: () => ipcRenderer.invoke('plugin:marketplace-list'),
+    addMarketplace: (source) => ipcRenderer.invoke('plugin:marketplace-add', source),
+    removeMarketplace: (name) => ipcRenderer.invoke('plugin:marketplace-remove', name),
+    browseMarketplace: (name) => ipcRenderer.invoke('plugin:marketplace-browse', name),
   },
   // Dev Console
   devConsole: {

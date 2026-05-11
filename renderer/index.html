@@ -125,6 +125,31 @@
       <div class="tab-bar" id="tabBar">
         <!-- Tabs werden dynamisch eingefügt -->
         <button class="tab-add" id="btnAddTab" data-tooltip="Neuer Tab (Ctrl+T)">+</button>
+        <button class="tab tab--fixed tab--plugins" id="tabPlugins" onclick="pluginsViewActive ? switchToChatView() : switchToPluginsView()">
+          🧩 Plugins <span class="tab--plugins__badge" id="pluginCount">0</span>
+        </button>
+      </div>
+      <!-- Plugin Manager View (ersetzt Chat-Inhalt, gleiche Größe wie Chat-Bereich) -->
+      <div class="plugins-view" id="pluginsView" style="display:none;">
+        <div class="plugins-view__header">
+          <div class="plugins-view__header-left">
+            <h2 class="plugins-view__title">🧩 Plugin Manager</h2>
+          </div>
+          <div class="plugins-view__header-center">
+            <input type="text" class="plugins-view__search" id="pluginSearch" placeholder="Plugins suchen…" />
+          </div>
+          <div class="plugins-view__actions">
+            <button class="plugin-actions__btn" id="btnAddPlugin" data-tooltip="Plugin/Marketplace hinzufügen">+</button>
+            <button class="plugin-actions__btn" id="btnRefreshPlugins" data-tooltip="Plugins aktualisieren">🔄</button>
+            <button class="plugin-actions__btn plugins-view__close" onclick="switchToChatView()" data-tooltip="Plugin Manager schließen">✕</button>
+          </div>
+        </div>
+        <div class="plugins-view__body">
+          <nav class="plugins-view__sidebar" id="pluginSidebar"></nav>
+          <div class="plugins-view__main">
+            <div class="plugins-view__list" id="pluginList"></div>
+          </div>
+        </div>
       </div>
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
@@ -229,11 +254,10 @@
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item" id="sbSkills" data-tooltip="Skills">🛠️ –</span>
         <span class="session-statusbar__sep">·</span>
-        <span class="session-statusbar__item" id="sbInstructions" data-tooltip="Instructions">📜 –</span>
-        <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item session-statusbar__item--clickable" id="sbCwd" data-tooltip="Arbeitsverzeichnis öffnen" onclick="openCwd()">📁 –</span>
       </div>
     </main>
+
   </div>
 
   <!-- Confirm Delete Overlay -->

@@ -1,22 +1,23 @@
-# Release Notes v0.15.1
+# Release Notes v0.16.0
 
 ## Was ist neu?
 
-### Agents-System 🤖
-Die Copilot Desktop App unterstützt jetzt **Agents** — spezialisierte Assistenten, die per `.agent.md`-Dateien definiert werden. Agents erscheinen im neuen Sidebar-Panel und können per Klick aktiviert/deaktiviert werden. Aktive Agents werden automatisch als `/agent <name>` Prefix in jede Nachricht injiziert.
+### Plugin-Manager 🔌
+Der Plugin-Manager unterstützt jetzt das **Hinzufügen und Entfernen von Marketplaces** direkt in der UI — mit visuellem Spinner-Feedback während der Verarbeitung. Neue Marketplaces erscheinen automatisch oben in der Liste. Das Plugin-Panel lässt sich jetzt per erneutem Klick auf den Plugin-Button wieder schließen (Toggle-Verhalten).
 
-### Konfigurierbarer Agents-Ordner 📁
-Der Agents-Ordner (Standard: `~/.copilot/agents/`) kann jetzt in den Folder-Settings angepasst werden. Der konfigurierte Ordner wird automatisch zur Session-Allowlist hinzugefügt.
+### Session-Wiederaufnahme 🔄
+Beim Fortsetzen einer Session werden Plan und letzte Nachrichten jetzt als **normale Chat-Nachrichten** angezeigt, statt in einem separaten Textblock. Checkpoints wurden entfernt — die Darstellung ist jetzt einheitlich und übersichtlich.
+
+### Startup-Optimierung ⚡
+`loadPlugins()` läuft jetzt non-blocking im Hintergrund. Die App startet sofort, Plugins werden asynchron nachgeladen.
 
 ## Bug Fixes
-- **XSS-Schutz**: `escapeAttr()` verhindert Code-Injection in onclick/data-tooltip Attributen (Agents & Skills)
-- **Model Rollback**: Bei fehlgeschlagenem Model-Switch wird das vorherige Model wiederhergestellt
-- **Event Listener Leak**: Korrekte Bereinigung bei Window-Close
+- **getInstructions**: Nutzt jetzt den konfigurierten Pfad aus `readFolderConfig()` — die Instructions-Anzeige im Footer funktioniert wieder korrekt
+- **CSS Selector Injection**: `CSS.escape()` schützt vor Injection in `installPlugin`, `uninstallPlugin`, `updatePlugin` und `removeMarketplace`
 
 ## Technische Details
-- Neues Modul: `src/agents.js` — scannt `*.agent.md`, parst YAML-Frontmatter
-- IPC: `agents:list` Handler + `copilot.agents.list()` Bridge
-- `folders:read` Response enthält jetzt `agentsDir`
-- `getEffectiveExtraDirs()` inkludiert `agentsDir` automatisch
-- 36 neue Tests (469 total, alle grün)
+- sbInstructions-Anzeige aus Statusbar entfernt (redundant)
+- Tote CSS-Klassen bereinigt
+- 37 neue Tests (616 total, alle grün)
+- Neues IPC-Modul: `src/ipc/plugins-ipc.js`
 - Electron + Node.js Architektur unverändert

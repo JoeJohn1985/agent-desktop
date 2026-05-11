@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0] - 2025-06-16
+
+### Added
+- Plugin-Manager: Marketplace hinzufügen/entfernen mit Spinner-Feedback
+- Marketplace-Reihenfolge: Neueste Marketplaces erscheinen oben (unshift statt push)
+- Plugin-Button Toggle: Plugin-Panel schließt bei erneutem Klick auf Plugin-Button
+- Session-Wiederaufnahme: Plan + letzte Nachrichten werden als normale Chat-Nachrichten angezeigt (Checkpoints entfernt)
+- Startup-Optimierung: `loadPlugins()` läuft non-blocking im Hintergrund — App startet sofort
+- Neue Tests: `get-instructions.test.js`, `plugin-view-toggle.test.js`, erweiterte `plugin-ui.test.js` (+37 Tests)
+
+### Fixed
+- `getInstructions` Bug: Nutzt jetzt den konfigurierten Pfad aus `readFolderConfig()` — sbInstructions-Anzeige im Footer funktioniert wieder
+- CSS Selector Injection: `CSS.escape()` in `installPlugin`, `uninstallPlugin`, `updatePlugin`, `removeMarketplace`
+
+### Changed
+- sbInstructions-Anzeige aus der Statusbar entfernt (war immer 1, keine relevante Information)
+- AGENTS.md: Git-Workflow-Regel ergänzt (pull → commit → push → pull)
+- Tote CSS-Klassen entfernt (QA-Fix)
+
 ## [0.15.1] - 2025-06-15
 
 ### Added
