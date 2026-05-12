@@ -119,9 +119,10 @@ copilot-desktop/
 
 ## Documentation
 
-- 📐 **[Technische Architektur](docs/ARCHITECTURE.md)** — Architektur-Diagramm, IPC-Channels, Datenflüsse, Persistenz, Security
+- 🏛️ **[Architektur (arc42)](docs/ARCHITECTURE.md)** — vollständige arc42-Sicht: Kontext, Bausteine, Laufzeit, IPC-Channels, Verteilung, Risiken, ADRs
 - 📘 **[Benutzerhandbuch](docs/USER-GUIDE.md)** — UI-Übersicht, Features, Erste Schritte, Tastenkombinationen
 - 📦 **[Portable Distribution](docs/PORTABLE-DISTRIBUTION.md)** — Maintainer-Doku zu Bundle-Layout, Build-Pipeline und Auto-Update-Mechanismus für die GEBIT-interne ZIP-Distribution
+- 🐞 **[Known Issues](docs/known-issues.md)** — offene Punkte und gefixte Probleme
 
 ## Portable Distribution (GEBIT-internal)
 
