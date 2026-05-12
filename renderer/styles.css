@@ -3078,3 +3078,376 @@ mark.chat-search-highlight--active {
   color: #fff;
   border-color: var(--accent);
 }
+
+/* ── Onboarding Wizard ─────────────────────────────────── */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.onboarding-wizard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: 560px;
+  width: 90%;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.onboarding-wizard__header {
+  padding: 24px 28px 16px;
+  text-align: center;
+}
+
+.onboarding-wizard__title {
+  display: block;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 16px;
+}
+
+.onboarding-wizard__steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.onboarding-step {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 2px solid var(--border);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.onboarding-step--active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.onboarding-step--done {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
+.onboarding-step__line {
+  width: 32px;
+  height: 2px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.onboarding-wizard__body {
+  padding: 8px 28px 24px;
+  min-height: 200px;
+}
+
+.onboarding-wizard__footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+/* Login Step */
+.onboarding-login__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.onboarding-login__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.onboarding-login__status {
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.onboarding-login__status--ok {
+  background: var(--badge-active-bg);
+  color: var(--green);
+}
+
+.onboarding-login__status--warn {
+  background: rgba(249,226,175,0.15);
+  color: var(--yellow);
+}
+
+.onboarding-login__status--error {
+  background: rgba(243,139,168,0.15);
+  color: var(--red);
+}
+
+.onboarding-login__btn {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 6px 14px;
+}
+
+.onboarding-login__spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: onboarding-spin 0.6s linear infinite;
+}
+
+@keyframes onboarding-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Folder Setup Step */
+.onboarding-folders__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.onboarding-folders__desc {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.onboarding-folder-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.onboarding-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  font-size: 13px;
+}
+
+.onboarding-folder-item--ok {
+  border-left: 3px solid var(--accent);
+}
+
+.onboarding-folder-item--missing {
+  border-left: 3px solid var(--text-muted);
+  opacity: 0.7;
+}
+
+.onboarding-folder-item__icon {
+  flex-shrink: 0;
+}
+
+.onboarding-folder-item__path {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.onboarding-create-btn {
+  margin-top: 12px;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+/* Placeholder Step */
+.onboarding-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: var(--text-muted);
+  font-size: 14px;
+  gap: 12px;
+}
+
+.onboarding-placeholder__icon {
+  font-size: 36px;
+}
+
+/* Category Step (Step 3) */
+.onboarding-categories-container {
+  padding: 0 4px;
+}
+
+.onboarding-categories__title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.onboarding-categories__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+
+.onboarding-categories {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.onboarding-category-card {
+  cursor: pointer;
+  border: 2px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.onboarding-category-card:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+
+.onboarding-category-card--selected {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.onboarding-category-card--disabled {
+  cursor: default;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.onboarding-category-card__icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.onboarding-category-card__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.onboarding-category-card__desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.onboarding-categories__setup-btn {
+  margin-top: 4px;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+.onboarding-categories__status {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--green);
+}
+
+.onboarding-categories__error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--red);
+}
+
+/* Intro Step (Step 4) */
+.onboarding-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 16px 8px 0;
+  min-height: 200px;
+}
+
+.onboarding-intro__icon {
+  font-size: 48px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.onboarding-intro__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.onboarding-intro__text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 20px;
+  max-width: 360px;
+}
+
+.onboarding-intro__dots {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.onboarding-intro__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-subtle);
+  transition: background 0.15s;
+}
+
+.onboarding-intro__dot--active {
+  background: var(--accent);
+}
+
+.onboarding-intro__nav {
+  display: flex;
+  gap: 12px;
+}

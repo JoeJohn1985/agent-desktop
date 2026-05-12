@@ -168,6 +168,23 @@ contextBridge.exposeInMainWorld('copilot', {
       return () => ipcRenderer.removeListener('terminal:exit', handler);
     },
   },
+  // Setup
+  setup: {
+    getFolderStatus: () => ipcRenderer.invoke('setup:getFolderStatus'),
+    createFolders: () => ipcRenderer.invoke('setup:createFolders'),
+    getCategories: () => ipcRenderer.invoke('setup:getCategories'),
+    createStarterFiles: (categories) => ipcRenderer.invoke('setup:createStarterFiles', categories),
+  },
+  // Onboarding
+  onboarding: {
+    isFirstRun: () => ipcRenderer.invoke('onboarding:isFirstRun'),
+    complete: () => ipcRenderer.invoke('onboarding:complete'),
+  },
+  // Auth
+  auth: {
+    check: () => ipcRenderer.invoke('auth:check'),
+    login: () => ipcRenderer.invoke('auth:login'),
+  },
   // Window
   window: {
     minimize: () => ipcRenderer.send('window:minimize'),

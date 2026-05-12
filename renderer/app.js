@@ -3130,6 +3130,383 @@ function initTooltips() {
   });
 }
 
+// ── Onboarding Wizard ────────────────────────────────────────
+let _onboardingStep = 1;
+let _onboardingSlide = 0;
+const ONBOARDING_TOTAL_STEPS = 4;
+
+async function initOnboarding() {
+  let isFirstRun;
+  try {
+    isFirstRun = await copilot.onboarding.isFirstRun();
+  } catch (e) {
+    console.warn('[onboarding] Check fehlgeschlagen:', e.message);
+    return;
+  }
+  if (!isFirstRun) return;
+
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay.style.display = 'flex';
+
+  document.getElementById('btnOnboardingSkip').addEventListener('click', finishOnboarding);
+  document.getElementById('btnOnboardingNext').addEventListener('click', nextOnboardingStep);
+
+  showOnboardingStep(1);
+}
+
+function updateStepIndicators(step) {
+  const steps = document.querySelectorAll('.onboarding-step');
+  steps.forEach(el => {
+    const s = parseInt(el.dataset.step, 10);
+    el.classList.toggle('onboarding-step--active', s === step);
+    el.classList.toggle('onboarding-step--done', s < step);
+  });
+}
+
+function showOnboardingStep(step) {
+  _onboardingStep = step;
+  updateStepIndicators(step);
+
+  const body = document.getElementById('onboarding-body');
+  const btnNext = document.getElementById('btnOnboardingNext');
+  btnNext.disabled = true;
+  btnNext.onclick = null;
+  btnNext.textContent = step < ONBOARDING_TOTAL_STEPS ? 'Weiter →' : 'Fertig ✓';
+
+  if (step === 1) {
+    renderLoginStep(body, btnNext);
+  } else if (step === 2) {
+    renderFolderStep(body, btnNext);
+  } else if (step === 3) {
+    renderCategoryStep(body, btnNext);
+  } else {
+    renderIntroStep(body, btnNext);
+  }
+}
+
+async function renderLoginStep(body, btnNext) {
+  body.innerHTML = `
+    <div class="onboarding-login">
+      <h2 class="onboarding-login__title">🔐 GitHub Copilot Login</h2>
+      <p class="onboarding-login__desc">Für die Nutzung von Copilot Desktop benötigst du einen aktiven GitHub Copilot Account und musst dich mit der GitHub CLI einloggen.</p>
+      <div class="onboarding-login__status" id="onboarding-login-status">
+        <span class="onboarding-login__spinner"></span> Prüfe Login-Status…
+      </div>
+    </div>`;
+
+  try {
+    const result = await copilot.auth.check();
+    const statusEl = document.getElementById('onboarding-login-status');
+    if (!statusEl) return;
+
+    if (result.authenticated) {
+      const user = result.user ? escapeHtml(result.user) : '';
+      statusEl.className = 'onboarding-login__status onboarding-login__status--ok';
+      statusEl.innerHTML = `✅ Eingeloggt${user ? ' als <strong>' + user + '</strong>' : ''}`;
+      btnNext.disabled = false;
+    } else {
+      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
+      statusEl.innerHTML = `⚠️ Nicht eingeloggt <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button>`;
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+    }
+  } catch (e) {
+    const statusEl = document.getElementById('onboarding-login-status');
+    if (statusEl) {
+      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
+      statusEl.innerHTML = `❌ Prüfung fehlgeschlagen: ${escapeHtml(e.message)}`;
+    }
+  }
+}
+
+async function handleOnboardingLogin(btnNext) {
+  const statusEl = document.getElementById('onboarding-login-status');
+  if (!statusEl) return;
+  statusEl.className = 'onboarding-login__status';
+  statusEl.innerHTML = '<span class="onboarding-login__spinner"></span> Login wird gestartet… Bitte im Browser bestätigen.';
+
+  try {
+    const result = await copilot.auth.login();
+    if (result.success) {
+      statusEl.className = 'onboarding-login__status onboarding-login__status--ok';
+      statusEl.innerHTML = '✅ Erfolgreich eingeloggt!';
+      btnNext.disabled = false;
+    } else {
+      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
+      statusEl.innerHTML = `❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+    }
+  } catch (e) {
+    statusEl.className = 'onboarding-login__status onboarding-login__status--error';
+    statusEl.innerHTML = `❌ Fehler: ${escapeHtml(e.message)} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
+    document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+  }
+}
+
+async function renderFolderStep(body, btnNext) {
+  body.innerHTML = `
+    <div class="onboarding-folders">
+      <h2 class="onboarding-folders__title">📁 Ordner einrichten</h2>
+      <p class="onboarding-folders__desc">Copilot Desktop benötigt einige Ordner für Skills, Agents, Sessions und Instructions. Diese werden in deinem Home-Verzeichnis angelegt.</p>
+      <ul class="onboarding-folder-list" id="onboarding-folder-list">
+        <li class="onboarding-folder-item"><span class="onboarding-login__spinner"></span> Prüfe…</li>
+      </ul>
+    </div>`;
+
+  try {
+    const status = await copilot.setup.getFolderStatus();
+    renderFolderList(status, btnNext);
+  } catch (e) {
+    const list = document.getElementById('onboarding-folder-list');
+    if (list) list.innerHTML = `<li class="onboarding-folder-item onboarding-folder-item--missing">❌ Fehler: ${escapeHtml(e.message)}</li>`;
+  }
+}
+
+function renderFolderList(status, btnNext) {
+  const list = document.getElementById('onboarding-folder-list');
+  if (!list) return;
+
+  const keys = ['skills', 'agents', 'sessions', 'instructions'];
+  const allExist = keys.every(k => status[k] && status[k].exists);
+
+  let html = '';
+  for (const key of keys) {
+    const item = status[key];
+    if (!item) continue;
+    const cls = item.exists ? 'onboarding-folder-item--ok' : 'onboarding-folder-item--missing';
+    const icon = item.exists ? '✅' : '⬜';
+    html += `<li class="onboarding-folder-item ${cls}"><span class="onboarding-folder-item__icon">${icon}</span><code class="onboarding-folder-item__path">${escapeHtml(item.path)}</code></li>`;
+  }
+  list.innerHTML = html;
+
+  const container = list.parentElement;
+  const existingBtn = container.querySelector('.onboarding-create-btn');
+  if (existingBtn) existingBtn.remove();
+
+  if (allExist) {
+    btnNext.disabled = false;
+  } else {
+    const btn = document.createElement('button');
+    btn.className = 'action-btn action-btn--primary onboarding-create-btn';
+    btn.textContent = '📁 Ordner anlegen';
+    btn.addEventListener('click', () => handleCreateFolders(btn, btnNext));
+    container.appendChild(btn);
+  }
+}
+
+async function handleCreateFolders(createBtn, btnNext) {
+  createBtn.disabled = true;
+  createBtn.innerHTML = '<span class="onboarding-login__spinner"></span> Erstelle…';
+
+  try {
+    await copilot.setup.createFolders();
+    const status = await copilot.setup.getFolderStatus();
+    renderFolderList(status, btnNext);
+  } catch (e) {
+    createBtn.disabled = false;
+    createBtn.textContent = '📁 Ordner anlegen';
+    const list = document.getElementById('onboarding-folder-list');
+    if (list) {
+      const errLi = document.createElement('li');
+      errLi.className = 'onboarding-folder-item onboarding-folder-item--missing';
+      errLi.textContent = `❌ ${e.message}`;
+      list.appendChild(errLi);
+    }
+  }
+}
+
+async function renderCategoryStep(body, btnNext) {
+  body.innerHTML = `
+    <div class="onboarding-categories-container">
+      <h2 class="onboarding-categories__title">🤖 Agents &amp; Skills einrichten</h2>
+      <p class="onboarding-categories__desc">Wähle die Bereiche aus, in denen du Copilot einsetzen möchtest. Wir legen passende Starter-Agents und Skills für dich an.</p>
+      <div class="onboarding-categories" id="onboarding-categories">
+        <div class="onboarding-category-card"><span class="onboarding-login__spinner"></span></div>
+      </div>
+      <div id="onboarding-categories-action"></div>
+    </div>`;
+
+  try {
+    const categories = await copilot.setup.getCategories();
+    renderCategoryCards(categories, btnNext);
+  } catch (e) {
+    const grid = document.getElementById('onboarding-categories');
+    if (grid) grid.innerHTML = `<p class="onboarding-categories__error">❌ Fehler: ${escapeHtml(e.message)}</p>`;
+    btnNext.disabled = false;
+  }
+}
+
+function renderCategoryCards(categories, btnNext) {
+  const grid = document.getElementById('onboarding-categories');
+  if (!grid) return;
+
+  const selected = new Set();
+
+  grid.innerHTML = categories.map(cat => `
+    <div class="onboarding-category-card" data-category="${escapeHtml(cat.id)}">
+      <span class="onboarding-category-card__icon">${escapeHtml(cat.icon)}</span>
+      <span class="onboarding-category-card__title">${escapeHtml(cat.title)}</span>
+      <span class="onboarding-category-card__desc">${escapeHtml(cat.desc)}</span>
+    </div>`).join('');
+
+  const actionContainer = document.getElementById('onboarding-categories-action');
+  btnNext.disabled = false;
+
+  grid.addEventListener('click', (e) => {
+    const card = e.target.closest('.onboarding-category-card');
+    if (!card || card.classList.contains('onboarding-category-card--disabled')) return;
+
+    const catId = card.dataset.category;
+    if (selected.has(catId)) {
+      selected.delete(catId);
+      card.classList.remove('onboarding-category-card--selected');
+    } else {
+      selected.add(catId);
+      card.classList.add('onboarding-category-card--selected');
+    }
+
+    updateCategoryActionButton(selected, actionContainer, btnNext, grid);
+  });
+}
+
+function updateCategoryActionButton(selected, actionContainer, btnNext, grid) {
+  if (!actionContainer) return;
+
+  const existingBtn = actionContainer.querySelector('.onboarding-categories__setup-btn');
+  if (selected.size > 0) {
+    btnNext.disabled = true;
+    if (!existingBtn) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn action-btn--primary onboarding-categories__setup-btn';
+      btn.textContent = '✨ Auswahl einrichten';
+      btn.addEventListener('click', () => handleCreateStarterFiles(selected, btn, btnNext, grid));
+      actionContainer.appendChild(btn);
+    }
+  } else {
+    btnNext.disabled = false;
+    if (existingBtn) existingBtn.remove();
+  }
+}
+
+async function handleCreateStarterFiles(selected, setupBtn, btnNext, grid) {
+  setupBtn.disabled = true;
+  setupBtn.innerHTML = '<span class="onboarding-login__spinner"></span> Richte ein…';
+
+  try {
+    const result = await copilot.setup.createStarterFiles([...selected]);
+    setupBtn.remove();
+
+    const cards = grid.querySelectorAll('.onboarding-category-card');
+    cards.forEach(card => {
+      card.classList.add('onboarding-category-card--disabled');
+    });
+
+    const actionContainer = document.getElementById('onboarding-categories-action');
+    if (actionContainer) {
+      let msg = `✅ ${result.created.length} Agent(s) angelegt.`;
+      if (result.skipped.length > 0) msg += ` ${result.skipped.length} übersprungen (existiert bereits).`;
+      if (result.errors.length > 0) msg += ` ⚠️ ${result.errors.length} Fehler.`;
+      const statusEl = document.createElement('p');
+      statusEl.className = 'onboarding-categories__status';
+      statusEl.textContent = msg;
+      actionContainer.appendChild(statusEl);
+    }
+
+    btnNext.disabled = false;
+  } catch (e) {
+    setupBtn.disabled = false;
+    setupBtn.textContent = '✨ Auswahl einrichten';
+    const actionContainer = document.getElementById('onboarding-categories-action');
+    if (actionContainer) {
+      const errEl = actionContainer.querySelector('.onboarding-categories__error');
+      if (errEl) errEl.remove();
+      const p = document.createElement('p');
+      p.className = 'onboarding-categories__error';
+      p.textContent = `❌ ${e.message}`;
+      actionContainer.appendChild(p);
+    }
+  }
+}
+
+const _introSlides = [
+  { icon: '💬', title: 'Chat-Tabs', text: 'Jede Aufgabe bekommt ihren eigenen Tab. Starte neue Chats mit dem + Button und wechsle zwischen ihnen.' },
+  { icon: '🤖', title: 'Skills & Agents', text: 'Aktiviere Skills über das Plugin-Menü. Deine eingerichteten Agents findest du als Befehle direkt im Chat.' },
+  { icon: '🚀', title: 'Alles bereit!', text: 'Du kannst jederzeit zurückkehren und weitere Agents und Skills in den Einstellungen hinzufügen.' }
+];
+
+function renderIntroStep(body, btnNext) {
+  _onboardingSlide = 0;
+  renderIntroSlide(body);
+  updateIntroNextButton(btnNext);
+}
+
+function renderIntroSlide(body) {
+  const slide = _introSlides[_onboardingSlide];
+  const dots = _introSlides.map((_, i) =>
+    `<span class="onboarding-intro__dot${i === _onboardingSlide ? ' onboarding-intro__dot--active' : ''}"></span>`
+  ).join('');
+
+  body.innerHTML = `
+    <div class="onboarding-intro">
+      <span class="onboarding-intro__icon">${slide.icon}</span>
+      <h2 class="onboarding-intro__title">${escapeHtml(slide.title)}</h2>
+      <p class="onboarding-intro__text">${escapeHtml(slide.text)}</p>
+      <div class="onboarding-intro__dots">${dots}</div>
+      <div class="onboarding-intro__nav">
+        <button class="action-btn onboarding-intro__btn-prev" ${_onboardingSlide === 0 ? 'style="visibility:hidden"' : ''}>← Zurück</button>
+        <button class="action-btn onboarding-intro__btn-next" ${_onboardingSlide >= _introSlides.length - 1 ? 'style="visibility:hidden"' : ''}>Weiter →</button>
+      </div>
+    </div>`;
+
+  const prevBtn = body.querySelector('.onboarding-intro__btn-prev');
+  const nextBtn = body.querySelector('.onboarding-intro__btn-next');
+
+  prevBtn.addEventListener('click', () => {
+    if (_onboardingSlide > 0) {
+      _onboardingSlide--;
+      renderIntroSlide(body);
+      updateIntroNextButton(document.getElementById('btnOnboardingNext'));
+    }
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (_onboardingSlide < _introSlides.length - 1) {
+      _onboardingSlide++;
+      renderIntroSlide(body);
+      updateIntroNextButton(document.getElementById('btnOnboardingNext'));
+    }
+  });
+}
+
+function updateIntroNextButton(btnNext) {
+  if (_onboardingSlide >= _introSlides.length - 1) {
+    btnNext.disabled = false;
+    btnNext.textContent = 'Fertig 🎉';
+    btnNext.onclick = null; // nextOnboardingStep handles finish
+  } else {
+    btnNext.disabled = true;
+    btnNext.textContent = 'Weiter →';
+    btnNext.onclick = null;
+  }
+}
+
+function nextOnboardingStep() {
+  if (_onboardingStep >= ONBOARDING_TOTAL_STEPS) {
+    finishOnboarding();
+    return;
+  }
+  showOnboardingStep(_onboardingStep + 1);
+}
+
+async function finishOnboarding() {
+  try {
+    await copilot.onboarding.complete();
+  } catch (e) {
+    console.warn('[onboarding] Complete fehlgeschlagen:', e.message);
+  }
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay.style.display = 'none';
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
   applyTheme(getCurrentTheme());
@@ -3162,4 +3539,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   initDragDrop();
   initTooltips();
   initModelSwitcher();
+  initOnboarding();
 });

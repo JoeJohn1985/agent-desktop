@@ -465,6 +465,30 @@
   <script src="../node_modules/xterm/lib/xterm.js"></script>
   <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <!-- Extracted modules (loaded before app.js, share global scope) -->
+  <!-- Onboarding Wizard Overlay -->
+  <div id="onboarding-overlay" class="onboarding-overlay" style="display:none">
+    <div class="onboarding-wizard">
+      <div class="onboarding-wizard__header">
+        <div class="onboarding-wizard__steps">
+          <span class="onboarding-step onboarding-step--active" data-step="1">1</span>
+          <span class="onboarding-step__line"></span>
+          <span class="onboarding-step" data-step="2">2</span>
+          <span class="onboarding-step__line"></span>
+          <span class="onboarding-step" data-step="3">3</span>
+          <span class="onboarding-step__line"></span>
+          <span class="onboarding-step" data-step="4">4</span>
+        </div>
+        <span class="onboarding-wizard__title">Willkommen bei Copilot Desktop</span>
+      </div>
+      <div class="onboarding-wizard__body" id="onboarding-body">
+      </div>
+      <div class="onboarding-wizard__footer">
+        <button class="action-btn" id="btnOnboardingSkip">Überspringen</button>
+        <button class="action-btn action-btn--primary" id="btnOnboardingNext" disabled>Weiter →</button>
+      </div>
+    </div>
+  </div>
+
   <script src="modules/utils.js"></script>
   <script src="modules/dev-console.js"></script>
   <script src="modules/todos.js"></script>

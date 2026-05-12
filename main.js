@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const yaml = require('yaml');
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
@@ -579,6 +579,226 @@ ipcMain.handle('instructions:write', async (_event, content) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+// ── Onboarding ─────────────────────────────────────────────────
+ipcMain.handle('onboarding:isFirstRun', async () => {
+  try {
+    const config = readFolderConfig();
+    return config.onboardingComplete !== true;
+  } catch (_) {
+    return true;
+  }
+});
+
+ipcMain.handle('onboarding:complete', async () => {
+  try {
+    const config = readFolderConfig();
+    config.onboardingComplete = true;
+    writeFolderConfig(config);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── Starter Agent Templates ────────────────────────────────────
+const STARTER_TEMPLATES = {
+  'code-review': {
+    agent: {
+      filename: 'code-reviewer.agent.md',
+      content: `---\nname: code-reviewer\ndescription: Führt Code Reviews durch und findet Bugs, Sicherheitslücken und Verbesserungspotenzial.\n---\n\nDu bist ein erfahrener Code-Reviewer. Analysiere den gegebenen Code auf:\n- Bugs und Logikfehler\n- Sicherheitslücken\n- Performance-Probleme\n- Code-Qualität und Lesbarkeit\n\nGib konkrete, umsetzbare Verbesserungsvorschläge.`
+    },
+    skill: null
+  },
+  'testing': {
+    agent: {
+      filename: 'tester.agent.md',
+      content: `---\nname: tester\ndescription: Schreibt Unit-Tests, Integrationstests und hilft bei Test-Strategien.\n---\n\nDu bist ein Test-Experte. Schreibe vollständige, aussagekräftige Tests.\nNutze das Test-Framework das im Projekt verwendet wird.\nTeste Edge Cases, Error Paths und Happy Paths.`
+    },
+    skill: null
+  },
+  'planning': {
+    agent: {
+      filename: 'planner.agent.md',
+      content: `---\nname: planner\ndescription: Erstellt strukturierte Pläne, Aufgabenlisten und Roadmaps.\n---\n\nDu bist ein strukturierter Planer. Zerlege Anforderungen in klare, umsetzbare Aufgaben.\nErstelle Pläne mit klaren Schritten, Abhängigkeiten und Prioritäten.`
+    },
+    skill: null
+  },
+  'documentation': {
+    agent: {
+      filename: 'documenter.agent.md',
+      content: `---\nname: documenter\ndescription: Erstellt und verbessert Dokumentation, READMEs und API-Docs.\n---\n\nDu bist ein Dokumentations-Experte. Schreibe klare, vollständige Dokumentation.\nPasse den Stil an die Zielgruppe an (Entwickler, Endnutzer, API-Nutzer).`
+    },
+    skill: null
+  },
+  'security': {
+    agent: {
+      filename: 'security-auditor.agent.md',
+      content: `---\nname: security-auditor\ndescription: Findet Sicherheitslücken, OWASP-Risiken und unsichere Patterns.\n---\n\nDu bist ein Security-Experte. Analysiere Code auf:\n- OWASP Top 10 Risiken\n- Injection-Angriffe (SQL, XSS, Command)\n- Authentifizierungs- und Autorisierungsprobleme\n- Unsichere Abhängigkeiten und Konfigurationen`
+    },
+    skill: null
+  },
+  'performance': {
+    agent: {
+      filename: 'performance-analyzer.agent.md',
+      content: `---\nname: performance-analyzer\ndescription: Analysiert Performance-Probleme und schlägt Optimierungen vor.\n---\n\nDu bist ein Performance-Experte. Identifiziere:\n- N+1 Queries und ineffiziente DB-Zugriffe\n- Unnötige Re-Renders und Memory Leaks\n- Algorithmen mit schlechter Komplexität\n- Caching-Möglichkeiten`
+    },
+    skill: null
+  }
+};
+
+// ── Setup (Folder creation) ────────────────────────────────────
+const SETUP_FOLDERS = [
+  { key: 'skills', rel: '.copilot/skills' },
+  { key: 'agents', rel: '.copilot/agents' },
+  { key: 'sessions', rel: '.copilot/session-state' },
+];
+const SETUP_INSTRUCTIONS = { key: 'instructions', rel: '.copilot/copilot-instructions.md', isFile: true };
+
+ipcMain.handle('setup:getFolderStatus', () => {
+  const home = os.homedir();
+  const result = {};
+  for (const item of SETUP_FOLDERS) {
+    const fullPath = path.join(home, item.rel);
+    result[item.key] = { path: '~/' + item.rel, exists: fs.existsSync(fullPath) };
+  }
+  const instrPath = path.join(home, SETUP_INSTRUCTIONS.rel);
+  result.instructions = { path: '~/' + SETUP_INSTRUCTIONS.rel, exists: fs.existsSync(instrPath), isFile: true };
+  return result;
+});
+
+ipcMain.handle('setup:createFolders', async () => {
+  const home = os.homedir();
+  const created = [];
+  const errors = [];
+
+  for (const item of SETUP_FOLDERS) {
+    const fullPath = path.join(home, item.rel);
+    if (!fs.existsSync(fullPath)) {
+      try {
+        fs.mkdirSync(fullPath, { recursive: true });
+        created.push(item.rel);
+      } catch (e) {
+        errors.push(`${item.rel}: ${e.message}`);
+      }
+    }
+  }
+
+  const instrPath = path.join(home, SETUP_INSTRUCTIONS.rel);
+  if (!fs.existsSync(instrPath)) {
+    try {
+      const dir = path.dirname(instrPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(instrPath, '# Copilot Instructions\n\nAntworte immer auf Deutsch.\n', 'utf-8');
+      created.push(SETUP_INSTRUCTIONS.rel);
+    } catch (e) {
+      errors.push(`${SETUP_INSTRUCTIONS.rel}: ${e.message}`);
+    }
+  }
+
+  return { success: errors.length === 0, created, errors };
+});
+
+// ── Setup (Starter Agents & Skills) ────────────────────────────
+ipcMain.handle('setup:getCategories', () => {
+  return [
+    { id: 'code-review', icon: '🔍', title: 'Code Review', desc: 'Analysiert Code und findet Probleme' },
+    { id: 'testing', icon: '🧪', title: 'Testen', desc: 'Schreibt Unit- und Integrationstests' },
+    { id: 'planning', icon: '📋', title: 'Planung', desc: 'Erstellt Pläne und Aufgabenlisten' },
+    { id: 'documentation', icon: '📝', title: 'Dokumentation', desc: 'Schreibt Doku und README-Dateien' },
+    { id: 'security', icon: '🔒', title: 'Security', desc: 'Findet Sicherheitslücken' },
+    { id: 'performance', icon: '⚡', title: 'Performance', desc: 'Analysiert und optimiert Code' },
+  ];
+});
+
+ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
+  const config = readFolderConfig();
+  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+  const created = [];
+  const skipped = [];
+  const errors = [];
+
+  for (const catId of categories) {
+    const template = STARTER_TEMPLATES[catId];
+    if (!template) {
+      errors.push(`Unbekannte Kategorie: ${catId}`);
+      continue;
+    }
+
+    if (template.agent) {
+      const filePath = path.join(agentsDir, template.agent.filename);
+      if (fs.existsSync(filePath)) {
+        skipped.push(template.agent.filename);
+      } else {
+        try {
+          if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+          fs.writeFileSync(filePath, template.agent.content, 'utf-8');
+          created.push(template.agent.filename);
+        } catch (e) {
+          errors.push(`${template.agent.filename}: ${e.message}`);
+        }
+      }
+    }
+
+    if (template.skill) {
+      const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
+      const filePath = path.join(skillsDir, template.skill.filename);
+      if (fs.existsSync(filePath)) {
+        skipped.push(template.skill.filename);
+      } else {
+        try {
+          if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
+          fs.writeFileSync(filePath, template.skill.content, 'utf-8');
+          created.push(template.skill.filename);
+        } catch (e) {
+          errors.push(`${template.skill.filename}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  return { success: errors.length === 0, created, skipped, errors };
+});
+
+// ── Auth (GitHub CLI) ──────────────────────────────────────────
+const AUTH_TIMEOUT_MS = 15000;
+
+ipcMain.handle('auth:check', async () => {
+  return new Promise((resolve) => {
+    execFile('gh', ['auth', 'status'], {
+      shell: true,
+      timeout: AUTH_TIMEOUT_MS,
+    }, (error, stdout, stderr) => {
+      const output = (stdout || '') + (stderr || '');
+      if (error) {
+        resolve({ success: true, authenticated: false, user: null });
+        return;
+      }
+      const userMatch = output.match(/Logged in to [^ ]+ account ([^ ]+)/i)
+        || output.match(/account ([^\s(]+)/i);
+      resolve({
+        success: true,
+        authenticated: true,
+        user: userMatch ? userMatch[1].replace(/\s/g, '') : null,
+      });
+    });
+  });
+});
+
+ipcMain.handle('auth:login', async () => {
+  return new Promise((resolve) => {
+    execFile('gh', ['auth', 'login', '--web'], {
+      shell: true,
+      timeout: 120000,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ success: false, error: (stderr || error.message).trim() });
+        return;
+      }
+      resolve({ success: true, error: null });
+    });
+  });
 });
 
 // Window controls
