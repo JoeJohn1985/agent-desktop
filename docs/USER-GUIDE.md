@@ -291,7 +291,7 @@ Copilot Desktop enthält ein vollwertiges integriertes Terminal (xterm.js):
 
 ### Settings
 
-Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt zwei Tabs:
+Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt vier Tabs:
 
 #### UI-Tab
 
@@ -311,6 +311,22 @@ Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt zwe
 | **Zusätzliche Verzeichnisse** | Extra Pfade, die Copilot durchsuchen darf |
 | **Shell-Ausnahmen** | Befehle, die immer erlaubt sind (Bypass der Genehmigung) |
 
+#### Ordner-Tab
+
+Konfiguriert die Standard-Verzeichnisse für Sessions, Skills, Plugins und Drop-Files.
+
+#### Tastenkürzel-Tab
+
+Erlaubt das Anpassen aller konfigurierbaren Tastenkürzel (siehe Abschnitt
+[Tastenkombinationen](#tastenkombinationen)). Klick auf **„Ändern"**, drücke die neue Kombination
+(`Esc` bricht ab). **„🔄 Alle zurücksetzen"** stellt alle Defaults wieder her.
+
+### Tastenkürzel-Hilfe
+
+Das ⌨️-Symbol im Sidebar-Footer (oder `Ctrl+/`) öffnet ein Overlay mit allen aktuell aktiven
+Tastenkürzeln, gruppiert nach Kategorie (Tabs, Chat, UI). Geänderte Kürzel werden farblich
+hervorgehoben.
+
 ### Themes
 
 Drei Themes stehen zur Verfügung, alle über CSS Custom Properties implementiert:
@@ -327,12 +343,32 @@ Wechsel über: **Settings → UI → Theme**.
 
 ## Tastenkombinationen
 
+Konfigurierbare Kürzel sind über **Settings → Tastenkürzel** anpassbar. Übersicht jederzeit
+mit `Ctrl+/` oder dem ⌨️-Button.
+
+### Konfigurierbar
+
+| Kürzel (Default) | Aktion | Kategorie |
+|---|---|---|
+| `Ctrl+T` | Neuer Tab | Tabs |
+| `Ctrl+W` | Tab schließen | Tabs |
+| `Ctrl+Tab` | Nächster Tab | Tabs |
+| `Ctrl+Shift+Tab` | Vorheriger Tab | Tabs |
+| `Ctrl+L` | Eingabe fokussieren | Chat |
+| `Ctrl+F` | Chat durchsuchen | Chat |
+| `Ctrl+E` | Chat exportieren | Chat |
+| `Ctrl+B` | Sidebar ein-/ausblenden | UI |
+| `Ctrl+/` | Tastenkürzel-Hilfe | UI |
+
+### Fest verdrahtet
+
 | Kürzel | Aktion |
 |---|---|
+| `Ctrl+1` … `Ctrl+8` | Tab 1–8 direkt anspringen |
+| `Ctrl+9` | Letzter Tab |
 | `Enter` | Nachricht senden |
 | `Shift+Enter` | Zeilenumbruch in der Nachricht |
-| `Strg+F` | Chat durchsuchen |
-| `Escape` | Overlay oder Settings schließen |
+| `Escape` | Aktion abbrechen / Overlay schließen |
 
 ---
 

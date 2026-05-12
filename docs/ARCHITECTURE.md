@@ -1,6 +1,6 @@
 # Copilot Desktop — Architektur (arc42)
 
-> **Version:** 0.15.7 · **Stand:** Mai 2026 · **Stack:** Electron 35, node-pty, marked, highlight.js, xterm.js, jest
+> **Version:** 0.18.2 · **Stand:** Mai 2026 · **Stack:** Electron 35, node-pty, marked, highlight.js, xterm.js, jest
 >
 > Diese Dokumentation folgt dem [arc42-Template](https://arc42.org/) (12 Kapitel) und ist **die** Architektur-Referenz für Copilot Desktop. Die frühere Aufteilung in `ARCHITECTURE.md` (technisch-detailliert) und `arc42.md` (strategisch) wurde in dieses Dokument zusammengeführt.
 
@@ -181,7 +181,7 @@
 | `renderer/modules/*.js` | siehe 5.4 | **UI-Module** — Terminal, Bilder, Todos, Test-Runner, Session-Tools, Dev-Console |
 | `src/*.js` | siehe 5.5 | **Reine Logik-Module** — testbar ohne Electron |
 | `src/ipc/*.js` | 3 Dateien | **IPC-Handler-Module** — Terminal, Bilder, Tests |
-| `__tests__/` | 16 Suiten | **Jest Unit-Tests** (>500 Tests) |
+| `__tests__/` | 24 Suiten | **Jest Unit-Tests** (>790 Tests) |
 | `e2e/` | — | **Playwright E2E-Tests** |
 | `assets/` | — | Logo-SVGs |
 | `setup.ps1`, `setup.bat` | — | Automatisierte Setup-Scripts (Windows) |
@@ -218,6 +218,18 @@
 - Schreibt atomar mit `.bak`-Backup; `read()` versucht bei korruptem JSON automatisch das `.bak` wiederherzustellen.
 - `ensureDir()` legt Zielverzeichnis rekursiv an (für `app.getPath('userData')`-Migration in v0.15.6).
 - `write()` wirft jetzt aussagekräftigen Fehler statt stillem `false` — `main.js` loggt ihn.
+
+#### src/shortcuts.js
+- Reine Logik-Modul für das Tastenkürzel-System (eingeführt in v0.18.x).
+- Exportiert `SHORTCUT_DEFS` (alle konfigurierbaren Shortcuts: newTab, closeTab, nextTab,
+  prevTab, focusInput, search, exportChat, toggleSidebar, showShortcuts) und `FIXED_SHORTCUTS`
+  (Tab 1–9, Escape).
+- `resolveShortcut(prefs, id)` — liefert User-Override oder Default-Binding.
+- `matchShortcut(event, binding)` — strenger Vergleich eines KeyboardEvents mit einer Bindung;
+  Modifier-Flags müssen exakt übereinstimmen.
+- `shortcutLabel(binding)` — rendert eine Bindung als `Ctrl+Shift+Tab`-String (Space wird zu „Space").
+- `renderer/app.js` hält eine 1:1-Spiegelung dieser Konstanten/Funktionen für den DOM-Layer; ein
+  Integritätstest stellt sicher, dass die IDs übereinstimmen.
 
 #### renderer/app.js
 - Ein langer prozeduraler Layer (~2.4k Zeilen), zerlegt in Sektionen für Chat, Tabs, Settings, Theme, Search, Skills, Agents, Folders, Instructions.
