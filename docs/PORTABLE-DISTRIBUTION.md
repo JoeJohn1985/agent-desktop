@@ -72,22 +72,47 @@ npm run dist:portable
 Every step is wrapped in `Invoke-Step` and logged with timestamp + outcome.
 On failure the script aborts with a stack trace in the log.
 
-### 3.3 CI release (planned, PR-B)
+### 3.3 CI release (PR-B — `.github/workflows/release.yml`)
 
-A GitHub Actions workflow will trigger on `v*` tags:
-1. `npm ci` on a Windows runner
-2. `npm run dist:portable`
-3. Attach the produced ZIP as an asset to the GitHub Release for the tag
+The release workflow runs on a `windows-latest` runner and is the
+**canonical way** to produce a distributable ZIP. Local builds are for
+development only (see §6.2 for host requirements).
 
-**Required repo settings (Matthias, one-time):**
+**Trigger:** push of an annotated tag matching `v*.*.*`, or a manual
+`workflow_dispatch` from the Actions UI (for dry-runs).
+
+**Pipeline:**
+| Step | Action |
+|---|---|
+| 1 | Resolve tag → version |
+| 2 | `actions/checkout@v4` (full history) |
+| 3 | Assert `package.json` version equals tag version (fails the build if drifted) |
+| 4 | `actions/setup-node@v4` (Node 20, npm cache) |
+| 5 | `npm ci --no-audit --no-fund` |
+| 6 | `npm test -- --ci` |
+| 7 | `npm run dist:portable` (with `CSC_IDENTITY_AUTO_DISCOVERY=false`) |
+| 8 | Locate `*portable*.zip` under `dist-portable\` |
+| 9 | Always upload ZIP as workflow artifact (30 d retention) — visible even without a Release |
+| 10 | Publish GitHub Release via `softprops/action-gh-release@v2` and attach the ZIP. Prerelease flag is set automatically for tags containing `-` (e.g. `v1.0.0-rc1`). |
+
+**Required repo settings (Matthias, one-time, already done):**
 - Settings → Actions → General: enable Actions
 - Workflow permissions: Read and write
+  (the workflow also sets `permissions: contents: write` explicitly as a
+  belt-and-braces defense against default-permission drift)
 
-Cutting a release then becomes:
+**Cutting a release** becomes:
 ```powershell
-npm version minor   # bumps package.json + creates a tag
+npm version minor                 # bumps package.json + creates an annotated tag
 git push origin main --follow-tags
+# → workflow runs, ZIP appears at:
+#    https://github.com/<owner>/<repo>/releases/latest
 ```
+
+**Dry-running the workflow** without publishing a Release:
+- Actions tab → "Release Portable ZIP" → "Run workflow"
+- Enter a tag name (e.g. `v0.16.2-test`) and leave `publish=false`
+- The ZIP is still uploaded as a workflow artifact for download.
 
 ---
 

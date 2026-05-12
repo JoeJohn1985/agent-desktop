@@ -1,0 +1,168 @@
+name: Release Portable ZIP
+
+# ---------------------------------------------------------------------------
+#  Triggered by pushing a tag like v0.16.2 or v1.0.0.
+#  Builds the portable distribution on windows-latest and attaches the
+#  resulting ZIP as an asset to a new GitHub Release.
+#
+#  Can also be triggered manually from the Actions UI via workflow_dispatch
+#  for dry-runs (skips release publication unless 'publish' is set to true).
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for a manual run (e.g. v0.16.2-test). Will NOT create a release unless publish=true.'
+        required: true
+        type: string
+      publish:
+        description: 'Publish a GitHub Release for the manual run?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build portable ZIP and publish release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve tag name
+        id: tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          } else {
+            $tag = '${{ inputs.tag }}'
+          }
+          if (-not $tag) { throw "Tag could not be resolved" }
+          $version = $tag -replace '^v', ''
+          Write-Host "Tag:     $tag"
+          Write-Host "Version: $version"
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify package.json version matches tag
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $expected = '${{ steps.tag.outputs.version }}'
+          if ($pkg.version -ne $expected) {
+            Write-Host "::error::package.json version ($($pkg.version)) does not match tag version ($expected). Bump package.json before tagging."
+            exit 1
+          }
+          Write-Host "Version check OK: $($pkg.version)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Run tests
+        run: npm test -- --ci --reporters=default
+
+      - name: Build portable ZIP
+        run: npm run dist:portable
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate built ZIP
+        id: locate
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "dist-portable",
+            "dist"
+          )
+          $zip = $null
+          foreach ($dir in $candidates) {
+            if (Test-Path $dir) {
+              $found = Get-ChildItem -Path $dir -Filter '*portable*.zip' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) { $zip = $found.FullName; break }
+            }
+          }
+          if (-not $zip) {
+            Write-Host "::error::No portable ZIP found in dist-portable\ or dist\."
+            Get-ChildItem -Recurse -Filter '*.zip' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Found ZIP: $($_.FullName)" }
+            exit 1
+          }
+          Write-Host "ZIP located: $zip"
+          $size = (Get-Item $zip).Length / 1MB
+          Write-Host ("Size: {0:N1} MB" -f $size)
+          "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload ZIP as workflow artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-desktop-${{ steps.tag.outputs.tag }}-portable
+          path: ${{ steps.locate.outputs.zip_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Decide whether to publish release
+        id: gate
+        shell: pwsh
+        run: |
+          $publish = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $publish = 'true'
+          } elseif ('${{ inputs.publish }}' -eq 'true') {
+            $publish = 'true'
+          }
+          Write-Host "Publish release: $publish"
+          "publish=$publish" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub Release with ZIP asset
+        if: steps.gate.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Copilot Desktop ${{ steps.tag.outputs.tag }} (Portable)
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          generate_release_notes: true
+          files: ${{ steps.locate.outputs.zip_path }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summary = @"
+          ## Release Run Summary
+          - Tag:           ``${{ steps.tag.outputs.tag }}``
+          - Version:       ``${{ steps.tag.outputs.version }}``
+          - ZIP:           ``${{ steps.locate.outputs.zip_path }}``
+          - Published:     ``${{ steps.gate.outputs.publish }}``
+          "@
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
