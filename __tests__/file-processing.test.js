@@ -9,8 +9,15 @@ const { processDroppedFile } = require('../src/file-processing');
 // processDroppedFile
 // ═══════════════════════════════════════════════════════════════
 describe('processDroppedFile', () => {
-  const cwd = 'C:\\Projects\\myapp';
-  const filesDropDir = 'C:\\Projects\\myapp\\Dateien';
+  const isWin = process.platform === 'win32';
+  const cwd = isWin ? 'C:\\Projects\\myapp' : '/home/user/projects/myapp';
+  const filesDropDir = path.join(cwd, 'Dateien');
+  const externalDir = isWin ? 'D:\\Photos' : '/tmp/photos';
+  const externalCodeDir = isWin ? 'D:\\code' : '/tmp/code';
+  const externalDataDir = isWin ? 'D:\\data' : '/tmp/data';
+  const externalImgDir = isWin ? 'D:\\img' : '/tmp/img';
+  const externalBinDir = isWin ? 'D:\\bin' : '/tmp/bin';
+  const externalDeepDir = isWin ? 'D:\\deep\\nested\\path' : '/tmp/deep/nested/path';
   const textExtensions = new Set([
     '.txt', '.md', '.json', '.js', '.ts', '.jsx', '.tsx', '.css', '.html', '.xml',
     '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.sh', '.bat', '.ps1',
@@ -26,7 +33,8 @@ describe('processDroppedFile', () => {
 
   test('gibt error wenn Datei nicht existiert', () => {
     fs.existsSync.mockReturnValue(false);
-    const result = processDroppedFile('C:\\nope\\file.txt', opts);
+    const filePath = path.join(externalDir, 'file.txt');
+    const result = processDroppedFile(filePath, opts);
     expect(result).toEqual({ type: 'error', message: 'Datei nicht gefunden' });
   });
 
@@ -49,7 +57,7 @@ describe('processDroppedFile', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.copyFileSync.mockReturnValue(undefined);
 
-    const filePath = 'D:\\Photos\\screenshot.png';
+    const filePath = path.join(externalDir, 'screenshot.png');
     const result = processDroppedFile(filePath, opts);
 
     expect(result.type).toBe('image');
@@ -63,7 +71,7 @@ describe('processDroppedFile', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.copyFileSync.mockReturnValue(undefined);
 
-    processDroppedFile('D:\\img\\photo.jpg', opts);
+    processDroppedFile(path.join(externalImgDir, 'photo.jpg'), opts);
     expect(fs.mkdirSync).toHaveBeenCalledWith(filesDropDir, { recursive: true });
   });
 
@@ -72,7 +80,7 @@ describe('processDroppedFile', () => {
     fs.copyFileSync.mockReturnValue(undefined);
 
     // File is outside CWD but filesDropDir exists
-    const filePath = 'D:\\img\\photo.jpg';
+    const filePath = path.join(externalImgDir, 'photo.jpg');
     // existsSync: true for filePath, true for filesDropDir
     processDroppedFile(filePath, opts);
     expect(fs.mkdirSync).not.toHaveBeenCalled();
@@ -83,7 +91,7 @@ describe('processDroppedFile', () => {
     fs.statSync.mockReturnValue({ size: 500 });
     fs.readFileSync.mockReturnValue('console.log("hello");');
 
-    const filePath = 'D:\\code\\app.js';
+    const filePath = path.join(externalCodeDir, 'app.js');
     const result = processDroppedFile(filePath, opts);
 
     expect(result).toEqual({
@@ -98,7 +106,7 @@ describe('processDroppedFile', () => {
     fs.existsSync.mockReturnValue(true);
     fs.statSync.mockReturnValue({ size: 150 * 1024 });
 
-    const filePath = 'D:\\code\\huge.py';
+    const filePath = path.join(externalCodeDir, 'huge.py');
     const result = processDroppedFile(filePath, opts);
 
     expect(result.type).toBe('error');
@@ -111,7 +119,7 @@ describe('processDroppedFile', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.copyFileSync.mockReturnValue(undefined);
 
-    const filePath = 'D:\\data\\archive.zip';
+    const filePath = path.join(externalDataDir, 'archive.zip');
     const result = processDroppedFile(filePath, opts);
 
     expect(result.type).toBe('copied');
@@ -124,7 +132,7 @@ describe('processDroppedFile', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.copyFileSync.mockReturnValue(undefined);
 
-    processDroppedFile('D:\\bin\\app.exe', opts);
+    processDroppedFile(path.join(externalBinDir, 'app.exe'), opts);
     expect(fs.mkdirSync).toHaveBeenCalledWith(filesDropDir, { recursive: true });
   });
 
@@ -134,7 +142,7 @@ describe('processDroppedFile', () => {
     fs.copyFileSync.mockReturnValue(undefined);
 
     for (const ext of ['.png', '.jpg', '.svg']) {
-      const result = processDroppedFile(`D:\\img\\file${ext}`, opts);
+      const result = processDroppedFile(path.join(externalImgDir, `file${ext}`), opts);
       expect(result.type).toBe('image');
     }
   });
@@ -145,7 +153,7 @@ describe('processDroppedFile', () => {
     fs.readFileSync.mockReturnValue('content');
 
     for (const ext of ['.js', '.py', '.md']) {
-      const result = processDroppedFile(`D:\\code\\file${ext}`, opts);
+      const result = processDroppedFile(path.join(externalCodeDir, `file${ext}`), opts);
       expect(result.type).toBe('text');
       expect(result.lang).toBe(ext.replace('.', ''));
     }
@@ -157,7 +165,7 @@ describe('processDroppedFile', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.copyFileSync.mockReturnValue(undefined);
 
-    const result = processDroppedFile('D:\\img\\photo.PNG', opts);
+    const result = processDroppedFile(path.join(externalImgDir, 'photo.PNG'), opts);
     expect(result.type).toBe('image');
   });
 
@@ -166,7 +174,7 @@ describe('processDroppedFile', () => {
     fs.statSync.mockReturnValue({ size: 50 });
     fs.readFileSync.mockReturnValue('data');
 
-    const result = processDroppedFile('D:\\deep\\nested\\path\\report.md', opts);
+    const result = processDroppedFile(path.join(externalDeepDir, 'report.md'), opts);
     expect(result.filename).toBe('report.md');
   });
 
@@ -175,7 +183,7 @@ describe('processDroppedFile', () => {
     fs.statSync.mockReturnValue({ size: 100 * 1024 });
     fs.readFileSync.mockReturnValue('x'.repeat(100 * 1024));
 
-    const result = processDroppedFile('D:\\code\\exact.txt', opts);
+    const result = processDroppedFile(path.join(externalCodeDir, 'exact.txt'), opts);
     // 100*1024 is NOT > 100*1024, so it should succeed
     expect(result.type).toBe('text');
   });

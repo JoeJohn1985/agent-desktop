@@ -3,6 +3,52 @@
 'use strict';
 
 const { ipcMain } = require('electron');
+const { buildEnv, detectCopilotPrompt, isCopilotTuiReady } = require('../main-helpers');
+
+/**
+ * Wires up auto-handling for Copilot CLI startup prompts on a PTY.
+ * - Auto-confirms folder-trust and resume-conflict prompts.
+ * - Marks the tab as ready once the TUI prints its slash-help line.
+ * - Falls back to "ready" after timeoutMs to avoid stalling forever.
+ *
+ * Returns a dispose() function.
+ */
+function attachReadyDetection(ptyProcess, tabId, terminalReady, timeoutMs, label) {
+  let allData = '';
+  const handled = new Set();
+
+  const readyListener = ptyProcess.onData((data) => {
+    allData += data;
+
+    const prompt = detectCopilotPrompt(allData, handled);
+    if (prompt) {
+      handled.add(prompt.name);
+      console.log(`[${label}] Auto-confirming ${prompt.name} prompt for tab`, tabId);
+      setTimeout(() => {
+        try { ptyProcess.write(prompt.input); } catch (_) {}
+      }, 500);
+    }
+
+    if (!terminalReady.get(tabId) && isCopilotTuiReady(allData)) {
+      console.log(`[${label}] TUI ready for tab`, tabId);
+      terminalReady.set(tabId, true);
+      readyListener.dispose();
+    }
+  });
+
+  const readyFallback = setTimeout(() => {
+    if (!terminalReady.get(tabId)) {
+      console.log(`[${label}] Fallback: assuming ready for tab`, tabId);
+      terminalReady.set(tabId, true);
+    }
+    readyListener.dispose();
+  }, timeoutMs);
+
+  return () => {
+    readyListener.dispose();
+    clearTimeout(readyFallback);
+  };
+}
 
 function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers, terminalReady, terminalBusy, sendToRenderer, waitForTerminalReady, collectPtyOutput, cleanupPty, COPILOT_CWD, PTY_BUFFER_MAX_CHUNKS, PTY_READY_TIMEOUT_MS, PTY_WRITE_DELAY_MS, PTY_SLASH_QUIET_THRESHOLD_MS, PTY_SLASH_CHECK_INTERVAL_MS, PTY_SLASH_FALLBACK_TIMEOUT_MS }) {
 
@@ -19,7 +65,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       cols: 80,
       rows: 24,
       cwd: COPILOT_CWD,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: buildEnv({ TERM: 'xterm-256color' }),
     });
 
     terminalProcesses.set(tabId, ptyProcess);
@@ -35,31 +81,12 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
     });
 
     terminalReady.set(tabId, false);
-    let allData = '';
-    let confirmed = false;
-    const readyListener = ptyProcess.onData((data) => {
-      allData += data;
-      if (!confirmed && (allData.includes('already be in use') || allData.includes('conflict'))) {
-        confirmed = true;
-        console.log('[bg-terminal] Auto-confirming resume for tab', tabId);
-        setTimeout(() => ptyProcess.write('1'), 500);
-      }
-      if (!terminalReady.get(tabId) && (allData.includes('/ commands') || allData.includes('? help'))) {
-        console.log('[bg-terminal] TUI ready for tab', tabId);
-        terminalReady.set(tabId, true);
-        readyListener.dispose();
-      }
-    });
-    const readyFallback = setTimeout(() => {
-      if (!terminalReady.get(tabId)) {
-        console.log('[bg-terminal] Fallback: assuming ready for tab', tabId);
-        terminalReady.set(tabId, true);
-      }
-      readyListener.dispose();
-    }, PTY_READY_TIMEOUT_MS);
+    const disposeReady = attachReadyDetection(
+      ptyProcess, tabId, terminalReady, PTY_READY_TIMEOUT_MS, 'bg-terminal'
+    );
 
     ptyProcess.onExit(({ exitCode }) => {
-      cleanupPty(tabId, exitCode, () => { readyListener.dispose(); clearTimeout(readyFallback); });
+      cleanupPty(tabId, exitCode, disposeReady);
     });
 
     const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
@@ -153,7 +180,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       cols: 80,
       rows: 24,
       cwd: COPILOT_CWD,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: buildEnv({ TERM: 'xterm-256color' }),
     });
 
     terminalProcesses.set(tabId, ptyProcess);
@@ -162,8 +189,13 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       sendToRenderer('terminal:data', tabId, data);
     });
 
+    terminalReady.set(tabId, false);
+    const disposeReady = attachReadyDetection(
+      ptyProcess, tabId, terminalReady, PTY_READY_TIMEOUT_MS, 'terminal:spawn'
+    );
+
     ptyProcess.onExit(({ exitCode }) => {
-      cleanupPty(tabId, exitCode);
+      cleanupPty(tabId, exitCode, disposeReady);
     });
 
     const resumeArg = sessionId ? ` --resume=${sessionId}` : '';

@@ -57,7 +57,7 @@ describe('stripAnsi', () => {
 // safeSessionPath
 // ═══════════════════════════════════════════════════════════════
 describe('safeSessionPath', () => {
-  const sessionsDir = path.join('C:', 'Users', 'test', 'sessions');
+  const sessionsDir = path.resolve(path.join('home', 'test', 'sessions'));
 
   test('gibt gültigen Pfad für normales Session-ID zurück', () => {
     const result = safeSessionPath(sessionsDir, 'session-123');
@@ -70,7 +70,8 @@ describe('safeSessionPath', () => {
   });
 
   test('wirft Fehler bei absolutem Pfad', () => {
-    expect(() => safeSessionPath(sessionsDir, 'C:\\Windows\\System32'))
+    const absPath = process.platform === 'win32' ? 'C:\\Windows\\System32' : '/etc/passwd';
+    expect(() => safeSessionPath(sessionsDir, absPath))
       .toThrow('Invalid session ID');
   });
 
