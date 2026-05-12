@@ -5,7 +5,6 @@
     "devMode": true,
     "extraDirs": [],
     "activeSkills": [
-      "task-router"
     ],
     "deniedTools": [],
     "adminDeniedTools": [
@@ -26,53 +25,8 @@
   },
   "deniedTools": [],
   "namedSessions": {
-    "8c205927-6dbd-42aa-9a42-e7e8551a3ee0": {
-      "name": "CD: Copilot Desktop",
-      "deniedTools": [
-        {
-          "name": "shell(git push)",
-          "enabled": false,
-          "pinned": true
-        },
-        {
-          "name": "shell(git commit)",
-          "enabled": false,
-          "pinned": true
-        }
-      ],
-      "lastUsed": "2026-05-11T14:36:47.925Z"
-    },
-    "f66d3ad9-13f0-43ae-8c4f-0abfa3117d3c": {
-      "name": "KPID: Dashboard Weiterentwicklung",
-      "deniedTools": [
-        {
-          "name": "shell(git push)",
-          "enabled": true,
-          "pinned": true
-        }
-      ],
-      "lastUsed": "2026-05-11T13:58:35.428Z"
-    },
-    "c39d1888-ae23-4249-896e-05a5a9845f63": {
-      "name": "RP: Retail Plattform",
-      "deniedTools": [],
-      "lastUsed": "2026-05-05T21:35:25.179Z"
-    },
-    "6effb241-c344-4d82-9ded-c4071af6a9d4": {
-      "name": "GPOM: Transkript",
-      "deniedTools": [],
-      "lastUsed": "2026-05-11T13:42:14.960Z"
-    }
   },
   "openTabs": [
-    {
-      "sessionId": "8c205927-6dbd-42aa-9a42-e7e8551a3ee0",
-      "label": "🤖 CD: Copilot Desktop"
-    },
-    {
-      "sessionId": "f66d3ad9-13f0-43ae-8c4f-0abfa3117d3c",
-      "label": "🤖 KPID: Dashboard Weiterentwicklung"
-    }
   ],
   "sidebarCollapsed": false,
   "sidebarWidth": 240,
