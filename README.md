@@ -15,7 +15,6 @@
 - 🔎 **Chat Search** — Search through conversation history
 - ⚙️ **Settings Dialog** — Model selection, permissions, folder paths, and preferences
 - 🔀 **Model Switcher** — Switch between AI models directly from the status bar
-- 🤖 **Sub-Agent Routing** — Automatic task complexity classification and delegation to specialized sub-agents
 
 ## Skills
 
