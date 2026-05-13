@@ -507,6 +507,36 @@ ipcMain.handle('agents:list', async () => {
   return scanAgents();
 });
 
+// Skills: Delete
+ipcMain.handle('skills:delete', async (_event, dirName) => {
+  if (!dirName || typeof dirName !== 'string') return { success: false, error: 'Ungültige ID' };
+  if (!/^[a-zA-Z0-9_-]+$/.test(dirName)) return { success: false, error: 'Ungültige ID' };
+  const config = readFolderConfig();
+  const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
+  const skillDir = path.join(skillsDir, dirName);
+  try {
+    await fs.promises.rm(skillDir, { recursive: true, force: true });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Agents: Delete
+ipcMain.handle('agents:delete', async (_event, fileSlug) => {
+  if (!fileSlug || typeof fileSlug !== 'string') return { success: false, error: 'Ungültige ID' };
+  if (!/^[a-zA-Z0-9_-]+$/.test(fileSlug)) return { success: false, error: 'Ungültige ID' };
+  const config = readFolderConfig();
+  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+  const agentFile = path.join(agentsDir, fileSlug + '.agent.md');
+  try {
+    await fs.promises.unlink(agentFile);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Tests → src/ipc/tests-ipc.js
 const { registerTestsIPC } = require('./src/ipc/tests-ipc');
 registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOUT_MS });
@@ -595,6 +625,59 @@ ipcMain.handle('onboarding:complete', async () => {
   try {
     const config = readFolderConfig();
     config.onboardingComplete = true;
+    writeFolderConfig(config);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── Dev Tools ──────────────────────────────────────────────────
+ipcMain.handle('dev:getOnboardingState', async () => {
+  try {
+    const config = readFolderConfig();
+    return { onboardingComplete: config.onboardingComplete === true };
+  } catch (_) {
+    return { onboardingComplete: false };
+  }
+});
+
+ipcMain.handle('dev:setOnboardingComplete', async (_event, value) => {
+  try {
+    const config = readFolderConfig();
+    config.onboardingComplete = value === true;
+    if (value === false) {
+      delete config.tutorialSkillsShown;
+      delete config.tutorialRenameShown;
+    }
+    writeFolderConfig(config);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('tutorial:getFlags', async () => {
+  try {
+    const config = readFolderConfig();
+    return {
+      tutorialSkillsShown: config.tutorialSkillsShown === true,
+      tutorialRenameShown: config.tutorialRenameShown === true,
+    };
+  } catch (_) {
+    return { tutorialSkillsShown: false, tutorialRenameShown: false };
+  }
+});
+
+const TUTORIAL_FLAG_KEYS = ['tutorialSkillsShown', 'tutorialRenameShown'];
+
+ipcMain.handle('tutorial:setFlag', async (_event, key, value) => {
+  try {
+    if (!TUTORIAL_FLAG_KEYS.includes(key)) {
+      return { success: false, error: `Invalid tutorial flag key: ${key}` };
+    }
+    const config = readFolderConfig();
+    config[key] = value === true;
     writeFolderConfig(config);
     return { success: true };
   } catch (e) {
@@ -761,44 +844,257 @@ ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
   return { success: errors.length === 0, created, skipped, errors };
 });
 
-// ── Auth (GitHub CLI) ──────────────────────────────────────────
-const AUTH_TIMEOUT_MS = 15000;
+// ── Setup (Personalized Role → Skills & Agents) ───────────────
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[äöüß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' }[c]))
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function buildSkillGenerationPrompt(role, skillsDir) {
+  return `Ich arbeite als ${role}. Erstelle genau 3 passende Skills für meinen Aufgabenbereich.
+
+Jeder Skill wird als SKILL.md-Datei in einem eigenen Unterordner angelegt:
+${skillsDir}/<skill-name>/SKILL.md
+
+Das SKILL.md-Format ist exakt wie folgt aufgebaut:
+\`\`\`
+---
+name: <kebab-case-name>
+description: >
+  <1-3 Sätze: Was tut dieser Skill, wann wird er aktiviert?>
+---
+
+# <Skill-Titel>
+
+<Hauptinstruktionen: Ausführliche Anleitung wie der Skill arbeiten soll, mindestens 10 Zeilen>
+\`\`\`
+
+Anforderungen:
+- Erstelle genau 3 Skills die für "${role}" besonders nützlich sind
+- Jeder Skill hat einen klaren, praktischen Fokus (kein generischer Kram)
+- Die Instruktionen im Body sind konkret und umsetzbar (mindestens 150 Wörter pro Skill)
+- Der Name ist kebab-case, deutsch oder englisch je nach Kontext
+- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen
+- Antworte auf Deutsch`;
+}
+
+function runCopilotForSkills(role, skillsDir) {
+  return new Promise((resolve, reject) => {
+    const prompt = buildSkillGenerationPrompt(role, skillsDir);
+
+    const proc = spawn('copilot', [
+      '-p', prompt,
+      '--allow-all-tools',
+      '--allow-all-paths',
+      '--no-color',
+      '-s',
+    ], {
+      cwd: COPILOT_CWD,
+      env: buildEnv({ NO_COLOR: '1' }),
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('Timeout: Copilot hat zu lange gebraucht (120s)'));
+    }, 120000);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        const created = [];
+        try {
+          if (fs.existsSync(skillsDir)) {
+            const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory()) {
+                const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
+                if (fs.existsSync(skillFile)) {
+                  created.push(entry.name + '/SKILL.md');
+                }
+              }
+            }
+          }
+        } catch (_) {}
+        resolve({ created, errors: [] });
+      } else {
+        reject(new Error(`Copilot exit code ${code}: ${stderr.slice(0, 200)}`));
+      }
+    });
+
+    proc.on('error', reject);
+  });
+}
+
+function buildAgentGenerationPrompt(missingRoles, agentsDir) {
+  const roleList = missingRoles.map(r => `- ${r}`).join('\n');
+  return `In meinem Team fehlen folgende Positionen:\n${roleList}\n\nErstelle für jede dieser Positionen einen passenden Agent als .agent.md-Datei in diesem Verzeichnis:\n${agentsDir}\n\nDas .agent.md-Format ist exakt wie folgt aufgebaut:\n\`\`\`\n---\nname: <kebab-case-name>\ndescription: <1-2 Sätze: Was tut dieser Agent, wann wird er genutzt?>\n---\n\n<Hauptinstruktionen: Ausführliche Beschreibung wie der Agent arbeitet, seine Stärken, typische Aufgaben und wie er kommuniziert. Mindestens 200 Wörter.>\n\`\`\`\n\nAnforderungen:\n- Erstelle genau ${missingRoles.length} Agent-Datei(en), eine pro fehlende Position\n- Der Dateiname ist <kebab-case-name>.agent.md\n- Jeder Agent hat eine klare Persönlichkeit und konkrete Arbeitsweise\n- Die Instruktionen beschreiben detailliert wie der Agent denkt, kommuniziert und arbeitet\n- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen\n- Antworte auf Deutsch`;
+}
+
+function runCopilotForAgents(missingRoles, agentsDir) {
+  return new Promise((resolve, reject) => {
+    const prompt = buildAgentGenerationPrompt(missingRoles, agentsDir);
+
+    const proc = spawn('copilot', [
+      '-p', prompt,
+      '--allow-all-tools',
+      '--allow-all-paths',
+      '--no-color',
+      '-s',
+    ], {
+      cwd: COPILOT_CWD,
+      env: buildEnv({ NO_COLOR: '1' }),
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    proc.stdout.on('data', () => {});
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('Timeout: Copilot hat zu lange gebraucht (120s)'));
+    }, 120000);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        const created = [];
+        try {
+          if (fs.existsSync(agentsDir)) {
+            const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isFile() && entry.name.endsWith('.agent.md')) {
+                created.push(entry.name);
+              }
+            }
+          }
+        } catch (_) {}
+        resolve({ created, errors: [] });
+      } else {
+        reject(new Error(`Copilot exit code ${code}: ${stderr.slice(0, 200)}`));
+      }
+    });
+
+    proc.on('error', reject);
+  });
+}
+
+ipcMain.handle('setup:generatePersonalized', async (_event, { role, missingRoles }) => {
+  const config = readFolderConfig();
+  const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
+  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+
+  const errors = [];
+  const created = [];
+
+  // 1. Copilot startet und erstellt Skills
+  try {
+    const skillResult = await runCopilotForSkills(role, skillsDir);
+    created.push(...skillResult.created);
+    errors.push(...skillResult.errors);
+  } catch (e) {
+    errors.push('Skills: ' + e.message);
+  }
+
+  // 2. Copilot generiert Agents für fehlende Team-Positionen
+  if (missingRoles && missingRoles.length > 0) {
+    try {
+      if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+      const agentResult = await runCopilotForAgents(missingRoles, agentsDir);
+      created.push(...agentResult.created);
+      errors.push(...agentResult.errors);
+    } catch (e) {
+      errors.push('Agents: ' + e.message);
+    }
+  }
+
+  return { success: errors.length === 0, created, errors };
+});
+
+ipcMain.handle('setup:startPersonalizedSessions', async (_event, { role, missingRoles }) => {
+  const config = readFolderConfig();
+  const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
+  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+
+  // Ensure directories exist
+  if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
+  if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+
+  // Mark onboarding as complete
+  const configPath = path.join(os.homedir(), '.copilot', 'config.json');
+  let copilotConfig = {};
+  try {
+    if (fs.existsSync(configPath)) copilotConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (_) {}
+  copilotConfig.onboardingComplete = true;
+  fs.writeFileSync(configPath, JSON.stringify(copilotConfig, null, 2), 'utf8');
+
+  const skillPrompt = buildSkillGenerationPrompt(role, skillsDir);
+  const agentPrompt = (missingRoles && missingRoles.length > 0)
+    ? buildAgentGenerationPrompt(missingRoles, agentsDir)
+    : null;
+
+  return { skillPrompt, agentPrompt };
+});
+
+// ── Auth (Copilot CLI) ─────────────────────────────────────────
+
+function readCopilotConfig() {
+  const configPath = path.join(os.homedir(), '.copilot', 'config.json');
+  try {
+    if (!fs.existsSync(configPath)) return {};
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    // Strip JS-style single-line comments (config.json may contain //-comments)
+    const cleaned = raw.replace(/^\s*\/\/.*$/gm, '');
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.warn('[auth] Failed to read copilot config:', e.message);
+    return {};
+  }
+}
 
 ipcMain.handle('auth:check', async () => {
-  return new Promise((resolve) => {
-    execFile('gh', ['auth', 'status'], {
-      shell: true,
-      timeout: AUTH_TIMEOUT_MS,
-    }, (error, stdout, stderr) => {
-      const output = (stdout || '') + (stderr || '');
-      if (error) {
-        resolve({ success: true, authenticated: false, user: null });
-        return;
-      }
-      const userMatch = output.match(/Logged in to [^ ]+ account ([^ ]+)/i)
-        || output.match(/account ([^\s(]+)/i);
-      resolve({
-        success: true,
-        authenticated: true,
-        user: userMatch ? userMatch[1].replace(/\s/g, '') : null,
-      });
-    });
-  });
+  console.log('[auth:check] Reading ~/.copilot/config.json');
+  const config = readCopilotConfig();
+  const user = config.lastLoggedInUser;
+  if (user && user.login) {
+    console.log('[auth:check] Authenticated as:', user.login);
+    return { success: true, authenticated: true, user: user.login, host: user.host };
+  }
+  console.log('[auth:check] No lastLoggedInUser found in config');
+  return { success: true, authenticated: false, user: null };
 });
 
 ipcMain.handle('auth:login', async () => {
-  return new Promise((resolve) => {
-    execFile('gh', ['auth', 'login', '--web'], {
-      shell: true,
-      timeout: 120000,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({ success: false, error: (stderr || error.message).trim() });
-        return;
-      }
-      resolve({ success: true, error: null });
-    });
+  console.log('[auth:login] Starting copilot login in new terminal window');
+  const psScript = [
+    'Write-Host "Copilot CLI Login" -ForegroundColor Cyan;',
+    'copilot login;',
+    'Write-Host "";',
+    'Write-Host "Dieses Fenster kann jetzt geschlossen werden." -ForegroundColor Green;',
+    'Start-Sleep -Seconds 3',
+  ].join(' ');
+  const child = require('child_process').spawn('powershell.exe', ['-NoLogo', '-Command', psScript], {
+    detached: true,
+    stdio: 'ignore',
+    shell: false,
+    windowsHide: false,
   });
+  child.unref();
+  return { success: true, pendingInTerminal: true, error: null };
 });
 
 // Window controls

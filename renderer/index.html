@@ -53,6 +53,7 @@
       <div class="sidebar__section" data-icon="🛠️">
         <div class="sidebar__header" onclick="toggleSection('skills')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
+          <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadSkills()" data-tooltip="Skills neu laden" aria-label="Skills neu laden">↻</button>
         </div>
         <div class="sidebar__content" id="skillsContent">
           <div class="sidebar__list" id="skillList"></div>
@@ -63,6 +64,7 @@
       <div class="sidebar__section" data-icon="🤖">
         <div class="sidebar__header" onclick="toggleSection('agents')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
+          <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadAgents()" data-tooltip="Agents neu laden" aria-label="Agents neu laden">↻</button>
         </div>
         <div class="sidebar__content" id="agentsContent">
           <div class="sidebar__list" id="agentList"></div>
@@ -283,7 +285,11 @@
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
         <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
+<<<<<<< Updated upstream
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
+=======
+        <button class="settings__tab" data-tab="devtools">Entwicklertools</button>
+>>>>>>> Stashed changes
       </div>
       <div class="settings">
         <!-- Tab: UI -->
@@ -424,6 +430,7 @@
             <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
           </div>
         </div>
+<<<<<<< Updated upstream
         <!-- Tab: Tastenkürzel -->
         <div class="settings__panel" data-panel="shortcuts">
           <div class="settings__group">
@@ -432,6 +439,20 @@
           <div id="settShortcutsList"></div>
           <div class="settings__group">
             <button class="action-btn" id="btnResetShortcuts" style="width:100%;margin-top:8px;">🔄 Alle zurücksetzen</button>
+=======
+        <!-- Tab: Entwicklertools -->
+        <div class="settings__panel" data-panel="devtools">
+          <div class="settings__group">
+            <label class="settings__label">🛠 Entwicklertools</label>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">Onboarding zurücksetzen</label>
+            <div class="settings__hint">Zeigt den Einrichtungs-Wizard beim nächsten App-Start erneut an.</div>
+            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
+              <span id="devOnboardingStatus"></span>
+              <button class="action-btn" id="btnDevOnboardingToggle"></button>
+            </div>
+>>>>>>> Stashed changes
           </div>
         </div>
       </div>
@@ -483,7 +504,6 @@
       <div class="onboarding-wizard__body" id="onboarding-body">
       </div>
       <div class="onboarding-wizard__footer">
-        <button class="action-btn" id="btnOnboardingSkip">Überspringen</button>
         <button class="action-btn action-btn--primary" id="btnOnboardingNext" disabled>Weiter →</button>
       </div>
     </div>

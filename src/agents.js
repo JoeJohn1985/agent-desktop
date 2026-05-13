@@ -19,13 +19,15 @@ function scanAgentsDirectory(agentsDir, yamlParse) {
   for (const file of fs.readdirSync(agentsDir)) {
     if (!file.endsWith('.agent.md')) continue;
     try {
+      const fileSlug = file.replace('.agent.md', '');
       const raw = fs.readFileSync(path.join(agentsDir, file), 'utf-8').replace(/^\uFEFF/, '');
       const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       if (frontmatter) {
         const meta = yamlParse(frontmatter[1]);
         agents.push({
-          id: meta.name || file.replace('.agent.md', ''),
-          name: meta.name || file.replace('.agent.md', ''),
+          id: meta.name || fileSlug,
+          fileSlug,
+          name: meta.name || fileSlug,
           description: meta.description || '',
           icon: '🤖',
         });

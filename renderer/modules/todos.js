@@ -50,7 +50,7 @@ function renderTodos() {
           <input type="checkbox" ${checked} onchange="toggleTodo('${escapeAttr(t.id)}')" />
         </label>
         <span class="todo-item__text" data-tooltip="${escapeHtml(t.text)}">${escapeHtml(t.text)}</span>
-        <button class="todo-item__delete" onclick="deleteTodo('${escapeAttr(t.id)}')" data-tooltip="Löschen">✕</button>
+        <button class="todo-item__delete" onclick="deleteTodo('${escapeAttr(t.id)}')" data-tooltip="Löschen">🗑️</button>
       </div>
     `;
   }).join('');

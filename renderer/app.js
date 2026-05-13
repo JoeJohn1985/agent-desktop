@@ -42,6 +42,7 @@ let historySavedInput = '';
 const tabs = new Map(); // tabId → { streamEl, label, status }
 const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
 let activeTabId = null;
+let _pendingOnboardingTabs = new Set(); // tabIds die auf 'done' warten
 
 // ── UI Constants → modules/utils.js ──────────────────────────
 
@@ -650,6 +651,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
         }
       }
       loadSessions(); // refresh sidebar
+      document.dispatchEvent(new CustomEvent('tab:renamed'));
     }
   };
 
@@ -670,6 +672,13 @@ function setTabStatus(tabId, status) {
   if (!tab) return;
   tab.tabStatus = status;
   renderTabs();
+
+  if (status === 'done' && _pendingOnboardingTabs.has(tabId)) {
+    _pendingOnboardingTabs.delete(tabId);
+    if (_pendingOnboardingTabs.size === 0) {
+      setTimeout(() => showTutorialPopup(), 1500);
+    }
+  }
 }
 
 // ── Inactivity Timeout & Force Unlock ────────────────────────
@@ -1178,6 +1187,8 @@ window.resumeSession = resumeSession;
 window.confirmDeleteSession = confirmDeleteSession;
 window.toggleTodo = toggleTodo;
 window.deleteTodo = deleteTodo;
+window.confirmDeleteSkill = confirmDeleteSkill;
+window.confirmDeleteAgent = confirmDeleteAgent;
 
 // ── Model Switcher ────────────────────────────────────────────
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
@@ -1447,21 +1458,6 @@ async function displaySessionContext(tab, sessionId) {
   headerEl.innerHTML = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
   insertBefore(headerEl);
 
-  // 1. Plan zuerst
-  try {
-    const plan = await copilot.sessions.readPlan(sessionId);
-    if (plan) {
-      const planEl = document.createElement('div');
-      planEl.className = 'stream-session-context';
-      planEl.innerHTML = `
-        <div class="stream-session-context__section">
-          <div class="stream-session-context__label">📝 Plan</div>
-          <div class="stream-session-context__plan markdown-body">${window.markdown ? window.markdown.render(plan) : escapeHtml(plan)}</div>
-        </div>`;
-      insertBefore(planEl);
-    }
-  } catch (e) { console.warn('[sessions] Plan nicht verfügbar:', e.message); }
-
   // 2. Letzte Nachrichten als echte Chat-Bubbles
   try {
     const messages = await copilot.sessions.readRecentMessages(sessionId);
@@ -1516,6 +1512,9 @@ function renderSkills() {
   const container = document.getElementById('skillList');
   container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
+    const deleteBtn = s.source === 'user' && s.dirName
+      ? `<button class="skill-card__delete" onclick="event.stopPropagation(); confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
+      : '';
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''}"
            onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
@@ -1523,6 +1522,7 @@ function renderSkills() {
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}</div>
         </div>
+        ${deleteBtn}
         <div class="skill-card__toggle"></div>
       </div>
     `;
@@ -1536,11 +1536,29 @@ function toggleSkill(skillId) {
   renderSkills();
 }
 
+async function reloadSkills() {
+  const btn = document.querySelector('[aria-label="Skills neu laden"]');
+  if (btn) btn.classList.add('sidebar__reload-btn--spinning');
+  try {
+    skills = await copilot.skills.list() || [];
+    const savedActiveSkills = getSettings().activeSkills || [];
+    activeSkills = new Set(savedActiveSkills);
+    renderSkills();
+  } catch (e) {
+    console.warn('[skills] Reload fehlgeschlagen:', e.message);
+  } finally {
+    if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
+  }
+}
+
 // ── Agents ───────────────────────────────────────────────────
 function renderAgents() {
   const container = document.getElementById('agentList');
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
+    const deleteBtn = a.fileSlug
+      ? `<button class="agent-card__delete" onclick="event.stopPropagation(); confirmDeleteAgent('${escapeAttr(a.fileSlug)}', '${escapeAttr(a.name)}')" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
+      : '';
     return `
       <div class="agent-card ${isActive ? 'agent-card--active' : ''}"
            onclick="toggleAgent('${escapeAttr(a.id)}')" data-tooltip="${escapeAttr(a.description)}">
@@ -1548,6 +1566,7 @@ function renderAgents() {
         <div class="agent-card__info">
           <div class="agent-card__name">${escapeHtml(a.name)}</div>
         </div>
+        ${deleteBtn}
         <div class="agent-card__toggle"></div>
       </div>
     `;
@@ -1559,6 +1578,76 @@ function toggleAgent(agentId) {
   else activeAgents.add(agentId);
   saveSetting('activeAgents', [...activeAgents]);
   renderAgents();
+}
+
+async function reloadAgents() {
+  const btn = document.querySelector('[aria-label="Agents neu laden"]');
+  if (btn) btn.classList.add('sidebar__reload-btn--spinning');
+  try {
+    agents = await copilot.agents.list() || [];
+    const savedActiveAgents = getSettings().activeAgents || [];
+    activeAgents = new Set(savedActiveAgents);
+    renderAgents();
+  } catch (e) {
+    console.warn('[agents] Reload fehlgeschlagen:', e.message);
+  } finally {
+    if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
+  }
+}
+
+// ── Skill/Agent Delete Confirmation ──────────────────────────
+function confirmDeleteSkill(dirName, skillName) {
+  document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sidebar-confirm';
+  overlay.innerHTML = `
+    <div class="sidebar-confirm__box">
+      <p class="sidebar-confirm__text">Skill <strong>${escapeHtml(skillName)}</strong> löschen?</p>
+      <div class="sidebar-confirm__actions">
+        <button class="action-btn action-btn--danger" id="confirmDeleteYes">Löschen</button>
+        <button class="action-btn" id="confirmDeleteNo">Abbrechen</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
+    overlay.remove();
+    const result = await copilot.skills.delete(dirName);
+    if (result.success) {
+      await reloadSkills();
+    } else {
+      console.error('[skills] Löschen fehlgeschlagen:', result.error);
+    }
+  });
+  document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());
+}
+
+function confirmDeleteAgent(fileSlug, agentName) {
+  document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sidebar-confirm';
+  overlay.innerHTML = `
+    <div class="sidebar-confirm__box">
+      <p class="sidebar-confirm__text">Agent <strong>${escapeHtml(agentName)}</strong> löschen?</p>
+      <div class="sidebar-confirm__actions">
+        <button class="action-btn action-btn--danger" id="confirmDeleteYes">Löschen</button>
+        <button class="action-btn" id="confirmDeleteNo">Abbrechen</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
+    overlay.remove();
+    const result = await copilot.agents.delete(fileSlug);
+    if (result.success) {
+      await reloadAgents();
+    } else {
+      console.error('[agents] Löschen fehlgeschlagen:', result.error);
+    }
+  });
+  document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());
 }
 
 // ── Plugins ─────────────────────────────────────────────────
@@ -2571,7 +2660,42 @@ function initSettings() {
 
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
+<<<<<<< Updated upstream
   initShortcutsSettings();
+=======
+
+  // Dev tools: Onboarding toggle
+  async function loadDevOnboardingState() {
+    const { onboardingComplete } = await copilot.dev.getOnboardingState();
+    const statusEl = document.getElementById('devOnboardingStatus');
+    const btnEl = document.getElementById('btnDevOnboardingToggle');
+    if (onboardingComplete) {
+      statusEl.textContent = 'Status: ● Abgeschlossen';
+      statusEl.style.color = 'var(--accent)';
+      btnEl.textContent = 'Zurücksetzen';
+    } else {
+      statusEl.textContent = 'Status: ○ Ausstehend';
+      statusEl.style.color = 'var(--text-muted)';
+      btnEl.textContent = 'Als erledigt markieren';
+    }
+  }
+
+  document.getElementById('btnDevOnboardingToggle').addEventListener('click', async () => {
+    const { onboardingComplete } = await copilot.dev.getOnboardingState();
+    const result = await copilot.dev.setOnboardingComplete(!onboardingComplete);
+    if (result.success) {
+      await loadDevOnboardingState();
+      showNotification(
+        !onboardingComplete ? 'Onboarding als erledigt markiert' : 'Onboarding zurückgesetzt — Wizard erscheint beim nächsten Start',
+        'success'
+      );
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
+  });
+
+  document.querySelector('.settings__tab[data-tab="devtools"]')?.addEventListener('click', loadDevOnboardingState);
+>>>>>>> Stashed changes
 }
 
 // ── Instructions Editor Modal ──────────────────────────────────────
@@ -3148,7 +3272,6 @@ async function initOnboarding() {
   const overlay = document.getElementById('onboarding-overlay');
   overlay.style.display = 'flex';
 
-  document.getElementById('btnOnboardingSkip').addEventListener('click', finishOnboarding);
   document.getElementById('btnOnboardingNext').addEventListener('click', nextOnboardingStep);
 
   showOnboardingStep(1);
@@ -3174,13 +3297,54 @@ function showOnboardingStep(step) {
   btnNext.textContent = step < ONBOARDING_TOTAL_STEPS ? 'Weiter →' : 'Fertig ✓';
 
   if (step === 1) {
-    renderLoginStep(body, btnNext);
+    renderCwdStep(body, btnNext);
   } else if (step === 2) {
-    renderFolderStep(body, btnNext);
+    renderLoginStep(body, btnNext);
   } else if (step === 3) {
+    renderFolderStep(body, btnNext);
+  } else if (step === 4) {
     renderCategoryStep(body, btnNext);
-  } else {
-    renderIntroStep(body, btnNext);
+  }
+}
+
+async function renderCwdStep(body, btnNext) {
+  body.innerHTML = `
+    <div class="onboarding-cwd">
+      <h2 class="onboarding-cwd__title">📂 Arbeitsverzeichnis</h2>
+      <p class="onboarding-cwd__desc">Wähle das Verzeichnis, in dem Copilot Desktop arbeiten soll. Dort werden deine Sessions und Dateien gespeichert.</p>
+      <div id="onboarding-cwd-status" class="onboarding-cwd__status">
+        <span class="onboarding-login__spinner"></span> Lade aktuelles Verzeichnis…
+      </div>
+    </div>`;
+
+  try {
+    const currentCwd = await copilot.chat.getCwd();
+    const statusEl = document.getElementById('onboarding-cwd-status');
+    if (!statusEl) return;
+
+    statusEl.className = 'onboarding-cwd__path-row';
+    statusEl.innerHTML = `
+      <input type="text" id="onboarding-cwd-input" class="onboarding-role__input" value="${escapeHtml(currentCwd || '')}" readonly />
+      <button class="action-btn action-btn--primary" id="btnOnboardingBrowseCwd">📁 Ändern</button>`;
+
+    if (currentCwd) {
+      btnNext.disabled = false;
+    }
+
+    document.getElementById('btnOnboardingBrowseCwd').addEventListener('click', async () => {
+      const selectedPath = await copilot.folders.browse();
+      if (selectedPath) {
+        document.getElementById('onboarding-cwd-input').value = selectedPath;
+        await copilot.folders.save({ cwd: selectedPath });
+        btnNext.disabled = false;
+      }
+    });
+  } catch (e) {
+    const statusEl = document.getElementById('onboarding-cwd-status');
+    if (statusEl) {
+      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
+      statusEl.innerHTML = `❌ Fehler: ${escapeHtml(e.message)}`;
+    }
   }
 }
 
@@ -3188,7 +3352,7 @@ async function renderLoginStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-login">
       <h2 class="onboarding-login__title">🔐 GitHub Copilot Login</h2>
-      <p class="onboarding-login__desc">Für die Nutzung von Copilot Desktop benötigst du einen aktiven GitHub Copilot Account und musst dich mit der GitHub CLI einloggen.</p>
+      <p class="onboarding-login__desc">Für die Nutzung von Copilot Desktop benötigst du einen aktiven GitHub Copilot Account. Der Login erfolgt über die Copilot CLI.</p>
       <div class="onboarding-login__status" id="onboarding-login-status">
         <span class="onboarding-login__spinner"></span> Prüfe Login-Status…
       </div>
@@ -3206,8 +3370,9 @@ async function renderLoginStep(body, btnNext) {
       btnNext.disabled = false;
     } else {
       statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
-      statusEl.innerHTML = `⚠️ Nicht eingeloggt <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button>`;
+      statusEl.innerHTML = `⚠️ Nicht eingeloggt. <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button> <button class="action-btn onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
       document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
     }
   } catch (e) {
     const statusEl = document.getElementById('onboarding-login-status');
@@ -3222,14 +3387,14 @@ async function handleOnboardingLogin(btnNext) {
   const statusEl = document.getElementById('onboarding-login-status');
   if (!statusEl) return;
   statusEl.className = 'onboarding-login__status';
-  statusEl.innerHTML = '<span class="onboarding-login__spinner"></span> Login wird gestartet… Bitte im Browser bestätigen.';
+  statusEl.innerHTML = '<span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.';
 
   try {
     const result = await copilot.auth.login();
     if (result.success) {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--ok';
-      statusEl.innerHTML = '✅ Erfolgreich eingeloggt!';
-      btnNext.disabled = false;
+      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
+      statusEl.innerHTML = `ℹ️ Login-Fenster geöffnet. Bitte melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
     } else {
       statusEl.className = 'onboarding-login__status onboarding-login__status--error';
       statusEl.innerHTML = `❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
@@ -3315,116 +3480,168 @@ async function handleCreateFolders(createBtn, btnNext) {
 }
 
 async function renderCategoryStep(body, btnNext) {
+  const missingRoles = [];
+
   body.innerHTML = `
-    <div class="onboarding-categories-container">
-      <h2 class="onboarding-categories__title">🤖 Agents &amp; Skills einrichten</h2>
-      <p class="onboarding-categories__desc">Wähle die Bereiche aus, in denen du Copilot einsetzen möchtest. Wir legen passende Starter-Agents und Skills für dich an.</p>
-      <div class="onboarding-categories" id="onboarding-categories">
-        <div class="onboarding-category-card"><span class="onboarding-login__spinner"></span></div>
+    <div class="onboarding-role">
+      <h2 class="onboarding-categories__title">🎯 Dein Aufgabenbereich</h2>
+      <p class="onboarding-categories__desc">Was machst du in deinem Job? Wir legen passende Skills für dich an.</p>
+
+      <div class="onboarding-role__field">
+        <label for="onboarding-role-input">Deine Rolle</label>
+        <input type="text" id="onboarding-role-input"
+               placeholder="z.B. Marketing Manager, Backend-Entwickler, Projektleiter…"
+               class="onboarding-role__input" />
       </div>
-      <div id="onboarding-categories-action"></div>
+
+      <div class="onboarding-role__team-section" id="onboarding-team-section" style="display:none">
+        <h3 class="onboarding-role__section-title">👥 Fehlende Team-Positionen</h3>
+        <p class="onboarding-categories__desc">Welche Rollen vermisst du in deinem Team? Wir legen für jede Position einen Agent an.</p>
+        <div class="onboarding-role__chips" id="onboarding-role-chips"></div>
+        <div class="onboarding-role__chip-input-row">
+          <input type="text" id="onboarding-team-input"
+                 placeholder="z.B. Event Manager, Webdesigner… (Enter zum Hinzufügen)"
+                 class="onboarding-role__input onboarding-role__chip-input" />
+          <button class="action-btn" id="onboarding-add-chip">Hinzufügen</button>
+        </div>
+      </div>
+
+      <div id="onboarding-role-action"></div>
+      <div id="onboarding-role-status"></div>
     </div>`;
 
-  try {
-    const categories = await copilot.setup.getCategories();
-    renderCategoryCards(categories, btnNext);
-  } catch (e) {
-    const grid = document.getElementById('onboarding-categories');
-    if (grid) grid.innerHTML = `<p class="onboarding-categories__error">❌ Fehler: ${escapeHtml(e.message)}</p>`;
-    btnNext.disabled = false;
-  }
-}
+  const roleInput = document.getElementById('onboarding-role-input');
+  const teamSection = document.getElementById('onboarding-team-section');
+  const teamInput = document.getElementById('onboarding-team-input');
+  const addChipBtn = document.getElementById('onboarding-add-chip');
+  const chipsContainer = document.getElementById('onboarding-role-chips');
+  const actionContainer = document.getElementById('onboarding-role-action');
+  const statusContainer = document.getElementById('onboarding-role-status');
 
-function renderCategoryCards(categories, btnNext) {
-  const grid = document.getElementById('onboarding-categories');
-  if (!grid) return;
+  btnNext.disabled = true;
 
-  const selected = new Set();
-
-  grid.innerHTML = categories.map(cat => `
-    <div class="onboarding-category-card" data-category="${escapeHtml(cat.id)}">
-      <span class="onboarding-category-card__icon">${escapeHtml(cat.icon)}</span>
-      <span class="onboarding-category-card__title">${escapeHtml(cat.title)}</span>
-      <span class="onboarding-category-card__desc">${escapeHtml(cat.desc)}</span>
-    </div>`).join('');
-
-  const actionContainer = document.getElementById('onboarding-categories-action');
-  btnNext.disabled = false;
-
-  grid.addEventListener('click', (e) => {
-    const card = e.target.closest('.onboarding-category-card');
-    if (!card || card.classList.contains('onboarding-category-card--disabled')) return;
-
-    const catId = card.dataset.category;
-    if (selected.has(catId)) {
-      selected.delete(catId);
-      card.classList.remove('onboarding-category-card--selected');
-    } else {
-      selected.add(catId);
-      card.classList.add('onboarding-category-card--selected');
+  function showTeamSection() {
+    if (roleInput.value.trim() && teamSection.style.display === 'none') {
+      teamSection.style.display = '';
+      updateSetupButton();
     }
-
-    updateCategoryActionButton(selected, actionContainer, btnNext, grid);
-  });
-}
-
-function updateCategoryActionButton(selected, actionContainer, btnNext, grid) {
-  if (!actionContainer) return;
-
-  const existingBtn = actionContainer.querySelector('.onboarding-categories__setup-btn');
-  if (selected.size > 0) {
-    btnNext.disabled = true;
-    if (!existingBtn) {
-      const btn = document.createElement('button');
-      btn.className = 'action-btn action-btn--primary onboarding-categories__setup-btn';
-      btn.textContent = '✨ Auswahl einrichten';
-      btn.addEventListener('click', () => handleCreateStarterFiles(selected, btn, btnNext, grid));
-      actionContainer.appendChild(btn);
-    }
-  } else {
-    btnNext.disabled = false;
-    if (existingBtn) existingBtn.remove();
   }
-}
 
-async function handleCreateStarterFiles(selected, setupBtn, btnNext, grid) {
-  setupBtn.disabled = true;
-  setupBtn.innerHTML = '<span class="onboarding-login__spinner"></span> Richte ein…';
+  function addChip() {
+    const val = teamInput.value.trim();
+    if (!val) return;
+    if (missingRoles.includes(val)) { teamInput.value = ''; return; }
+    missingRoles.push(val);
+    teamInput.value = '';
+    renderChips();
+  }
 
-  try {
-    const result = await copilot.setup.createStarterFiles([...selected]);
-    setupBtn.remove();
-
-    const cards = grid.querySelectorAll('.onboarding-category-card');
-    cards.forEach(card => {
-      card.classList.add('onboarding-category-card--disabled');
+  function renderChips() {
+    chipsContainer.innerHTML = '';
+    missingRoles.forEach((role, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'onboarding-role__chip';
+      chip.innerHTML = `${escapeHtml(role)} <button class="onboarding-role__chip-remove" data-idx="${idx}">&times;</button>`;
+      chipsContainer.appendChild(chip);
     });
+    chipsContainer.querySelectorAll('.onboarding-role__chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        missingRoles.splice(parseInt(btn.dataset.idx), 1);
+        renderChips();
+      });
+    });
+  }
 
-    const actionContainer = document.getElementById('onboarding-categories-action');
-    if (actionContainer) {
-      let msg = `✅ ${result.created.length} Agent(s) angelegt.`;
-      if (result.skipped.length > 0) msg += ` ${result.skipped.length} übersprungen (existiert bereits).`;
-      if (result.errors.length > 0) msg += ` ⚠️ ${result.errors.length} Fehler.`;
-      const statusEl = document.createElement('p');
-      statusEl.className = 'onboarding-categories__status';
-      statusEl.textContent = msg;
-      actionContainer.appendChild(statusEl);
-    }
-
-    btnNext.disabled = false;
-  } catch (e) {
-    setupBtn.disabled = false;
-    setupBtn.textContent = '✨ Auswahl einrichten';
-    const actionContainer = document.getElementById('onboarding-categories-action');
-    if (actionContainer) {
-      const errEl = actionContainer.querySelector('.onboarding-categories__error');
-      if (errEl) errEl.remove();
-      const p = document.createElement('p');
-      p.className = 'onboarding-categories__error';
-      p.textContent = `❌ ${e.message}`;
-      actionContainer.appendChild(p);
+  function updateSetupButton() {
+    const role = roleInput.value.trim();
+    const existing = actionContainer.querySelector('.onboarding-role__setup-btn');
+    if (role && !existing) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn action-btn--primary onboarding-role__setup-btn';
+      btn.textContent = '✨ Einrichten';
+      btn.style.marginTop = '12px';
+      btn.style.width = '100%';
+      btn.addEventListener('click', () => handleGeneratePersonalized(btn));
+      actionContainer.appendChild(btn);
+    } else if (!role && existing) {
+      existing.remove();
     }
   }
+
+  async function handleGeneratePersonalized(setupBtn) {
+    const role = roleInput.value.trim();
+    if (!role) return;
+
+    setupBtn.disabled = true;
+    setupBtn.innerHTML = '<span class="onboarding-login__spinner"></span> Wird vorbereitet…';
+    statusContainer.innerHTML = '';
+
+    try {
+      const { skillPrompt, agentPrompt } = await copilot.setup.startPersonalizedSessions({ role, missingRoles });
+
+      // Close onboarding immediately
+      await finishOnboarding();
+
+      // Open tab for skill generation
+      const skillTabId = await createTab('⚡ Skills generieren');
+      _pendingOnboardingTabs.add(skillTabId);
+      const skillTab = tabs.get(skillTabId);
+      if (skillTab) {
+        skillTab.isProcessing = true;
+        setTabStatus(skillTabId, 'working');
+        const skillInputEl = document.createElement('div');
+        skillInputEl.className = 'stream-input';
+        skillInputEl.textContent = 'Skills für "' + role + '" generieren…';
+        skillTab.streamEl.insertBefore(skillInputEl, skillTab.statusEl);
+        skillTab.statusEl.textContent = '● Thinking…';
+        skillTab.statusEl.style.display = 'block';
+        copilot.chat.send(skillTabId, skillPrompt, {
+          autoApprove: true,
+          allowedTools: [],
+          deniedTools: [],
+          allowAllPaths: true,
+        });
+      }
+
+      // Open tab for agent generation (if roles specified)
+      if (agentPrompt) {
+        const agentTabId = await createTab('👥 Agents generieren');
+        _pendingOnboardingTabs.add(agentTabId);
+        const agentTab = tabs.get(agentTabId);
+        if (agentTab) {
+          agentTab.isProcessing = true;
+          setTabStatus(agentTabId, 'working');
+          const agentInputEl = document.createElement('div');
+          agentInputEl.className = 'stream-input';
+          agentInputEl.textContent = 'Agents für fehlende Team-Positionen generieren…';
+          agentTab.streamEl.insertBefore(agentInputEl, agentTab.statusEl);
+          agentTab.statusEl.textContent = '● Thinking…';
+          agentTab.statusEl.style.display = 'block';
+          copilot.chat.send(agentTabId, agentPrompt, {
+            autoApprove: true,
+            allowedTools: [],
+            deniedTools: [],
+            allowAllPaths: true,
+          });
+        }
+      }
+    } catch (e) {
+      setupBtn.disabled = false;
+      setupBtn.textContent = '✨ Einrichten';
+      statusContainer.innerHTML = `<p class="onboarding-categories__error">❌ ${escapeHtml(e.message)}</p>`;
+    }
+  }
+
+  roleInput.addEventListener('blur', showTeamSection);
+  roleInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); showTeamSection(); roleInput.blur(); }
+  });
+  roleInput.addEventListener('input', updateSetupButton);
+
+  teamInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addChip(); }
+  });
+  addChipBtn.addEventListener('click', addChip);
 }
 
 const _introSlides = [
@@ -3495,6 +3712,116 @@ function nextOnboardingStep() {
     return;
   }
   showOnboardingStep(_onboardingStep + 1);
+}
+
+// ── Tutorial Popup ─────────────────────────────────────────
+async function showTutorialPopup() {
+  const flags = await copilot.tutorial.getFlags();
+  if (flags.tutorialSkillsShown) return;
+
+  const skillsHeader = document.querySelector('.sidebar__section[data-icon="🛠️"] .sidebar__header');
+  if (!skillsHeader) return;
+
+  const existing = document.getElementById('tutorialSkillsPopup');
+  if (existing) existing.remove();
+
+  const popup = document.createElement('div');
+  popup.className = 'tutorial-popup';
+  popup.id = 'tutorialSkillsPopup';
+  popup.innerHTML =
+    '<div class="tutorial-popup__arrow"></div>' +
+    '<div class="tutorial-popup__header">' +
+      '<span class="tutorial-popup__title">💡 Tipp</span>' +
+      '<button class="tutorial-popup__close" id="tutorialSkillsClose">×</button>' +
+    '</div>' +
+    '<div class="tutorial-popup__body">' +
+      'Über <strong>Skills &amp; Agents</strong> hovern — Beschreibung erscheint als Tooltip.<br>' +
+      'Über den Header hovern um neu zu laden <strong>↻</strong>' +
+    '</div>';
+  document.body.appendChild(popup);
+
+  const rect = skillsHeader.getBoundingClientRect();
+  popup.style.top = (rect.top + rect.height / 2 - popup.offsetHeight / 2) + 'px';
+  popup.style.left = (rect.right + 12) + 'px';
+
+  await copilot.tutorial.setFlag('tutorialSkillsShown', true);
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    popup.remove();
+    document.removeEventListener('click', onReloadClick);
+    setTimeout(() => showTutorialRenamePopup(), 1000);
+  };
+
+  // Close when user clicks the reload button
+  const onReloadClick = (e) => {
+    if (e.target.closest('[aria-label="Skills neu laden"], [aria-label="Agents neu laden"]')) close();
+  };
+
+  popup.querySelector('.tutorial-popup__close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    close();
+  });
+
+  setTimeout(() => document.addEventListener('click', onReloadClick), 200);
+
+  // Safety: auto-close after 30s to prevent listener leak if user ignores popup
+  setTimeout(() => close(), 30000);
+}
+
+async function showTutorialRenamePopup() {
+  const flags = await copilot.tutorial.getFlags();
+  if (flags.tutorialRenameShown) return;
+
+  const tabBar = document.getElementById('tabBar');
+  const firstTab = tabBar && tabBar.querySelector('.tab');
+  if (!firstTab) return;
+
+  const existing = document.getElementById('tutorialRenamePopup');
+  if (existing) existing.remove();
+
+  const popup = document.createElement('div');
+  popup.className = 'tutorial-popup tutorial-popup--below';
+  popup.id = 'tutorialRenamePopup';
+  popup.innerHTML =
+    '<div class="tutorial-popup__arrow tutorial-popup__arrow--up"></div>' +
+    '<div class="tutorial-popup__header">' +
+      '<span class="tutorial-popup__title">💡 Tipp</span>' +
+      '<button class="tutorial-popup__close" id="tutorialRenameClose">×</button>' +
+    '</div>' +
+    '<div class="tutorial-popup__body">' +
+      'Tab <strong>✎ umbenennen</strong> um den Gesprächsverlauf zu speichern' +
+    '</div>';
+  document.body.appendChild(popup);
+
+  const rect = firstTab.getBoundingClientRect();
+  popup.style.left = (rect.left + rect.width / 2 - popup.offsetWidth / 2) + 'px';
+  popup.style.top = (rect.bottom + 10) + 'px';
+
+  await copilot.tutorial.setFlag('tutorialRenameShown', true);
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    popup.remove();
+    document.removeEventListener('tab:renamed', onTabRenamed);
+  };
+
+  // Close when user successfully renames a tab
+  const onTabRenamed = () => close();
+
+  popup.querySelector('.tutorial-popup__close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    close();
+  });
+
+  setTimeout(() => document.addEventListener('tab:renamed', onTabRenamed), 200);
+
+  // Safety: auto-close after 30s to prevent listener leak if user ignores popup
+  setTimeout(() => close(), 30000);
 }
 
 async function finishOnboarding() {

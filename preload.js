@@ -111,10 +111,12 @@ contextBridge.exposeInMainWorld('copilot', {
   // Skills
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
+    delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
   },
   // Agents
   agents: {
     list: () => ipcRenderer.invoke('agents:list'),
+    delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },
   // Tests
   tests: {
@@ -174,11 +176,23 @@ contextBridge.exposeInMainWorld('copilot', {
     createFolders: () => ipcRenderer.invoke('setup:createFolders'),
     getCategories: () => ipcRenderer.invoke('setup:getCategories'),
     createStarterFiles: (categories) => ipcRenderer.invoke('setup:createStarterFiles', categories),
+    generatePersonalized: (data) => ipcRenderer.invoke('setup:generatePersonalized', data),
+    startPersonalizedSessions: (data) => ipcRenderer.invoke('setup:startPersonalizedSessions', data),
   },
   // Onboarding
   onboarding: {
     isFirstRun: () => ipcRenderer.invoke('onboarding:isFirstRun'),
     complete: () => ipcRenderer.invoke('onboarding:complete'),
+  },
+  // Tutorial
+  tutorial: {
+    getFlags: () => ipcRenderer.invoke('tutorial:getFlags'),
+    setFlag: (key, value) => ipcRenderer.invoke('tutorial:setFlag', key, value),
+  },
+  // Dev Tools
+  dev: {
+    getOnboardingState: () => ipcRenderer.invoke('dev:getOnboardingState'),
+    setOnboardingComplete: (value) => ipcRenderer.invoke('dev:setOnboardingComplete', value),
   },
   // Auth
   auth: {

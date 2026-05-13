@@ -75,6 +75,7 @@ describe('scanSkillDirectory', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       id: 'code-review',
+      dirName: 'code-review',
       name: 'code-review',
       description: 'Reviews code',
       source: 'builtin',

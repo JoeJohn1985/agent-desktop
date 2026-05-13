@@ -23,6 +23,7 @@ function scanSkillDirectory(dir, source, iconFn, yamlParse) {
         const meta = yamlParse(frontmatter[1]);
         results.push({
           id: meta.name || entry.name,
+          dirName: entry.name,
           name: meta.name || entry.name,
           description: meta.description || '',
           source,

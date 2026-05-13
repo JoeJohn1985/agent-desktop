@@ -123,160 +123,101 @@ describe('Onboarding: complete Logik', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// TEIL 2: Auth Check / Login (execFile-Logik, gemockt)
+// TEIL 2: Auth Check / Login (config.json-basiert, gemockt)
 // ═══════════════════════════════════════════════════════════════
 
 /**
  * Extrahierte Logik aus main.js auth:check Handler.
+ * Liest lastLoggedInUser aus ~/.copilot/config.json.
  * Testbar ohne Electron ipcMain.
  */
-function parseAuthCheckResult(error, stdout, stderr) {
-  const output = (stdout || '') + (stderr || '');
-  if (error) {
+function parseAuthCheckFromConfig(configJson) {
+  try {
+    if (!configJson) return { success: true, authenticated: false, user: null };
+    const cleaned = configJson.replace(/^\s*\/\/.*$/gm, '');
+    const config = JSON.parse(cleaned);
+    const user = config.lastLoggedInUser;
+    if (user && user.login) {
+      return { success: true, authenticated: true, user: user.login, host: user.host };
+    }
+    return { success: true, authenticated: false, user: null };
+  } catch (e) {
     return { success: true, authenticated: false, user: null };
   }
-  const userMatch = output.match(/Logged in to [^ ]+ account ([^ ]+)/i)
-    || output.match(/account ([^\s(]+)/i);
-  return {
-    success: true,
-    authenticated: true,
-    user: userMatch ? userMatch[1].replace(/\s/g, '') : null,
-  };
 }
 
 /**
- * Extrahierte Logik aus main.js auth:login Handler.
+ * auth:login öffnet ein Terminal-Fenster (detached spawn).
+ * Das Ergebnis ist immer pendingInTerminal = true (kein execFile-Parsing nötig).
  */
-function parseAuthLoginResult(error, stdout, stderr) {
-  if (error) {
-    return { success: false, error: (stderr || error.message).trim() };
-  }
-  return { success: true, error: null };
+function makeAuthLoginResult() {
+  return { success: true, pendingInTerminal: true, error: null };
 }
 
-describe('auth:check Parsing-Logik', () => {
+describe('auth:check aus config.json', () => {
 
-  test('gh auth status Erfolg mit User → authenticated + user', () => {
-    const result = parseAuthCheckResult(
-      null,
-      'Logged in to github.com account testuser (keyring)',
-      ''
-    );
-    expect(result).toEqual({ success: true, authenticated: true, user: 'testuser' });
+  test('config mit lastLoggedInUser → authenticated + user', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({
+      lastLoggedInUser: { host: 'https://github.com', login: 'testuser' },
+    }));
+    expect(result).toEqual({ success: true, authenticated: true, user: 'testuser', host: 'https://github.com' });
   });
 
-  test('gh auth status Erfolg mit Account-Zeile ohne Logged-in-Prefix', () => {
-    const result = parseAuthCheckResult(
-      null,
-      '',
-      '✓ Logged in to github.com account myuser (oauth_token)'
-    );
-    expect(result).toEqual({ success: true, authenticated: true, user: 'myuser' });
-  });
-
-  test('gh auth status Erfolg, aber kein User erkennbar', () => {
-    const result = parseAuthCheckResult(null, 'some unknown output', '');
-    expect(result).toEqual({ success: true, authenticated: true, user: null });
-  });
-
-  test('gh auth status Fehler (nicht eingeloggt) → authenticated: false', () => {
-    const result = parseAuthCheckResult(
-      new Error('exit code 1'),
-      '',
-      'You are not logged into any GitHub hosts.'
-    );
+  test('config ohne lastLoggedInUser → authenticated: false', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({ firstLaunchAt: '2026-01-01' }));
     expect(result).toEqual({ success: true, authenticated: false, user: null });
   });
 
-  test('gh nicht installiert (command not found) → authenticated: false', () => {
-    const result = parseAuthCheckResult(
-      new Error('command not found: gh'),
-      '',
-      ''
-    );
+  test('leere config → authenticated: false', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({}));
     expect(result).toEqual({ success: true, authenticated: false, user: null });
   });
 
-  test('stderr enthält Account-Info (gh gibt auf stderr aus)', () => {
-    const result = parseAuthCheckResult(
-      null,
-      '',
-      'github.com\n  ✓ Logged in to github.com account enterprise-user (keyring)\n  ✓ Git operations use ssh'
-    );
+  test('null/undefined → authenticated: false', () => {
+    expect(parseAuthCheckFromConfig(null)).toEqual({ success: true, authenticated: false, user: null });
+    expect(parseAuthCheckFromConfig(undefined)).toEqual({ success: true, authenticated: false, user: null });
+  });
+
+  test('config mit JS-Kommentaren wird korrekt geparsed', () => {
+    const raw = `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ lastLoggedInUser: { host: 'https://github.com', login: 'commentuser' } })}`;
+    const result = parseAuthCheckFromConfig(raw);
     expect(result.authenticated).toBe(true);
-    expect(result.user).toBe('enterprise-user');
+    expect(result.user).toBe('commentuser');
   });
 
-  test('leerer Output ohne Fehler → authenticated: true, user: null', () => {
-    const result = parseAuthCheckResult(null, '', '');
-    expect(result.authenticated).toBe(true);
-    expect(result.user).toBe(null);
+  test('lastLoggedInUser ohne login-Feld → authenticated: false', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({ lastLoggedInUser: { host: 'https://github.com' } }));
+    expect(result).toEqual({ success: true, authenticated: false, user: null });
   });
 
-  test('user mit Whitespace wird getrimmt', () => {
-    // Regex: /account ([^\s(]+)/i matcht erstes Non-Whitespace-Wort nach "account "
-    // Bei "account  spaced-user" startet die Capture-Group beim ersten Non-Space
-    const result = parseAuthCheckResult(
-      null,
-      'Logged in to github.com account spaced-user (token)',
-      ''
-    );
-    expect(result.user).toBe('spaced-user');
-    expect(result.user).not.toContain(' ');
+  test('kaputtes JSON → authenticated: false (kein Crash)', () => {
+    const result = parseAuthCheckFromConfig('{broken json!!!');
+    expect(result).toEqual({ success: true, authenticated: false, user: null });
   });
 
-  test('Fallback-Regex: "account username" ohne Logged-in-Prefix', () => {
-    const result = parseAuthCheckResult(
-      null,
-      'Connected to github.com\naccount devuser (token)',
-      ''
-    );
-    expect(result.user).toBe('devuser');
+  test('config mit trustedFolders aber ohne lastLoggedInUser → authenticated: false', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({
+      trustedFolders: ['C:\\DEV'],
+      firstLaunchAt: '2026-01-01T00:00:00Z',
+    }));
+    expect(result.authenticated).toBe(false);
+  });
+
+  test('user-Login wird korrekt weitergegeben (kein Trimmen nötig, da aus JSON)', () => {
+    const result = parseAuthCheckFromConfig(JSON.stringify({
+      lastLoggedInUser: { host: 'https://github.com', login: 'my-org-user' },
+    }));
+    expect(result.user).toBe('my-org-user');
   });
 });
 
-describe('auth:login Parsing-Logik', () => {
+describe('auth:login (Terminal-basiert)', () => {
 
-  test('Login erfolgreich → success: true', () => {
-    const result = parseAuthLoginResult(null, 'Login successful', '');
-    expect(result).toEqual({ success: true, error: null });
-  });
-
-  test('Login fehlgeschlagen mit stderr → success: false + error', () => {
-    const result = parseAuthLoginResult(
-      new Error('exit code 1'),
-      '',
-      'Error: authentication failed'
-    );
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Error: authentication failed');
-  });
-
-  test('Login fehlgeschlagen ohne stderr → error.message als Fallback', () => {
-    const result = parseAuthLoginResult(
-      new Error('Process timed out'),
-      '',
-      ''
-    );
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Process timed out');
-  });
-
-  test('Login Timeout → Fehler', () => {
-    const err = new Error('Command timed out after 120000ms');
-    err.killed = true;
-    const result = parseAuthLoginResult(err, '', 'timeout');
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('timeout');
-  });
-
-  test('stderr mit Whitespace wird getrimmt', () => {
-    const result = parseAuthLoginResult(
-      new Error('fail'),
-      '',
-      '  some error message  \n'
-    );
-    expect(result.error).toBe('some error message');
+  test('Login gibt pendingInTerminal: true zurück', () => {
+    const result = makeAuthLoginResult();
+    expect(result.success).toBe(true);
+    expect(result.pendingInTerminal).toBe(true);
+    expect(result.error).toBeNull();
   });
 });
 
@@ -320,9 +261,10 @@ class OnboardingWizardStateMachine {
       });
     }
 
-    // Step 1 = Login → bleibt disabled bis auth ok
-    // Steps 2-4 = Placeholder → sofort enabled
-    if (step !== 1) {
+    // Step 1 = CWD → disabled bis Verzeichnis bestätigt
+    // Step 2 = Login → disabled bis auth ok
+    // Steps 3-4 = Placeholder → sofort enabled
+    if (step !== 1 && step !== 2) {
       this.btnNextDisabled = false;
     }
   }
@@ -366,25 +308,37 @@ describe('Onboarding Wizard State Machine', () => {
     wiz.start();
     expect(wiz.overlayVisible).toBe(true);
     expect(wiz.currentStep).toBe(1);
-    expect(wiz.btnNextDisabled).toBe(true); // Login-Step: disabled bis auth
+    expect(wiz.btnNextDisabled).toBe(true); // CWD-Step: disabled bis Verzeichnis bestätigt
   });
 
-  test('Step 1 (Login): Next-Button disabled bis enableNext()', () => {
+  test('Step 1 (CWD): Next-Button disabled bis enableNext()', () => {
     wiz.start();
     expect(wiz.btnNextDisabled).toBe(true);
     wiz.enableNext();
     expect(wiz.btnNextDisabled).toBe(false);
   });
 
-  test('Steps 2-4 (Placeholder): Next-Button sofort enabled', () => {
+  test('Step 2 (Login): Next-Button disabled bis enableNext()', () => {
     wiz.start();
     wiz.enableNext();
     wiz.nextStep(); // → Step 2
     expect(wiz.currentStep).toBe(2);
+    expect(wiz.btnNextDisabled).toBe(true);
+    wiz.enableNext();
     expect(wiz.btnNextDisabled).toBe(false);
+  });
 
+  test('Steps 3-4 (Folder/Category): Next-Button sofort enabled', () => {
+    wiz.start();
+    wiz.enableNext();
+    wiz.nextStep(); // → Step 2
+    wiz.enableNext();
     wiz.nextStep(); // → Step 3
     expect(wiz.currentStep).toBe(3);
+    expect(wiz.btnNextDisabled).toBe(false);
+
+    wiz.nextStep(); // → Step 4
+    expect(wiz.currentStep).toBe(4);
     expect(wiz.btnNextDisabled).toBe(false);
   });
 
@@ -396,6 +350,7 @@ describe('Onboarding Wizard State Machine', () => {
     wiz.nextStep(); // Step 2
     expect(wiz.btnNextText).toBe('Weiter →');
 
+    wiz.enableNext();
     wiz.nextStep(); // Step 3
     expect(wiz.btnNextText).toBe('Weiter →');
 
@@ -421,6 +376,7 @@ describe('Onboarding Wizard State Machine', () => {
       { step: 4, active: false, done: false },
     ]);
 
+    wiz.enableNext();
     wiz.nextStep(); // Step 3
     expect(wiz.stepIndicators[0].done).toBe(true);
     expect(wiz.stepIndicators[1].done).toBe(true);
@@ -431,6 +387,7 @@ describe('Onboarding Wizard State Machine', () => {
     wiz.start();
     wiz.enableNext();
     wiz.nextStep(); // → 2
+    wiz.enableNext();
     wiz.nextStep(); // → 3
     wiz.nextStep(); // → 4
     expect(wiz.currentStep).toBe(4);
@@ -470,8 +427,11 @@ describe('Onboarding Wizard State Machine', () => {
     expect(wiz.btnNextDisabled).toBe(false);
 
     // Wenn man showStep nochmal aufruft, wird disabled zurückgesetzt
-    // (nur Step 1 bleibt disabled, andere werden sofort enabled)
+    // Step 1 (CWD) und Step 2 (Login) bleiben disabled, andere werden sofort enabled
     wiz.showStep(2);
+    expect(wiz.btnNextDisabled).toBe(true); // Login → disabled bis auth ok
+
+    wiz.showStep(3);
     expect(wiz.btnNextDisabled).toBe(false); // Placeholder → sofort enabled
   });
 });

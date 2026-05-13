@@ -75,6 +75,7 @@ describe('scanAgentsDirectory', () => {
     const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result[0]).toEqual({
       id: 'TestAgent',
+      fileSlug: 'test-agent',
       name: 'TestAgent',
       description: 'Ein Test',
       icon: '🤖',
