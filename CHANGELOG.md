@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.20.5] - 2026-05-14
+
+### Added
+- Tutorial-Flags (`tutorialSkillsShown`, `tutorialRenameShown`) nach `folders.json` migriert
+- IPC-Handler `tutorial:getFlags` / `tutorial:setFlag` mit Key-Whitelist
+- Tutorial-Popups schließen automatisch bei Nutzeraktion (Reload-Button / Tab-Umbenennung)
+- Auto-close nach 30 Sekunden (Event-Listener Leak-Fix via closed-Guard)
+- `tab:renamed` CustomEvent bei erfolgreicher Tab-Umbenennung
+- `dev:setOnboardingComplete` löscht jetzt auch Tutorial-Flags
+- 2 neue Testdateien (`tutorial-flags.test.js`, erweitertes `onboarding-auth.test.js`)
+
+### Fixed
+- Event-Listener Leak in Tutorial-Popup Auto-close behoben (closed-Guard verhindert doppelte Registrierung)
+
+### Changed
+- Todo-Löschicon vereinheitlicht (🗑️ Mülleimer-Emoji durchgehend)
+- Session-Context zeigt nur noch Nachrichten — kein Plan mehr
+
+## [0.19.0] - 2026-05-12
+
+### Changed
+- Versionserhöhung auf 0.19.0 nach Onboarding-Wizard-Release
+
+## [0.18.2] - 2026-05-12
+
+### Added
+- First-Run Onboarding Wizard (Schritte 1–4):
+  - Schritt 1: GitHub Login-Check via `gh auth status` / `gh auth login`
+  - Schritt 2: Ordner-Einrichtung (`~/.copilot-desktop/*`)
+  - Schritt 3: Starter Agents & Skills (6 Kategorien, togglebar)
+  - Schritt 4: Kurzeinführung mit 3-Slide-Carousel
+- Tab-Unlock Fallback: Auto-Unlock nach 180s Inaktivität mit Info-Nachricht
+- +165 neue Tests (onboarding-auth, -folders, -categories, -intro)
+
+### Fixed
+- CSS-Variablen-Fix: `--bg-secondary` / `--color-success` korrigiert
+
 ## [0.16.1] - 2025-06-17
 
 ### Added
