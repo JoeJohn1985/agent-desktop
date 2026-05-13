@@ -8,6 +8,15 @@ const path = require('path');
 
 // ── scanSkillDirectory ───────────────────────────────────────
 
+/**
+ * Scannt ein Verzeichnis nach Skill-Ordnern mit SKILL.md und parst deren YAML-Frontmatter.
+ *
+ * @param {string} dir - Pfad zum Skill-Verzeichnis
+ * @param {string} source - Herkunftsbezeichnung (z.B. 'user', 'builtin')
+ * @param {(name: string) => string} iconFn - Fallback-Funktion für Icon-Ermittlung
+ * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
+ * @returns {Array<{id: string, dirName: string, name: string, description: string, source: string, icon: string}>}
+ */
 function scanSkillDirectory(dir, source, iconFn, yamlParse) {
   const results = [];
   if (!fs.existsSync(dir)) return results;
@@ -39,6 +48,13 @@ function scanSkillDirectory(dir, source, iconFn, yamlParse) {
 
 // ── Folder Config ────────────────────────────────────────────
 
+/**
+ * Liest eine JSON-Konfigurationsdatei für Ordner-Einstellungen.
+ * Gibt ein leeres Objekt zurück wenn die Datei nicht existiert oder fehlerhaft ist.
+ *
+ * @param {string} configPath - Absoluter Pfad zur JSON-Konfigurationsdatei
+ * @returns {Object} Die geparste Konfiguration oder ein leeres Objekt
+ */
 function readFolderConfig(configPath) {
   try {
     if (fs.existsSync(configPath)) {
@@ -50,6 +66,12 @@ function readFolderConfig(configPath) {
   return {};
 }
 
+/**
+ * Schreibt eine Konfiguration als JSON-Datei. Erstellt fehlende Verzeichnisse automatisch.
+ *
+ * @param {string} configPath - Absoluter Pfad zur Zieldatei
+ * @param {Object} config - Das zu schreibende Konfigurationsobjekt
+ */
 function writeFolderConfig(configPath, config) {
   const dir = path.dirname(configPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

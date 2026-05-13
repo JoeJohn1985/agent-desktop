@@ -2,8 +2,16 @@
 // Extracted from app.js — Todo list management
 'use strict';
 
+/** @type {Array<{id: string, text: string, status: 'open'|'done'}>} */
 let currentTodos = [];
 
+/**
+ * Lädt die Todos einer Session vom Backend und rendert sie.
+ * Versteckt die Todo-Sektion wenn keine Session aktiv ist.
+ *
+ * @param {string|null} sessionId - Die aktive Session-ID oder null
+ * @returns {Promise<void>}
+ */
 async function loadTodos(sessionId) {
   if (!sessionId) {
     currentTodos = [];
@@ -21,6 +29,10 @@ async function loadTodos(sessionId) {
   renderTodos();
 }
 
+/**
+ * Rendert die Todo-Liste ins DOM.
+ * Sortiert offene Todos vor erledigte und aktualisiert den Zähler.
+ */
 function renderTodos() {
   const container = document.getElementById('todoList');
   const openCount = currentTodos.filter(t => t.status === 'open').length;
@@ -58,6 +70,12 @@ function renderTodos() {
   initTodoDragDrop(container);
 }
 
+/**
+ * Initialisiert Drag-and-Drop-Reordering für die Todo-Elemente.
+ * Persistiert die neue Reihenfolge nach dem Drop via Backend-API.
+ *
+ * @param {HTMLElement} container - Das DOM-Element das die Todo-Items enthält
+ */
 function initTodoDragDrop(container) {
   let dragEl = null;
 
@@ -106,6 +124,12 @@ function initTodoDragDrop(container) {
   });
 }
 
+/**
+ * Liest den Text aus dem Eingabefeld und erstellt ein neues Todo.
+ * Leert das Eingabefeld bei Erfolg und aktualisiert die Anzeige.
+ *
+ * @returns {Promise<void>}
+ */
 async function addTodo() {
   const input = document.getElementById('todoInput');
   const text = input.value.trim();
@@ -122,6 +146,12 @@ async function addTodo() {
   renderTodos();
 }
 
+/**
+ * Wechselt den Status eines Todos zwischen 'open' und 'done'.
+ *
+ * @param {string} todoId - Die ID des umzuschaltenden Todos
+ * @returns {Promise<void>}
+ */
 async function toggleTodo(todoId) {
   const todo = currentTodos.find(t => t.id === todoId);
   if (!todo || !activeSessionId) return;
@@ -136,6 +166,12 @@ async function toggleTodo(todoId) {
   renderTodos();
 }
 
+/**
+ * Löscht ein Todo aus der aktiven Session.
+ *
+ * @param {string} todoId - Die ID des zu löschenden Todos
+ * @returns {Promise<void>}
+ */
 async function deleteTodo(todoId) {
   if (!activeSessionId) return;
   try {

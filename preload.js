@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // ── Markdown + Syntax Highlighting ──────────────────────────
+
+/**
+ * Renders Markdown to sanitized HTML with syntax highlighting.
+ * Falls back to plain-text passthrough if marked/highlight.js are unavailable.
+ *
+ * @type {(text: string) => string}
+ */
 let markdownRender = (text) => text; // fallback: plain text
 try {
   const { marked } = require('marked');
@@ -34,180 +41,572 @@ try {
   console.warn('Markdown/highlight.js not available:', e.message);
 }
 
+/** Exposes a safe markdown renderer to the renderer process. */
 contextBridge.exposeInMainWorld('markdown', {
   render: markdownRender,
 });
 
+/**
+ * IPC bridge: Exposes the `copilot.*` namespace to the renderer process
+ * via Electron's contextBridge. All methods delegate to ipcRenderer.invoke
+ * (request/response) or ipcRenderer.send (fire-and-forget).
+ *
+ * @namespace copilot
+ */
 contextBridge.exposeInMainWorld('copilot', {
-  // Chat (JSONL-based communication)
+
+  // ── Chat (JSONL-based communication) ──────────────────────
+
+  /**
+   * Chat API — spawns Copilot CLI processes and streams JSONL events.
+   *
+   * @namespace copilot.chat
+   */
   chat: {
+    /** @ipc copilot:newTab — Allocates a new tab ID. @returns {Promise<number>} */
     newTab: () => ipcRenderer.invoke('copilot:newTab'),
+    /**
+     * Sends a prompt to the Copilot CLI for the given tab.
+     * @ipc copilot:send
+     * @param {number} tabId - Target tab identifier
+     * @param {string} prompt - User prompt text
+     * @param {Object} [options] - Spawn options (model, sessionId, deniedTools, etc.)
+     * @returns {Promise<number>} The tab ID
+     */
     send: (tabId, prompt, options) => ipcRenderer.invoke('copilot:send', tabId, prompt, options),
+    /**
+     * Kills the running Copilot process for a tab.
+     * @ipc copilot:stop
+     * @param {number} tabId
+     */
     stop: (tabId) => ipcRenderer.send('copilot:stop', tabId),
+    /** @ipc copilot:getCwd @returns {Promise<string>} Current working directory */
     getCwd: () => ipcRenderer.invoke('copilot:getCwd'),
+    /** @ipc copilot:openCwd — Opens the CWD in the system file explorer. @returns {Promise<void>} */
     openCwd: () => ipcRenderer.invoke('copilot:openCwd'),
+    /** @ipc copilot:getVersions @returns {Promise<{app: string, cli: string}>} App and CLI versions */
     getVersions: () => ipcRenderer.invoke('copilot:getVersions'),
+    /** @ipc copilot:getInstructions @returns {Promise<Array<{path: string, name: string}>>} Found instruction files */
     getInstructions: () => ipcRenderer.invoke('copilot:getInstructions'),
+    /**
+     * Subscribes to JSONL events streamed from the Copilot CLI.
+     * @param {(tabId: number, event: Object) => void} cb - Event callback
+     * @returns {() => void} Unsubscribe function
+     */
     onEvent: (cb) => {
       const handler = (_e, tabId, event) => cb(tabId, event);
       ipcRenderer.on('copilot:event', handler);
       return () => ipcRenderer.removeListener('copilot:event', handler);
     },
+    /**
+     * Subscribes to process-done events (Copilot CLI exited).
+     * @param {(tabId: number, code: number|null) => void} cb - Done callback with exit code
+     * @returns {() => void} Unsubscribe function
+     */
     onDone: (cb) => {
       const handler = (_e, tabId, code) => cb(tabId, code);
       ipcRenderer.on('copilot:done', handler);
       return () => ipcRenderer.removeListener('copilot:done', handler);
     },
   },
-  // Sessions
+
+  // ── Sessions ──────────────────────────────────────────────
+
+  /**
+   * Session management — read checkpoints, plans, and messages from session state.
+   *
+   * @namespace copilot.sessions
+   */
   sessions: {
+    /** @ipc sessions:readCheckpoints @param {string} id - Session ID @returns {Promise<Array>} */
     readCheckpoints: (id) => ipcRenderer.invoke('sessions:readCheckpoints', id),
+    /** @ipc sessions:readPlan @param {string} id - Session ID @returns {Promise<string|null>} */
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
+    /** @ipc sessions:readRecentMessages @param {string} id - Session ID @returns {Promise<Array>} Last 5 messages */
     readRecentMessages: (id) => ipcRenderer.invoke('sessions:readRecentMessages', id),
+    /** @ipc sessions:create @param {string} name - Session display name @returns {Promise<string>} New session UUID */
     create: (name) => ipcRenderer.invoke('sessions:create', name),
+    /** @ipc sessions:delete @param {string} id - Session ID @returns {Promise<boolean>} */
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
-  // Todos (per session)
+
+  // ── Todos (per session) ───────────────────────────────────
+
+  /**
+   * Per-session todo list management.
+   *
+   * @namespace copilot.todos
+   */
   todos: {
+    /** @ipc todos:list @param {string} sessionId @returns {Promise<Array<Object>>} */
     list: (sessionId) => ipcRenderer.invoke('todos:list', sessionId),
+    /**
+     * @ipc todos:add
+     * @param {string} sessionId
+     * @param {Object} todo - Todo object with at least `text` property
+     * @returns {Promise<Array<Object>>} Updated todo list
+     */
     add: (sessionId, todo) => ipcRenderer.invoke('todos:add', sessionId, todo),
+    /**
+     * @ipc todos:update
+     * @param {string} sessionId
+     * @param {string} todoId
+     * @param {Object} updates - Fields to merge into the todo
+     * @returns {Promise<Array<Object>>} Updated todo list
+     */
     update: (sessionId, todoId, updates) => ipcRenderer.invoke('todos:update', sessionId, todoId, updates),
+    /** @ipc todos:delete @param {string} sessionId @param {string} todoId @returns {Promise<Array<Object>>} */
     delete: (sessionId, todoId) => ipcRenderer.invoke('todos:delete', sessionId, todoId),
+    /**
+     * Reorders todos according to the given ID sequence.
+     * @ipc todos:reorder
+     * @param {string} sessionId
+     * @param {string[]} orderedIds - Todo IDs in desired order
+     * @returns {Promise<Array<Object>>} Reordered todo list
+     */
     reorder: (sessionId, orderedIds) => ipcRenderer.invoke('todos:reorder', sessionId, orderedIds),
   },
-  // Images
+
+  // ── Images ────────────────────────────────────────────────
+
+  /**
+   * Image file management (list, open, delete) in the project images directory.
+   *
+   * @namespace copilot.images
+   */
   images: {
+    /** @ipc images:list @returns {Promise<Array<Object>>} */
     list: () => ipcRenderer.invoke('images:list'),
+    /** @ipc images:open @param {string} filePath @returns {Promise<void>} */
     open: (filePath) => ipcRenderer.invoke('images:open', filePath),
+    /** @ipc images:delete @param {string} filePath @returns {Promise<Object>} */
     delete: (filePath) => ipcRenderer.invoke('images:delete', filePath),
+    /** @ipc images:openFolder — Opens the images directory in the file explorer. @returns {Promise<void>} */
     openFolder: () => ipcRenderer.invoke('images:openFolder'),
+    /**
+     * Subscribes to image directory change events (file watcher).
+     * @param {Function} cb - Change callback
+     * @returns {() => void} Unsubscribe function
+     */
     onChanged: (cb) => {
       ipcRenderer.on('images:changed', cb);
       return () => ipcRenderer.removeListener('images:changed', cb);
     },
   },
+
+  /**
+   * Video utilities — frame extraction for video files.
+   *
+   * @namespace copilot.videos
+   */
   videos: {
+    /**
+     * Extracts frames from a video file (via ffmpeg).
+     * @ipc videos:extractFrames
+     * @param {string} videoPath - Absolute path to the video
+     * @param {Object} [options] - Extraction options (count, interval, etc.)
+     * @returns {Promise<Object>} Extraction result with frame paths
+     */
     extractFrames: (videoPath, options) => ipcRenderer.invoke('videos:extractFrames', videoPath, options),
   },
-  // Preferences (file-based persistent settings)
+
+  // ── Preferences ───────────────────────────────────────────
+
+  /**
+   * Persistent file-based user preferences (theme, language, etc.).
+   *
+   * @namespace copilot.preferences
+   */
   preferences: {
+    /** @ipc preferences:read @returns {Promise<Object>} Current preferences merged with defaults */
     read: () => ipcRenderer.invoke('preferences:read'),
+    /** @ipc preferences:write @param {Object} prefs - Preferences to persist @returns {Promise<boolean>} */
     write: (prefs) => ipcRenderer.invoke('preferences:write', prefs),
   },
-  // Folders
+
+  // ── Folders ───────────────────────────────────────────────
+
+  /**
+   * Folder configuration — read/save project paths, browse for directories/files.
+   *
+   * @namespace copilot.folders
+   */
   folders: {
+    /** @ipc folders:read @returns {Promise<Object>} All configured folder paths */
     read: () => ipcRenderer.invoke('folders:read'),
+    /**
+     * Saves a new folder configuration. May require app restart.
+     * @ipc folders:save
+     * @param {Object} config - New folder paths
+     * @returns {Promise<{success: boolean, requiresRestart?: boolean, error?: string}>}
+     */
     save: (config) => ipcRenderer.invoke('folders:save', config),
+    /** @ipc folders:browse — Opens a native directory picker. @returns {Promise<string|null>} */
     browse: () => ipcRenderer.invoke('folders:browse'),
+    /**
+     * Opens a native file picker with optional filters.
+     * @ipc folders:browse-file
+     * @param {Array<{name: string, extensions: string[]}>} [filters] - File type filters
+     * @returns {Promise<string|null>} Selected file path or null
+     */
     browseFile: (filters) => ipcRenderer.invoke('folders:browse-file', filters),
   },
 
-  // Instructions
+  // ── Instructions ──────────────────────────────────────────
+
+  /**
+   * Read/write the copilot-instructions.md file.
+   *
+   * @namespace copilot.instructions
+   */
   instructions: {
+    /** @ipc instructions:read @returns {Promise<{success: boolean, content: string, path: string}>} */
     read: () => ipcRenderer.invoke('instructions:read'),
+    /** @ipc instructions:write @param {string} content - Markdown content @returns {Promise<{success: boolean, path: string}>} */
     write: (content) => ipcRenderer.invoke('instructions:write', content),
   },
 
-  // Skills
+  // ── Skills ────────────────────────────────────────────────
+
+  /**
+   * Skill management — list and delete user/builtin skills.
+   *
+   * @namespace copilot.skills
+   */
   skills: {
+    /** @ipc skills:list @returns {Promise<Array<Object>>} All discovered skills (builtin + user) */
     list: () => ipcRenderer.invoke('skills:list'),
+    /** @ipc skills:delete @param {string} dirName - Skill directory name @returns {Promise<{success: boolean, error?: string}>} */
     delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
   },
-  // Agents
+
+  // ── Agents ────────────────────────────────────────────────
+
+  /**
+   * Agent management — list and delete .agent.md files.
+   *
+   * @namespace copilot.agents
+   */
   agents: {
+    /** @ipc agents:list @returns {Promise<Array<Object>>} All discovered agents */
     list: () => ipcRenderer.invoke('agents:list'),
+    /** @ipc agents:delete @param {string} fileSlug - Agent file slug (without .agent.md) @returns {Promise<{success: boolean, error?: string}>} */
     delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },
-  // Tests
+
+  // ── Tests ─────────────────────────────────────────────────
+
+  /**
+   * Test runner — execute unit tests, e2e tests and coverage reports.
+   *
+   * @namespace copilot.tests
+   */
   tests: {
+    /** @ipc tests:run @returns {Promise<Object>} Test run result */
     run: () => ipcRenderer.invoke('tests:run'),
+    /** @ipc tests:e2e @returns {Promise<Object>} E2E test result */
     e2e: () => ipcRenderer.invoke('tests:e2e'),
+    /** @ipc tests:coverage @returns {Promise<Object>} Coverage report result */
     coverage: () => ipcRenderer.invoke('tests:coverage'),
   },
-  // Plugins
+
+  // ── Plugins ───────────────────────────────────────────────
+
+  /**
+   * Plugin management — install, uninstall, update plugins and manage marketplaces.
+   *
+   * @namespace copilot.plugins
+   */
   plugins: {
+    /** @ipc plugin:list @returns {Promise<Array<Object>>} Installed plugins */
     list: () => ipcRenderer.invoke('plugin:list'),
+    /** @ipc plugin:install @param {string} target - Plugin name or path @returns {Promise<Object>} */
     install: (target) => ipcRenderer.invoke('plugin:install', target),
+    /** @ipc plugin:uninstall @param {string} name @returns {Promise<Object>} */
     uninstall: (name) => ipcRenderer.invoke('plugin:uninstall', name),
+    /** @ipc plugin:update @param {string} name @returns {Promise<Object>} */
     update: (name) => ipcRenderer.invoke('plugin:update', name),
+    /** @ipc plugin:marketplace-list @returns {Promise<Array<Object>>} Registered marketplace sources */
     listMarketplaces: () => ipcRenderer.invoke('plugin:marketplace-list'),
+    /** @ipc plugin:marketplace-add @param {string} source - Marketplace URL or identifier @returns {Promise<Object>} */
     addMarketplace: (source) => ipcRenderer.invoke('plugin:marketplace-add', source),
+    /** @ipc plugin:marketplace-remove @param {string} name @returns {Promise<Object>} */
     removeMarketplace: (name) => ipcRenderer.invoke('plugin:marketplace-remove', name),
+    /** @ipc plugin:marketplace-browse @param {string} name - Marketplace name @returns {Promise<Array<Object>>} Available plugins */
     browseMarketplace: (name) => ipcRenderer.invoke('plugin:marketplace-browse', name),
   },
-  // Dev Console
+
+  // ── Dev Console ───────────────────────────────────────────
+
+  /**
+   * Dev console log stream — receives main-process console output in the renderer.
+   *
+   * @namespace copilot.devConsole
+   */
   devConsole: {
+    /**
+     * Subscribes to dev console log entries forwarded from the main process.
+     * @param {(entry: {level: string, message: string, timestamp: number}) => void} cb
+     * @returns {() => void} Unsubscribe function
+     */
     onLog: (cb) => {
       const handler = (_e, entry) => cb(entry);
       ipcRenderer.on('dev-console:log', handler);
       return () => ipcRenderer.removeListener('dev-console:log', handler);
     },
   },
-  // Logging (renderer → main → file)
+
+  // ── Logging (renderer → main → file) ─────────────────────
+
+  /**
+   * Renderer-to-file logging bridge. Messages are forwarded to the main process
+   * file logger via fire-and-forget IPC.
+   *
+   * @namespace copilot.log
+   */
   log: {
+    /**
+     * @ipc log:write
+     * @param {string} level - Log level ('info'|'warn'|'error')
+     * @param {string} message - Log message
+     */
     write: (level, message) => ipcRenderer.send('log:write', level, message),
   },
-  // Terminal (interactive PTY for slash commands)
+
+  // ── Terminal (interactive PTY) ────────────────────────────
+
+  /**
+   * Interactive PTY terminal — spawns shell sessions, sends slash commands,
+   * handles input/output streaming and resize events.
+   *
+   * @namespace copilot.terminal
+   */
   terminal: {
+    /** @ipc terminal:available — Checks if node-pty is available. @returns {Promise<boolean>} */
     available: () => ipcRenderer.invoke('terminal:available'),
+    /**
+     * Spawns a new interactive terminal with an optional slash command.
+     * @ipc terminal:spawn
+     * @param {number} tabId
+     * @param {string} sessionId
+     * @param {string} [slashCommand] - Initial slash command to execute
+     * @returns {Promise<Object>} Spawn result
+     */
     spawn: (tabId, sessionId, slashCommand) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand),
+    /**
+     * Spawns a background terminal (no UI, for automated commands).
+     * @ipc terminal:spawn-background
+     * @param {number} tabId
+     * @param {string} sessionId
+     * @returns {Promise<Object>}
+     */
     spawnBackground: (tabId, sessionId) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId),
+    /** @ipc terminal:get-buffer @param {number} tabId @returns {Promise<string[]>} Buffered output lines */
     getBuffer: (tabId) => ipcRenderer.invoke('terminal:get-buffer', tabId),
+    /**
+     * Sends a raw command string to the terminal.
+     * @ipc terminal:send-command
+     * @param {number} tabId
+     * @param {string} command
+     * @returns {Promise<Object>}
+     */
     sendCommand: (tabId, command) => ipcRenderer.invoke('terminal:send-command', tabId, command),
+    /** @ipc terminal:fetch-context @param {number} tabId @returns {Promise<Object>} Current terminal context */
     fetchContext: (tabId) => ipcRenderer.invoke('terminal:fetch-context', tabId),
+    /**
+     * Sends a slash command to the Copilot TUI running in the terminal.
+     * @ipc terminal:send-slash
+     * @param {number} tabId
+     * @param {string} command - Slash command (e.g. '/help')
+     * @returns {Promise<Object>}
+     */
     sendSlash: (tabId, command) => ipcRenderer.invoke('terminal:send-slash', tabId, command),
+    /**
+     * Sends raw input data to the PTY (fire-and-forget).
+     * @ipc terminal:input
+     * @param {number} tabId
+     * @param {string} data - Raw terminal input
+     */
     input: (tabId, data) => ipcRenderer.send('terminal:input', tabId, data),
+    /**
+     * Resizes the PTY to the given dimensions.
+     * @ipc terminal:resize
+     * @param {number} tabId
+     * @param {number} cols
+     * @param {number} rows
+     */
     resize: (tabId, cols, rows) => ipcRenderer.send('terminal:resize', tabId, cols, rows),
+    /**
+     * Closes the PTY for a tab (fire-and-forget).
+     * @ipc terminal:close
+     * @param {number} tabId
+     */
     close: (tabId) => ipcRenderer.send('terminal:close', tabId),
+    /**
+     * Subscribes to PTY output data.
+     * @param {(tabId: number, data: string) => void} cb
+     * @returns {() => void} Unsubscribe function
+     */
     onData: (cb) => {
       const handler = (_e, tabId, data) => cb(tabId, data);
       ipcRenderer.on('terminal:data', handler);
       return () => ipcRenderer.removeListener('terminal:data', handler);
     },
+    /**
+     * Subscribes to PTY exit events.
+     * @param {(tabId: number, code: number|null) => void} cb
+     * @returns {() => void} Unsubscribe function
+     */
     onExit: (cb) => {
       const handler = (_e, tabId, code) => cb(tabId, code);
       ipcRenderer.on('terminal:exit', handler);
       return () => ipcRenderer.removeListener('terminal:exit', handler);
     },
   },
-  // Setup
+
+  // ── Setup ─────────────────────────────────────────────────
+
+  /**
+   * First-run setup — creates default folders, starter agents and personalized configs.
+   *
+   * @namespace copilot.setup
+   */
   setup: {
+    /** @ipc setup:getFolderStatus @returns {Promise<Object>} Existence status of each setup folder */
     getFolderStatus: () => ipcRenderer.invoke('setup:getFolderStatus'),
+    /** @ipc setup:createFolders — Creates missing default folders and instructions file. @returns {Promise<Object>} */
     createFolders: () => ipcRenderer.invoke('setup:createFolders'),
+    /** @ipc setup:getCategories @returns {Promise<Array<{id: string, icon: string, title: string, desc: string}>>} */
     getCategories: () => ipcRenderer.invoke('setup:getCategories'),
+    /**
+     * Creates starter agent/skill files for the selected categories.
+     * @ipc setup:createStarterFiles
+     * @param {string[]} categories - Array of category IDs
+     * @returns {Promise<{success: boolean, created: string[], skipped: string[], errors: string[]}>}
+     */
     createStarterFiles: (categories) => ipcRenderer.invoke('setup:createStarterFiles', categories),
+    /**
+     * Generates personalized skills and agents via Copilot CLI based on user role.
+     * @ipc setup:generatePersonalized
+     * @param {Object} data
+     * @param {string} data.role - User's role description
+     * @param {string[]} [data.missingRoles] - Missing team roles to generate agents for
+     * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
+     */
     generatePersonalized: (data) => ipcRenderer.invoke('setup:generatePersonalized', data),
+    /**
+     * Returns prompts for personalized skill/agent generation (non-blocking variant).
+     * @ipc setup:startPersonalizedSessions
+     * @param {Object} data
+     * @param {string} data.role
+     * @param {string[]} [data.missingRoles]
+     * @returns {Promise<{skillPrompt: string, agentPrompt: string|null}>}
+     */
     startPersonalizedSessions: (data) => ipcRenderer.invoke('setup:startPersonalizedSessions', data),
   },
-  // Onboarding
+
+  // ── Onboarding ────────────────────────────────────────────
+
+  /**
+   * Onboarding state — tracks whether the user has completed the first-run wizard.
+   *
+   * @namespace copilot.onboarding
+   */
   onboarding: {
+    /** @ipc onboarding:isFirstRun @returns {Promise<boolean>} True if onboarding not yet completed */
     isFirstRun: () => ipcRenderer.invoke('onboarding:isFirstRun'),
+    /** @ipc onboarding:complete — Marks onboarding as done. @returns {Promise<{success: boolean}>} */
     complete: () => ipcRenderer.invoke('onboarding:complete'),
   },
-  // Tutorial
+
+  // ── Tutorial ──────────────────────────────────────────────
+
+  /**
+   * Tutorial flag management — tracks which tutorial hints have been shown.
+   *
+   * @namespace copilot.tutorial
+   */
   tutorial: {
+    /** @ipc tutorial:getFlags @returns {Promise<{tutorialSkillsShown: boolean, tutorialRenameShown: boolean}>} */
     getFlags: () => ipcRenderer.invoke('tutorial:getFlags'),
+    /**
+     * @ipc tutorial:setFlag
+     * @param {string} key - Flag key ('tutorialSkillsShown'|'tutorialRenameShown')
+     * @param {boolean} value
+     * @returns {Promise<{success: boolean}>}
+     */
     setFlag: (key, value) => ipcRenderer.invoke('tutorial:setFlag', key, value),
   },
-  // Dev Tools
+
+  // ── Dev Tools ─────────────────────────────────────────────
+
+  /**
+   * Developer tools — inspect and manipulate onboarding state for debugging.
+   *
+   * @namespace copilot.dev
+   */
   dev: {
+    /** @ipc dev:getOnboardingState @returns {Promise<{onboardingComplete: boolean}>} */
     getOnboardingState: () => ipcRenderer.invoke('dev:getOnboardingState'),
+    /**
+     * Overrides the onboarding completion flag (resets tutorial flags when set to false).
+     * @ipc dev:setOnboardingComplete
+     * @param {boolean} value
+     * @returns {Promise<{success: boolean}>}
+     */
     setOnboardingComplete: (value) => ipcRenderer.invoke('dev:setOnboardingComplete', value),
   },
-  // Auth
+
+  // ── Auth ──────────────────────────────────────────────────
+
+  /**
+   * Authentication — checks login status and triggers Copilot CLI login flow.
+   *
+   * @namespace copilot.auth
+   */
   auth: {
+    /** @ipc auth:check @returns {Promise<{success: boolean, authenticated: boolean, user: string|null, host?: string}>} */
     check: () => ipcRenderer.invoke('auth:check'),
+    /** @ipc auth:login — Opens a new terminal window for `copilot login`. @returns {Promise<{success: boolean, pendingInTerminal: boolean}>} */
     login: () => ipcRenderer.invoke('auth:login'),
   },
-  // Window
+
+  // ── Window ────────────────────────────────────────────────
+
+  /**
+   * Frameless window controls (minimize, maximize/restore, close).
+   *
+   * @namespace copilot.window
+   */
   window: {
+    /** @ipc window:minimize */
     minimize: () => ipcRenderer.send('window:minimize'),
+    /** @ipc window:maximize — Toggles between maximized and restored state. */
     maximize: () => ipcRenderer.send('window:maximize'),
+    /** @ipc window:close */
     close: () => ipcRenderer.send('window:close'),
   },
-  // File utilities
+
+  // ── File Utilities ────────────────────────────────────────
+
+  /**
+   * File utilities — resolve dropped file paths and process file content.
+   *
+   * @namespace copilot.files
+   */
   files: {
+    /**
+     * Resolves the native file system path for a drag-and-dropped File object.
+     * @param {File} file - DOM File object from a drop event
+     * @returns {string} Absolute file path
+     */
     getPath: (file) => webUtils.getPathForFile(file),
+    /**
+     * Processes a dropped file — reads text content or copies to the Dateien folder.
+     * @ipc files:processDropped
+     * @param {string} filePath - Absolute path of the dropped file
+     * @returns {Promise<{type: string, content?: string, path?: string, message?: string}>}
+     */
     processDropped: (filePath) => ipcRenderer.invoke('files:processDropped', filePath),
   },
 });

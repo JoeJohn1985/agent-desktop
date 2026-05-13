@@ -16,10 +16,19 @@ const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger')
 initLogger();
 
 // ── Dev Console Log Capture ─────────────────────────────────
+/** @type {Function} Original console.log before interception */
 const _originalConsoleLog = console.log;
+/** @type {Function} Original console.warn before interception */
 const _originalConsoleWarn = console.warn;
+/** @type {Function} Original console.error before interception */
 const _originalConsoleError = console.error;
 
+/**
+ * Forwards a console log entry to the renderer's dev console panel.
+ *
+ * @param {'info'|'warn'|'error'} level - Log severity
+ * @param {any[]} args - Original console arguments
+ */
 function _sendDevLog(level, args) {
   try {
     const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ');
@@ -34,6 +43,7 @@ console.warn = (...args) => { _originalConsoleWarn(...args); writeLog('warn', ar
 console.error = (...args) => { _originalConsoleError(...args); writeLog('error', args); _sendDevLog('error', args); };
 
 // ── PTY (optional, for interactive terminal) ─────────────────
+/** @type {import('@homebridge/node-pty-prebuilt-multiarch')|import('node-pty')|undefined} node-pty module, undefined if unavailable */
 let pty;
 try {
   pty = require('@homebridge/node-pty-prebuilt-multiarch');
@@ -46,12 +56,23 @@ try {
 }
 
 // ── Folder Configuration ─────────────────────────────────────
+/** @type {string} Path to the persistent folder configuration JSON */
 const FOLDERS_CONFIG_PATH = path.join(os.homedir(), '.copilot-desktop', 'folders.json');
 
+/**
+ * Reads the folder configuration from disk.
+ *
+ * @returns {Object} Folder paths (cwd, sessionsDir, skillsDir, etc.)
+ */
 function readFolderConfig() {
   return _readFolderConfig(FOLDERS_CONFIG_PATH);
 }
 
+/**
+ * Persists the folder configuration to disk.
+ *
+ * @param {Object} config - Folder paths to save
+ */
 function writeFolderConfig(config) {
   _writeFolderConfig(FOLDERS_CONFIG_PATH, config);
 }
@@ -59,20 +80,40 @@ function writeFolderConfig(config) {
 const folderConfig = readFolderConfig();
 
 // ── Globals ──────────────────────────────────────────────────
+/** @type {BrowserWindow|null} Main application window */
 let mainWindow = null;
-const copilotProcesses = new Map(); // tabId → child process
-const terminalProcesses = new Map(); // tabId → pty process
-const terminalBuffers = new Map(); // tabId → string[]
-const terminalReady = new Map(); // tabId → boolean (Copilot TUI is ready for commands)
+/** @type {Map<number, import('child_process').ChildProcess>} tabId → Copilot CLI child process */
+const copilotProcesses = new Map();
+/** @type {Map<number, Object>} tabId → PTY process instance */
+const terminalProcesses = new Map();
+/** @type {Map<number, string[]>} tabId → buffered terminal output chunks */
+const terminalBuffers = new Map();
+/** @type {Map<number, boolean>} tabId → true when Copilot TUI is ready for commands */
+const terminalReady = new Map();
+/** @type {number} Auto-incrementing tab identifier */
 let nextTabId = 1;
+/** @type {string} Directory for Copilot session state files */
 let SESSIONS_DIR = folderConfig.sessionsDir || path.join(os.homedir(), '.copilot', 'session-state');
+/** @type {string} Name of the Copilot CLI binary */
 const COPILOT_BIN = 'copilot';
+/** @type {string} Current working directory for Copilot CLI processes */
 let COPILOT_CWD = folderConfig.cwd || process.cwd();
+/** @type {string} Directory for project images */
 let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
-const terminalBusy = new Map(); // tabId → boolean (slash command in progress)
+/** @type {Map<number, boolean>} tabId → true when a slash command is in progress */
+const terminalBusy = new Map();
 
 // Bundled PowerShell — fallback to system shell
+/** @type {string} Path to the bundled PowerShell executable */
 const BUNDLED_PWSH = path.join(__dirname, 'vendor', 'pwsh', 'pwsh.exe');
+
+/**
+ * Returns the path to the preferred shell for the current platform.
+ * On Windows: bundled PowerShell if available, otherwise cmd.exe.
+ * On Unix: $SHELL or /bin/bash.
+ *
+ * @returns {string} Shell executable path
+ */
 function getShell() {
   if (process.platform === 'win32') {
     if (fs.existsSync(BUNDLED_PWSH)) return BUNDLED_PWSH;
@@ -81,7 +122,8 @@ function getShell() {
   return process.env.SHELL || '/bin/bash';
 }
 
-// ── Constants ──────────────────────────────────────────────────
+// ── Constants (PTY & CLI timeouts) ─────────────────────────────
+/** @type {number} Max wait time for PTY ready signal (ms) */
 const PTY_READY_TIMEOUT_MS = 20000;
 const PTY_READY_CHECK_INTERVAL_MS = 200;
 const PTY_QUIET_MS = 3000;
@@ -96,22 +138,58 @@ const TEST_RUN_TIMEOUT_MS = 30000;
 const TEST_COVERAGE_TIMEOUT_MS = 60000;
 
 // ── Path Safety ──────────────────────────────────────────────
+/**
+ * Resolves a session ID to a safe, validated absolute path inside SESSIONS_DIR.
+ * Prevents path traversal attacks.
+ *
+ * @param {string} sessionId - The session identifier
+ * @returns {string} Absolute path to the session directory
+ * @throws {Error} If the resolved path escapes SESSIONS_DIR
+ */
 function safeSessionPath(sessionId) {
   return _safeSessionPath(SESSIONS_DIR, sessionId);
 }
 
 // ── Helper Functions ─────────────────────────────────────────
 
+/**
+ * Safely sends an IPC message to the renderer process if the main window exists.
+ *
+ * @type {(channel: string, ...args: any[]) => void}
+ */
 const sendToRenderer = _createSendToRenderer(() => mainWindow);
 
+/**
+ * Waits until the Copilot TUI in the given PTY signals readiness.
+ *
+ * @param {number} tabId - Tab identifier
+ * @param {number} [timeoutMs=PTY_READY_TIMEOUT_MS] - Maximum wait time in ms
+ * @returns {Promise<void>} Resolves when ready, rejects on timeout
+ */
 function waitForTerminalReady(tabId, timeoutMs = PTY_READY_TIMEOUT_MS) {
   return waitForReady(terminalReady, tabId, { timeoutMs, checkIntervalMs: PTY_READY_CHECK_INTERVAL_MS });
 }
 
+/**
+ * Collects PTY output until quiet (no new data) or timeout.
+ *
+ * @param {Object} ptyProc - The PTY process instance
+ * @param {Object} [options]
+ * @param {number} [options.quietMs=PTY_QUIET_MS] - Quiet period before resolving (ms)
+ * @param {number} [options.timeoutMs=PTY_OUTPUT_TIMEOUT_MS] - Hard timeout (ms)
+ * @returns {Promise<string>} Collected output with ANSI stripped
+ */
 function collectPtyOutput(ptyProc, { quietMs = PTY_QUIET_MS, timeoutMs = PTY_OUTPUT_TIMEOUT_MS } = {}) {
   return _collectPtyOutput(ptyProc, stripAnsi, { quietMs, timeoutMs });
 }
 
+/**
+ * Cleans up all PTY-related state for a tab and notifies the renderer.
+ *
+ * @param {number} tabId - Tab identifier
+ * @param {number|null} exitCode - PTY exit code
+ * @param {Function} [extraCleanup] - Optional additional cleanup callback
+ */
 function cleanupPty(tabId, exitCode, extraCleanup) {
   _cleanupPty(
     [terminalProcesses, terminalBuffers, terminalReady, terminalBusy],
@@ -121,6 +199,10 @@ function cleanupPty(tabId, exitCode, extraCleanup) {
 }
 
 // ── Window ───────────────────────────────────────────────────
+/**
+ * Creates the main BrowserWindow with frameless design, preload script,
+ * and external-link interception. Registers cleanup on window close.
+ */
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -165,6 +247,22 @@ function createWindow() {
 }
 
 // ── Copilot Process (JSONL) ──────────────────────────────────
+/**
+ * Spawns a Copilot CLI child process for a given tab and streams JSONL events
+ * to the renderer. Kills any existing process for the same tab first.
+ *
+ * @param {number} tabId - Target tab identifier
+ * @param {string} prompt - User prompt to send to the CLI
+ * @param {Object} [options={}] - Additional CLI options
+ * @param {string[]} [options.deniedTools] - Tools to deny via --deny-tool
+ * @param {boolean} [options.allowAllPaths] - If true, adds --allow-all-paths
+ * @param {string[]} [options.addDirs] - Additional directories to grant access to
+ * @param {string} [options.sessionId] - Session ID for --resume
+ * @param {string} [options.model] - Model override
+ * @param {string} [options.effort] - Reasoning effort level
+ * @param {string} [options.cwd] - Working directory override
+ * @returns {number} The tab ID
+ */
 function spawnCopilot(tabId, prompt, options = {}) {
   // Kill existing process for this tab
   if (copilotProcesses.has(tabId)) {
@@ -264,6 +362,14 @@ function spawnCopilot(tabId, prompt, options = {}) {
 
 // ── IPC Handlers ─────────────────────────────────────────────
 
+/**
+ * @ipc copilot:send — Sends a prompt to Copilot CLI and starts streaming.
+ * @param {Electron.IpcMainInvokeEvent} _event
+ * @param {number} tabId - Tab identifier
+ * @param {string} prompt - User prompt
+ * @param {Object} [options] - Spawn options
+ * @returns {number|{success: false, error: string}} Tab ID or error
+ */
 // Copilot Chat
 ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
   if (typeof tabId !== 'number' || typeof prompt !== 'string') {
@@ -273,27 +379,33 @@ ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
   return tabId;
 });
 
+/** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
 ipcMain.handle('copilot:newTab', () => {
   return nextTabId++;
 });
 
+/** @ipc copilot:getCwd @returns {string} Current working directory */
 ipcMain.handle('copilot:getCwd', () => {
   return COPILOT_CWD;
 });
 
+/** @ipc copilot:openCwd — Opens CWD in the system file explorer. */
 ipcMain.handle('copilot:openCwd', () => {
   shell.openPath(COPILOT_CWD);
 });
 
+/** @ipc copilot:openLogDir — Opens the log directory in the file explorer. */
 ipcMain.handle('copilot:openLogDir', () => {
   shell.openPath(getLogDir());
 });
 
+/** @ipc log:write — Renderer-to-file log bridge (fire-and-forget). */
 // Renderer → file log bridge
 ipcMain.on('log:write', (_event, level, message) => {
   writeLog(level || 'info', [message]);
 });
 
+/** @ipc copilot:getVersions — Returns app and CLI version strings. @returns {Promise<{app: string, cli: string}>} */
 ipcMain.handle('copilot:getVersions', async () => {
   const appVersion = require('./package.json').version;
   let cliVersion = '?';
@@ -306,6 +418,11 @@ ipcMain.handle('copilot:getVersions', async () => {
   return { app: appVersion, cli: cliVersion };
 });
 
+/**
+ * @ipc copilot:getInstructions — Discovers all copilot-instructions.md files
+ * from configured paths, CWD, and home directory.
+ * @returns {Array<{path: string, name: string}>} Found instruction files
+ */
 ipcMain.handle('copilot:getInstructions', () => {
   const cwd = COPILOT_CWD;
   const config = readFolderConfig();
@@ -330,6 +447,7 @@ ipcMain.handle('copilot:getInstructions', () => {
   return found;
 });
 
+/** @ipc copilot:stop — Kills the Copilot CLI process for a tab (fire-and-forget). */
 ipcMain.on('copilot:stop', (_event, tabId) => {
   const p = copilotProcesses.get(tabId);
   if (p) p.kill();
@@ -337,16 +455,26 @@ ipcMain.on('copilot:stop', (_event, tabId) => {
 });
 
 // Process dropped files — read content or copy into Dateien folder
+/** @type {string} Target directory for dropped file copies */
 const FILES_DROP_DIR = path.join(COPILOT_CWD, 'Dateien');
+/** @type {Set<string>} File extensions treated as readable text */
 const TEXT_EXTENSIONS = new Set([
   '.txt', '.md', '.json', '.js', '.ts', '.jsx', '.tsx', '.css', '.html', '.xml',
   '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.sh', '.bat', '.ps1',
   '.py', '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb', '.php',
   '.sql', '.csv', '.log', '.gitignore', '.dockerfile', '.properties',
 ]);
+/** @type {Set<string>} Image file extensions for special handling */
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff']);
+/** @type {Set<string>} Video file extensions */
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.avi', '.mov', '.wmv']);
 
+/**
+ * @ipc files:processDropped — Processes a dropped file (reads text or copies to Dateien/).
+ * @param {Electron.IpcMainInvokeEvent} _event
+ * @param {string} filePath - Absolute path of the dropped file
+ * @returns {{type: string, content?: string, path?: string, message?: string}}
+ */
 ipcMain.handle('files:processDropped', (_event, filePath) => {
   try {
     return processDroppedFile(filePath, { cwd: COPILOT_CWD, filesDropDir: FILES_DROP_DIR, textExtensions: TEXT_EXTENSIONS, imageExtensions: IMAGE_EXTENSIONS });
@@ -357,19 +485,23 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
 
 
 
+/** @ipc sessions:readCheckpoints @param {string} sessionId @returns {Promise<Array>} */
 // Sessions
 ipcMain.handle('sessions:readCheckpoints', async (_event, sessionId) => {
   return readCheckpoints(safeSessionPath(sessionId));
 });
 
+/** @ipc sessions:readPlan @param {string} sessionId @returns {Promise<string|null>} */
 ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
   return readPlan(safeSessionPath(sessionId));
 });
 
+/** @ipc sessions:readRecentMessages @param {string} sessionId @returns {Promise<Array>} Last 5 messages */
 ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
   return readRecentMessages(safeSessionPath(sessionId), 5);
 });
 
+/** @ipc sessions:delete — Deletes a session directory recursively. @returns {Promise<boolean>} */
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
   try {
     const sessionPath = safeSessionPath(sessionId);
@@ -382,6 +514,11 @@ ipcMain.handle('sessions:delete', async (_event, sessionId) => {
   }
 });
 
+/**
+ * @ipc sessions:create — Creates a new session directory with workspace.yaml.
+ * @param {string} name - Display name for the session
+ * @returns {Promise<string>} New session UUID
+ */
 ipcMain.handle('sessions:create', async (_event, name) => {
   const id = require('crypto').randomUUID();
   const sessionDir = path.join(SESSIONS_DIR, id);
@@ -399,11 +536,18 @@ ipcMain.handle('sessions:create', async (_event, name) => {
   return id;
 });
 
+/** @ipc todos:list @returns {Promise<Array<Object>>} All todos for the session */
 // Todos (per session)
 ipcMain.handle('todos:list', async (_event, sessionId) => {
   return readTodos(safeSessionPath(sessionId));
 });
 
+/**
+ * @ipc todos:add — Adds a new todo to a session.
+ * @param {string} sessionId
+ * @param {Object} todo - Must contain `text` string property
+ * @returns {Promise<Array<Object>>} Updated todo list
+ */
 ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
   if (!todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
@@ -417,6 +561,13 @@ ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
   return todos;
 });
 
+/**
+ * @ipc todos:update — Merges updates into an existing todo.
+ * @param {string} sessionId
+ * @param {string} todoId
+ * @param {Object} updates - Fields to merge
+ * @returns {Promise<Array<Object>>} Updated todo list
+ */
 ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
   if (typeof todoId !== 'string' || typeof updates !== 'object') {
     return { success: false, error: 'Ungültige Argumente' };
@@ -429,6 +580,7 @@ ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
   return todos;
 });
 
+/** @ipc todos:delete — Removes a todo by ID. @returns {Promise<Array<Object>>} */
 ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
   let todos = readTodos(safeSessionPath(sessionId));
   todos = todos.filter(t => t.id !== todoId);
@@ -436,6 +588,13 @@ ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
   return todos;
 });
 
+/**
+ * @ipc todos:reorder — Reorders todos according to the given ID sequence.
+ * Todos not in the list are appended at the end (safety fallback).
+ * @param {string} sessionId
+ * @param {string[]} orderedIds
+ * @returns {Promise<Array<Object>>} Reordered todo list
+ */
 ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
   const todos = readTodos(safeSessionPath(sessionId));
   const byId = new Map(todos.map(t => [t.id, t]));
@@ -476,10 +635,21 @@ if (process.env.NODE_ENV !== 'test') {
   }
 }
 
+/**
+ * Reads user preferences from disk, merged with defaults.
+ *
+ * @returns {Object} Merged preferences object
+ */
 function readPreferences() {
   return _prefsManager.read();
 }
 
+/**
+ * Writes user preferences to disk with atomic backup.
+ *
+ * @param {Object} prefs - Preferences to persist
+ * @returns {boolean} True on success
+ */
 function writePreferences(prefs) {
   try {
     return _prefsManager.write(prefs);
@@ -489,24 +659,33 @@ function writePreferences(prefs) {
   }
 }
 
+/** @ipc preferences:read @returns {Promise<Object>} */
 ipcMain.handle('preferences:read', async () => {
   return readPreferences();
 });
 
+/** @ipc preferences:write @param {Object} prefs @returns {Promise<boolean>} */
 ipcMain.handle('preferences:write', async (_event, prefs) => {
   return writePreferences(prefs);
 });
 
+/** @ipc skills:list — Scans builtin and user skills. @returns {Promise<Array<Object>>} */
 // Skills
 ipcMain.handle('skills:list', async () => {
   return scanSkills();
 });
 
+/** @ipc agents:list — Scans .agent.md files. @returns {Promise<Array<Object>>} */
 // Agents
 ipcMain.handle('agents:list', async () => {
   return scanAgents();
 });
 
+/**
+ * @ipc skills:delete — Deletes a user skill directory.
+ * @param {string} dirName - Skill directory name (alphanumeric, dashes, underscores only)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
 // Skills: Delete
 ipcMain.handle('skills:delete', async (_event, dirName) => {
   if (!dirName || typeof dirName !== 'string') return { success: false, error: 'Ungültige ID' };
@@ -522,6 +701,11 @@ ipcMain.handle('skills:delete', async (_event, dirName) => {
   }
 });
 
+/**
+ * @ipc agents:delete — Deletes an agent .agent.md file.
+ * @param {string} fileSlug - Agent file slug (alphanumeric, dashes, underscores only)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
 // Agents: Delete
 ipcMain.handle('agents:delete', async (_event, fileSlug) => {
   if (!fileSlug || typeof fileSlug !== 'string') return { success: false, error: 'Ungültige ID' };
@@ -545,6 +729,7 @@ registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOUT_MS });
 const { registerPluginsIPC } = require('./src/ipc/plugins-ipc');
 registerPluginsIPC();
 
+/** @ipc folders:read — Returns all configured folder paths. @returns {Object} */
 // Folders
 ipcMain.handle('folders:read', () => {
   const config = readFolderConfig();
@@ -559,6 +744,10 @@ ipcMain.handle('folders:read', () => {
   };
 });
 
+/**
+ * @ipc folders:save — Persists new folder paths and updates runtime globals.
+ * @returns {Promise<{success: boolean, requiresRestart?: boolean, error?: string}>}
+ */
 ipcMain.handle('folders:save', async (_event, newConfig) => {
   try {
     writeFolderConfig(newConfig);
@@ -571,6 +760,7 @@ ipcMain.handle('folders:save', async (_event, newConfig) => {
   }
 });
 
+/** @ipc folders:browse — Opens a native directory picker dialog. @returns {Promise<string|null>} */
 ipcMain.handle('folders:browse', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory'],
@@ -579,6 +769,11 @@ ipcMain.handle('folders:browse', async () => {
   return result.filePaths[0];
 });
 
+/**
+ * @ipc folders:browse-file — Opens a native file picker dialog.
+ * @param {Array<{name: string, extensions: string[]}>} [filters] - File type filters
+ * @returns {Promise<string|null>} Selected file path or null
+ */
 ipcMain.handle('folders:browse-file', async (_event, filters) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
@@ -588,6 +783,7 @@ ipcMain.handle('folders:browse-file', async (_event, filters) => {
   return result.filePaths[0];
 });
 
+/** @ipc instructions:read — Reads the copilot-instructions.md file. @returns {Promise<{success: boolean, content: string, path: string}>} */
 ipcMain.handle('instructions:read', async () => {
   const config = readFolderConfig();
   const filePath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
@@ -600,6 +796,7 @@ ipcMain.handle('instructions:read', async () => {
   }
 });
 
+/** @ipc instructions:write — Writes content to the copilot-instructions.md file. @returns {Promise<{success: boolean, path: string}>} */
 ipcMain.handle('instructions:write', async (_event, content) => {
   const config = readFolderConfig();
   const filePath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
@@ -612,6 +809,7 @@ ipcMain.handle('instructions:write', async (_event, content) => {
 });
 
 // ── Onboarding ─────────────────────────────────────────────────
+/** @ipc onboarding:isFirstRun — Checks whether onboarding has been completed. @returns {Promise<boolean>} */
 ipcMain.handle('onboarding:isFirstRun', async () => {
   try {
     const config = readFolderConfig();
@@ -621,6 +819,7 @@ ipcMain.handle('onboarding:isFirstRun', async () => {
   }
 });
 
+/** @ipc onboarding:complete — Marks onboarding as done in folder config. @returns {Promise<{success: boolean}>} */
 ipcMain.handle('onboarding:complete', async () => {
   try {
     const config = readFolderConfig();
@@ -633,6 +832,7 @@ ipcMain.handle('onboarding:complete', async () => {
 });
 
 // ── Dev Tools ──────────────────────────────────────────────────
+/** @ipc dev:getOnboardingState — Returns current onboarding state for debugging. @returns {Promise<{onboardingComplete: boolean}>} */
 ipcMain.handle('dev:getOnboardingState', async () => {
   try {
     const config = readFolderConfig();
@@ -642,6 +842,12 @@ ipcMain.handle('dev:getOnboardingState', async () => {
   }
 });
 
+/**
+ * @ipc dev:setOnboardingComplete — Overrides onboarding flag.
+ * Resets tutorial flags when set to false.
+ * @param {boolean} value
+ * @returns {Promise<{success: boolean}>}
+ */
 ipcMain.handle('dev:setOnboardingComplete', async (_event, value) => {
   try {
     const config = readFolderConfig();
@@ -657,6 +863,7 @@ ipcMain.handle('dev:setOnboardingComplete', async (_event, value) => {
   }
 });
 
+/** @ipc tutorial:getFlags — Returns which tutorial hints have been shown. @returns {Promise<Object>} */
 ipcMain.handle('tutorial:getFlags', async () => {
   try {
     const config = readFolderConfig();
@@ -669,8 +876,15 @@ ipcMain.handle('tutorial:getFlags', async () => {
   }
 });
 
+/** @type {string[]} Allowed tutorial flag keys for validation */
 const TUTORIAL_FLAG_KEYS = ['tutorialSkillsShown', 'tutorialRenameShown'];
 
+/**
+ * @ipc tutorial:setFlag — Persists a tutorial flag.
+ * @param {string} key - One of TUTORIAL_FLAG_KEYS
+ * @param {boolean} value
+ * @returns {Promise<{success: boolean}>}
+ */
 ipcMain.handle('tutorial:setFlag', async (_event, key, value) => {
   try {
     if (!TUTORIAL_FLAG_KEYS.includes(key)) {
@@ -686,6 +900,12 @@ ipcMain.handle('tutorial:setFlag', async (_event, key, value) => {
 });
 
 // ── Starter Agent Templates ────────────────────────────────────
+/**
+ * Predefined agent/skill templates for common development roles.
+ * Used by the setup wizard to create starter .agent.md files.
+ *
+ * @type {Object<string, {agent: {filename: string, content: string}|null, skill: {filename: string, content: string}|null}>}
+ */
 const STARTER_TEMPLATES = {
   'code-review': {
     agent: {
@@ -732,13 +952,19 @@ const STARTER_TEMPLATES = {
 };
 
 // ── Setup (Folder creation) ────────────────────────────────────
+/**
+ * Folder definitions for the first-run setup wizard.
+ * @type {Array<{key: string, rel: string}>}
+ */
 const SETUP_FOLDERS = [
   { key: 'skills', rel: '.copilot/skills' },
   { key: 'agents', rel: '.copilot/agents' },
   { key: 'sessions', rel: '.copilot/session-state' },
 ];
+/** @type {{key: string, rel: string, isFile: boolean}} Instructions file setup definition */
 const SETUP_INSTRUCTIONS = { key: 'instructions', rel: '.copilot/copilot-instructions.md', isFile: true };
 
+/** @ipc setup:getFolderStatus — Checks which setup folders/files already exist. @returns {Object} */
 ipcMain.handle('setup:getFolderStatus', () => {
   const home = os.homedir();
   const result = {};
@@ -751,6 +977,10 @@ ipcMain.handle('setup:getFolderStatus', () => {
   return result;
 });
 
+/**
+ * @ipc setup:createFolders — Creates all missing setup folders and the default instructions file.
+ * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
+ */
 ipcMain.handle('setup:createFolders', async () => {
   const home = os.homedir();
   const created = [];
@@ -783,6 +1013,7 @@ ipcMain.handle('setup:createFolders', async () => {
   return { success: errors.length === 0, created, errors };
 });
 
+/** @ipc setup:getCategories — Returns available starter template categories for the wizard. */
 // ── Setup (Starter Agents & Skills) ────────────────────────────
 ipcMain.handle('setup:getCategories', () => {
   return [
@@ -795,6 +1026,11 @@ ipcMain.handle('setup:getCategories', () => {
   ];
 });
 
+/**
+ * @ipc setup:createStarterFiles — Creates agent/skill files from predefined templates.
+ * @param {string[]} categories - Category IDs to create
+ * @returns {Promise<{success: boolean, created: string[], skipped: string[], errors: string[]}>}
+ */
 ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
   const config = readFolderConfig();
   const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
@@ -846,6 +1082,13 @@ ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
 
 // ── Setup (Personalized Role → Skills & Agents) ───────────────
 
+/**
+ * Converts a display text into a URL/filename-safe kebab-case slug.
+ * Handles German umlauts (ä→ae, ö→oe, ü→ue, ß→ss).
+ *
+ * @param {string} text - Input text to slugify
+ * @returns {string} Kebab-case slug
+ */
 function slugify(text) {
   return text
     .toLowerCase()
@@ -855,6 +1098,14 @@ function slugify(text) {
     .replace(/^-|-$/g, '');
 }
 
+/**
+ * Builds a Copilot CLI prompt that instructs it to generate 3 role-specific
+ * SKILL.md files in the given directory.
+ *
+ * @param {string} role - User's professional role description
+ * @param {string} skillsDir - Absolute path where skill folders should be created
+ * @returns {string} Complete prompt string for Copilot CLI
+ */
 function buildSkillGenerationPrompt(role, skillsDir) {
   return `Ich arbeite als ${role}. Erstelle genau 3 passende Skills für meinen Aufgabenbereich.
 
@@ -883,6 +1134,15 @@ Anforderungen:
 - Antworte auf Deutsch`;
 }
 
+/**
+ * Spawns a Copilot CLI process to generate role-specific skills.
+ * Resolves with a list of created SKILL.md files after the process completes.
+ * Times out after 120 seconds.
+ *
+ * @param {string} role - User's role description
+ * @param {string} skillsDir - Target directory for generated skills
+ * @returns {Promise<{created: string[], errors: string[]}>}
+ */
 function runCopilotForSkills(role, skillsDir) {
   return new Promise((resolve, reject) => {
     const prompt = buildSkillGenerationPrompt(role, skillsDir);
@@ -937,11 +1197,27 @@ function runCopilotForSkills(role, skillsDir) {
   });
 }
 
+/**
+ * Builds a Copilot CLI prompt to generate .agent.md files for missing team roles.
+ *
+ * @param {string[]} missingRoles - List of missing team position names
+ * @param {string} agentsDir - Absolute path where agent files should be created
+ * @returns {string} Complete prompt string for Copilot CLI
+ */
 function buildAgentGenerationPrompt(missingRoles, agentsDir) {
   const roleList = missingRoles.map(r => `- ${r}`).join('\n');
   return `In meinem Team fehlen folgende Positionen:\n${roleList}\n\nErstelle für jede dieser Positionen einen passenden Agent als .agent.md-Datei in diesem Verzeichnis:\n${agentsDir}\n\nDas .agent.md-Format ist exakt wie folgt aufgebaut:\n\`\`\`\n---\nname: <kebab-case-name>\ndescription: <1-2 Sätze: Was tut dieser Agent, wann wird er genutzt?>\n---\n\n<Hauptinstruktionen: Ausführliche Beschreibung wie der Agent arbeitet, seine Stärken, typische Aufgaben und wie er kommuniziert. Mindestens 200 Wörter.>\n\`\`\`\n\nAnforderungen:\n- Erstelle genau ${missingRoles.length} Agent-Datei(en), eine pro fehlende Position\n- Der Dateiname ist <kebab-case-name>.agent.md\n- Jeder Agent hat eine klare Persönlichkeit und konkrete Arbeitsweise\n- Die Instruktionen beschreiben detailliert wie der Agent denkt, kommuniziert und arbeitet\n- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen\n- Antworte auf Deutsch`;
 }
 
+/**
+ * Spawns a Copilot CLI process to generate agent files for missing team positions.
+ * Resolves with a list of created .agent.md files after the process completes.
+ * Times out after 120 seconds.
+ *
+ * @param {string[]} missingRoles - Missing team role names
+ * @param {string} agentsDir - Target directory for generated agents
+ * @returns {Promise<{created: string[], errors: string[]}>}
+ */
 function runCopilotForAgents(missingRoles, agentsDir) {
   return new Promise((resolve, reject) => {
     const prompt = buildAgentGenerationPrompt(missingRoles, agentsDir);
@@ -992,6 +1268,14 @@ function runCopilotForAgents(missingRoles, agentsDir) {
   });
 }
 
+/**
+ * @ipc setup:generatePersonalized — Generates personalized skills and agents
+ * by spawning Copilot CLI processes. Blocking; may take up to 2×120s.
+ * @param {Object} data
+ * @param {string} data.role - User's role
+ * @param {string[]} [data.missingRoles] - Missing team positions
+ * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
+ */
 ipcMain.handle('setup:generatePersonalized', async (_event, { role, missingRoles }) => {
   const config = readFolderConfig();
   const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
@@ -1024,6 +1308,15 @@ ipcMain.handle('setup:generatePersonalized', async (_event, { role, missingRoles
   return { success: errors.length === 0, created, errors };
 });
 
+/**
+ * @ipc setup:startPersonalizedSessions — Non-blocking variant: returns the prompts
+ * for skill/agent generation so the renderer can start them independently.
+ * Also marks onboarding as complete.
+ * @param {Object} data
+ * @param {string} data.role
+ * @param {string[]} [data.missingRoles]
+ * @returns {Promise<{skillPrompt: string, agentPrompt: string|null}>}
+ */
 ipcMain.handle('setup:startPersonalizedSessions', async (_event, { role, missingRoles }) => {
   const config = readFolderConfig();
   const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
@@ -1052,6 +1345,12 @@ ipcMain.handle('setup:startPersonalizedSessions', async (_event, { role, missing
 
 // ── Auth (Copilot CLI) ─────────────────────────────────────────
 
+/**
+ * Reads and parses ~/.copilot/config.json, stripping JS-style comments.
+ * Returns an empty object if the file doesn't exist or parsing fails.
+ *
+ * @returns {Object} Parsed Copilot CLI configuration
+ */
 function readCopilotConfig() {
   const configPath = path.join(os.homedir(), '.copilot', 'config.json');
   try {
@@ -1066,6 +1365,10 @@ function readCopilotConfig() {
   }
 }
 
+/**
+ * @ipc auth:check — Checks if a user is authenticated via ~/.copilot/config.json.
+ * @returns {Promise<{success: boolean, authenticated: boolean, user: string|null, host?: string}>}
+ */
 ipcMain.handle('auth:check', async () => {
   console.log('[auth:check] Reading ~/.copilot/config.json');
   const config = readCopilotConfig();
@@ -1078,6 +1381,10 @@ ipcMain.handle('auth:check', async () => {
   return { success: true, authenticated: false, user: null };
 });
 
+/**
+ * @ipc auth:login — Opens a detached PowerShell window running `copilot login`.
+ * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: null}>}
+ */
 ipcMain.handle('auth:login', async () => {
   console.log('[auth:login] Starting copilot login in new terminal window');
   const psScript = [
@@ -1107,11 +1414,26 @@ ipcMain.on('window:close', () => mainWindow?.close());
 
 // ── Skill Icon Mapping ─────────────────────────────────────---
 // SKILL_ICON_MAP, builtinSkillIcon, userSkillIcon imported from ./src/utils
+
 // ── Skills Scanner ────────────────────────────────────────────
+/**
+ * Scans a directory for SKILL.md files and parses their YAML frontmatter.
+ *
+ * @param {string} dir - Absolute path to the skills directory
+ * @param {'builtin'|'user'} source - Whether these are builtin or user skills
+ * @param {(name: string) => string} iconFn - Icon resolver function
+ * @returns {Array<Object>} Parsed skill metadata
+ */
 function scanSkillDirectory(dir, source, iconFn) {
   return _scanSkillDirectory(dir, source, iconFn, yaml.parse);
 }
 
+/**
+ * Scans and returns all skills from both the builtin Copilot CLI package
+ * and the user's ~/.copilot/skills/ directory.
+ *
+ * @returns {Array<Object>} Combined list of builtin and user skills
+ */
 function scanSkills() {
   const skills = [];
 
@@ -1146,6 +1468,11 @@ function scanSkills() {
 }
 
 // ── Agents Scanner ────────────────────────────────────────────
+/**
+ * Scans the agents directory for .agent.md files and parses their frontmatter.
+ *
+ * @returns {Array<Object>} Parsed agent metadata
+ */
 function scanAgents() {
   const config = readFolderConfig();
   const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');

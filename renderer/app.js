@@ -4,6 +4,12 @@ const _rendererOrigWarn = console.warn;
 const _rendererOrigError = console.error;
 window._rendererLogs = [];
 
+/**
+ * Redirect renderer console.log/warn/error to both the original console
+ * and the main-process file logger via the copilot bridge.
+ * @param {'info'|'warn'|'error'} level
+ * @param {Array} args - Console arguments.
+ */
 function _rendererLog(level, args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   window._rendererLogs.push({ level, message: '[renderer] ' + msg, timestamp: Date.now() });
@@ -19,30 +25,50 @@ console.error = (...args) => { _rendererOrigError(...args); _rendererLog('error'
 //   tab.terminal = { instance, fitAddon, bodyEl, alive }
 
 // ── Skills Definition ────────────────────────────────────────
-let skills = []; // dynamically loaded from main process
+/** @type {Array<{id: string, name: string, icon: string, description: string, source: string, dirName?: string}>} Skill definitions loaded from main process. */
+let skills = [];
 
 // ── Agents Definition ────────────────────────────────────────
-let agents = []; // dynamically loaded from main process
+/** @type {Array<{id: string, name: string, icon: string, description: string, fileSlug?: string}>} Agent definitions loaded from main process. */
+let agents = [];
 
 // ── Plugins State ────────────────────────────────────────────
+/** @type {Array<{success: boolean, marketplace: string, name: string, plugins: Array, error?: string}>} Marketplace browse results. */
 let marketplaces = [];
+/** @type {Array<{name: string, version: string, updateAvailable?: boolean}>} Currently installed plugins. */
 let installedPlugins = [];
 
 // ── State ────────────────────────────────────────────────────
+/** @type {Array<{id: string, name: string, lastUsed: string}>} Named sessions for the sidebar, sorted by last-used. */
 let sessions = [];
+/** @type {string|null} Session ID of the currently active tab. */
 let activeSessionId = null;
+/** @type {Set<string>} IDs of currently enabled skills (persisted to preferences). */
 let activeSkills = new Set();
+/** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
 let activeAgents = new Set();
-let userHomeDir = ''; // loaded from main process at startup
+/** @type {string} User home directory path, loaded from main process at startup. */
+let userHomeDir = '';
+/** @type {string[]} Chat input history for arrow-key recall. */
 const inputHistory = [];
+/** @type {number} Current position in the input history (-1 = not browsing). */
 let historyIndex = -1;
+/** @type {string} Saved input text before browsing history. */
 let historySavedInput = '';
 
 // Multi-Tab State
-const tabs = new Map(); // tabId → { streamEl, label, status }
-const pendingToolCalls = new Map(); // toolCallId → {toolName, arguments}
+/**
+ * Map of all open chat tabs. Each entry holds the tab's DOM elements, session
+ * state, processing flags, terminal reference, and context metadata.
+ * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, context: Object}>}
+ */
+const tabs = new Map();
+/** @type {Map<string, {toolName: string, arguments: Object}>} Pending tool calls awaiting completion, keyed by toolCallId. */
+const pendingToolCalls = new Map();
+/** @type {string|null} Tab ID of the currently visible/active tab. */
 let activeTabId = null;
-let _pendingOnboardingTabs = new Set(); // tabIds die auf 'done' warten
+/** @type {Set<string>} Tab IDs waiting for onboarding generation to finish. */
+let _pendingOnboardingTabs = new Set();
 
 // ── UI Constants → modules/utils.js ──────────────────────────
 
@@ -81,8 +107,13 @@ function initAutoScroll(streamEl) {
 const THEMES = ['light', 'dark', 'gebit'];
 
 // ── Preferences (file-based persistence) ────────────────────
+/** @type {Object<string, *>} In-memory cache of user preferences (file-backed). */
 let _prefs = {};
 
+/**
+ * Load all user preferences from the main process file store into memory.
+ * @returns {Promise<void>}
+ */
 async function loadPreferences() {
   try {
     _prefs = await copilot.preferences.read() || {};
@@ -92,10 +123,21 @@ async function loadPreferences() {
   }
 }
 
+/**
+ * Read a single preference value from the in-memory cache.
+ * @param {string} key - Preference key.
+ * @param {*} defaultValue - Fallback if the key is not set.
+ * @returns {*}
+ */
 function getPref(key, defaultValue) {
   return _prefs[key] !== undefined ? _prefs[key] : defaultValue;
 }
 
+/**
+ * Write a preference value and persist asynchronously to disk.
+ * @param {string} key - Preference key.
+ * @param {*} value - Value to store.
+ */
 function setPref(key, value) {
   _prefs[key] = value;
   copilot.preferences.write(_prefs).catch(e => {
@@ -113,6 +155,10 @@ function applyTheme(theme) {
 }
 
 // ── Session Restore ─────────────────────────────────────────
+/**
+ * Persist the list of currently open tabs (with session IDs) to preferences
+ * so they can be restored on next launch.
+ */
 function saveOpenTabs() {
   const openTabs = [];
   tabs.forEach((tab, id) => {
@@ -125,6 +171,11 @@ function saveOpenTabs() {
   setPref('openTabs', openTabs);
 }
 
+/**
+ * Restore previously open tabs from preferences. Recreates tabs, loads
+ * session state, and spawns background terminals.
+ * @returns {Promise<boolean>} True if at least one tab was restored.
+ */
 async function restoreOpenTabs() {
   const openTabs = getPref('openTabs', []);
   if (!openTabs.length) return false;
@@ -169,10 +220,19 @@ function saveSetting(key, value) {
 }
 
 // ── Named Sessions (persistent, CLI-sicher) ──────────────────
+/**
+ * Retrieve the named-sessions map from preferences.
+ * @returns {Object<string, {name: string, deniedTools: string[], lastUsed: string}>}
+ */
 function getNamedSessions() {
   return getPref('namedSessions', {});
 }
 
+/**
+ * Get the user-assigned display name for a session.
+ * @param {string} sessionId
+ * @returns {string|null}
+ */
 function getSessionName(sessionId) {
   const entry = getNamedSessions()[sessionId];
   return entry?.name || null;
@@ -182,6 +242,12 @@ function getSessionEntry(sessionId) {
   return getNamedSessions()[sessionId] || null;
 }
 
+/**
+ * Set or update the display name for a session in the named-sessions map.
+ * Creates the entry if it does not yet exist.
+ * @param {string} sessionId
+ * @param {string} name - Human-readable session name.
+ */
 function setSessionName(sessionId, name) {
   const all = getNamedSessions();
   if (!all[sessionId]) {
@@ -198,6 +264,10 @@ function removeSessionName(sessionId) {
   setPref('namedSessions', all);
 }
 
+/**
+ * Update the lastUsed timestamp of a named session (for sorting).
+ * @param {string} sessionId
+ */
 function touchSession(sessionId) {
   const all = getNamedSessions();
   if (all[sessionId]) {
@@ -206,11 +276,21 @@ function touchSession(sessionId) {
   }
 }
 
+/**
+ * Get the list of denied tool names for a specific session.
+ * @param {string} sessionId
+ * @returns {string[]}
+ */
 function getSessionDeniedTools(sessionId) {
   const entry = getNamedSessions()[sessionId];
   return entry?.deniedTools || [];
 }
 
+/**
+ * Persist the denied-tools list for a specific session.
+ * @param {string} sessionId
+ * @param {string[]} tools - Tool names to deny.
+ */
 function saveSessionDeniedTools(sessionId, tools) {
   const all = getNamedSessions();
   if (all[sessionId]) {
@@ -231,7 +311,11 @@ function getExtraDirs() {
   return getSettings().extraDirs || [];
 }
 
-// Merges user-configured extraDirs with auto-derived paths from folder settings
+/**
+ * Merge user-configured extra directories with auto-derived paths from
+ * folder settings (skills dir, agents dir, instructions file directory).
+ * @returns {string[]} Deduplicated array of directory paths.
+ */
 let _cachedFolders = null;
 function getEffectiveExtraDirs() {
   const userDirs = getExtraDirs();
@@ -246,6 +330,10 @@ function getEffectiveExtraDirs() {
   return [...new Set([...userDirs, ...autoDirs])];
 }
 
+/**
+ * Add a tool to the global denied-tools list (wraps in shell() if needed).
+ * @param {string} toolName - Tool or shell command name to deny.
+ */
 function addDeniedTool(toolName) {
   const wrapped = toolName.startsWith('shell(') ? toolName : `shell(${toolName})`;
   const tools = getDeniedTools();
@@ -310,6 +398,11 @@ function applyChatFontSize(size) {
 }
 
 // ── Developer Mode ──────────────────────────────────────────
+/**
+ * Show or hide developer-mode UI elements (test runner, dev console,
+ * admin tools section).
+ * @param {boolean} enabled
+ */
 function applyDevMode(enabled) {
   const btnTests = document.getElementById('btnTests');
   const btnDevConsole = document.getElementById('btnDevConsole');
@@ -325,7 +418,12 @@ function applyDevMode(enabled) {
 }
 
 // ── Notification Sound ──────────────────────────────────────
+/** @type {AudioContext|null} Shared audio context for notification sounds. */
 let _audioCtx = null;
+
+/**
+ * Play a short sine-wave notification beep (respects sound-enabled setting).
+ */
 function playNotificationSound() {
   if (getSettings().soundEnabled === false) return;
   try {
@@ -346,11 +444,21 @@ function playNotificationSound() {
 }
 
 // ── Context Color Helper ─────────────────────────────────────
+/**
+ * Return a CSS color string for a context-usage percentage (red/orange/green).
+ * @param {number} percent - Context usage 0–100.
+ * @returns {string} CSS color hex code.
+ */
 function contextColor(percent) {
   return percent > 80 ? '#f38ba8' : percent > 60 ? '#fab387' : '#a6e3a1';
 }
 
 // ── Context Category HTML Builder ────────────────────────────
+/**
+ * Build an HTML snippet showing token-usage bars for each context category.
+ * @param {Array<{name: string, tokens: number, percent: number}>} categories
+ * @returns {string} HTML string (must be sanitized before insertion).
+ */
 function buildContextCategoryHtml(categories) {
   if (!categories || !categories.length) return '';
   let html = '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
@@ -374,6 +482,12 @@ function stripShellWrapper(name) {
   return m ? m[1] : name;
 }
 
+/**
+ * Render a list of removable tag elements into a container.
+ * @param {string} containerId - DOM id of the container element.
+ * @param {string[]} items - Tag label strings.
+ * @param {string} removeFnName - Global function name called on remove click.
+ */
 function renderTagList(containerId, items, removeFnName) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -383,6 +497,13 @@ function renderTagList(containerId, items, removeFnName) {
 }
 
 // ── Generic Tag Input Init ───────────────────────────────────
+/**
+ * Wire up a button + input pair so that clicking the button (or pressing
+ * Enter in the input) calls the given add-function with the trimmed value.
+ * @param {string} btnId - DOM id of the add button.
+ * @param {string} inputId - DOM id of the text input.
+ * @param {function(string): void} addFn - Callback receiving the input value.
+ */
 function initTagInput(btnId, inputId, addFn) {
   const btn = document.getElementById(btnId);
   const input = document.getElementById(inputId);
@@ -400,6 +521,11 @@ function initTagInput(btnId, inputId, addFn) {
 }
 
 // ── Toast Notifications ─────────────────────────────────────
+/**
+ * Display a toast notification that auto-dismisses after a timeout.
+ * @param {string} message - Text to display.
+ * @param {'info'|'success'|'warning'|'error'} [type='info'] - Visual style.
+ */
 function showNotification(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast toast--${type}`;
@@ -414,6 +540,12 @@ function showNotification(message, type = 'info') {
 }
 
 // ── Tab Management ──────────────────────────────────────────
+/**
+ * Create a new chat tab, register it in the tabs map, and switch to it.
+ * Also allocates a stream-output element and a status-line element.
+ * @param {string} [label='🤖 Copilot'] - Display label for the tab.
+ * @returns {Promise<string>} The new tab's unique ID.
+ */
 async function createTab(label) {
   const tabLabel = label || '🤖 Copilot';
   const tabId = await copilot.chat.newTab();
@@ -453,6 +585,11 @@ async function createTab(label) {
   return tabId;
 }
 
+/**
+ * Activate a tab: show its stream output, terminal panel, load its
+ * session todos, and update the context/statusbar display.
+ * @param {string} tabId - ID of the tab to activate.
+ */
 function switchTab(tabId) {
   // If plugins view is active, switch back to chat view
   switchToChatView();
@@ -510,6 +647,11 @@ function switchTab(tabId) {
   document.getElementById('chatInput')?.focus();
 }
 
+/**
+ * Close a tab: stop its chat process, dispose its terminal, remove DOM
+ * elements, and switch to the next available tab (or create a new one).
+ * @param {string} tabId - ID of the tab to close.
+ */
 function closeTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -537,6 +679,11 @@ function closeTab(tabId) {
   renderSessions(filterSessions());
 }
 
+/**
+ * Re-render the tab bar DOM from the current tabs map.
+ * Each tab gets a label, optional status badge, edit/close buttons,
+ * and click/double-click handlers.
+ */
 function renderTabs() {
   const bar = document.getElementById('tabBar');
   const addBtn = document.getElementById('btnAddTab');
@@ -605,6 +752,14 @@ function renderTabs() {
   saveOpenTabs();
 }
 
+/**
+ * Replace the tab label with an inline input field for renaming.
+ * On commit, updates the tab label, persists the session name, and
+ * optionally creates a new CLI session if none exists yet.
+ * @param {string} tabId - Tab to rename.
+ * @param {HTMLElement} tabEl - The tab's DOM element.
+ * @param {HTMLElement} labelSpan - The span containing the label text.
+ */
 function startTabRename(tabId, tabEl, labelSpan) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -667,6 +822,12 @@ function startTabRename(tabId, tabEl, labelSpan) {
 
 // ── Tab Status ───────────────────────────────────────────────
 // Status: 'idle' | 'working' | 'question' | 'done' | 'error'
+/**
+ * Update the visual status badge of a tab and trigger tutorial popups
+ * when all pending onboarding tabs reach 'done'.
+ * @param {string} tabId
+ * @param {'idle'|'working'|'question'|'done'|'error'} status
+ */
 function setTabStatus(tabId, status) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -686,6 +847,12 @@ const INACTIVITY_TIMEOUT_MS = 180_000;
 const INACTIVITY_CHECK_INTERVAL_MS = 10_000;
 const UNLOCK_BTN_DELAY_MS = 30_000;
 
+/**
+ * Start monitoring a tab for inactivity while it is processing.
+ * Shows an unlock button after UNLOCK_BTN_DELAY_MS and auto-unlocks
+ * the tab after INACTIVITY_TIMEOUT_MS of no activity.
+ * @param {string} tabId
+ */
 function startInactivityMonitor(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -712,6 +879,10 @@ function startInactivityMonitor(tabId) {
   }, UNLOCK_BTN_DELAY_MS);
 }
 
+/**
+ * Stop the inactivity monitor and hide the unlock button for a tab.
+ * @param {string} tabId
+ */
 function stopInactivityMonitor(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -720,6 +891,12 @@ function stopInactivityMonitor(tabId) {
   hideUnlockButton(tabId);
 }
 
+/**
+ * Force-unlock a stuck/inactive tab by stopping the chat process and
+ * resetting all processing state. Shows an info banner in the stream.
+ * @param {string} tabId
+ * @param {boolean} isAutomatic - True if triggered by the inactivity timer.
+ */
 function forceUnlockTab(tabId, isAutomatic) {
   const tab = tabs.get(tabId);
   if (!tab || !tab.isProcessing) return;
@@ -764,6 +941,11 @@ function hideUnlockButton(tabId) {
 }
 
 // ── Send Message ─────────────────────────────────────────────
+/**
+ * Send the current chat input to the Copilot CLI backend.
+ * Handles slash-command detection, input history, skill/agent prefix
+ * injection, denied-tools merging, and UI state updates.
+ */
 function sendMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
@@ -885,6 +1067,11 @@ function sendMessage() {
 }
 
 // ── Copilot Event Processing (JSONL) ─────────────────────────
+/**
+ * Register IPC event handlers for all Copilot CLI JSONL events.
+ * Handles reasoning deltas, streaming message text, tool execution,
+ * session setup events, errors, and process completion.
+ */
 function initCopilotIPC() {
   copilot.chat.onEvent((tabId, event) => {
     const tab = tabs.get(tabId);
@@ -1206,6 +1393,10 @@ function getAvailableModels() {
   return DEFAULT_MODELS;
 }
 
+/**
+ * Initialize the model switcher dropdown on the statusbar. Clicking the
+ * model segment opens a dropdown of available models for quick switching.
+ */
 function initModelSwitcher() {
   const sbModel = document.getElementById('sbModel');
   if (!sbModel) return;
@@ -1257,6 +1448,12 @@ function initModelSwitcher() {
   });
 }
 
+/**
+ * Switch the active tab's model by sending a `/model <id>` slash command.
+ * Optimistically updates the UI and rolls back on failure.
+ * @param {{id: string, label: string}} model - The model to switch to.
+ * @returns {Promise<void>}
+ */
 async function switchModel(model) {
   // Close dropdown
   const dropdown = document.querySelector('.model-dropdown');
@@ -1290,6 +1487,10 @@ function openCwd() {
   copilot.chat.openCwd();
 }
 
+/**
+ * Export the active tab's chat history as a Markdown file download.
+ * Includes user messages, assistant responses, and tool call summaries.
+ */
 function exportChat() {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
@@ -1328,6 +1529,11 @@ function exportChat() {
 
 // ── Sessions ─────────────────────────────────────────────────
 
+/**
+ * Load all named sessions from preferences and re-render the sidebar list.
+ * Sessions are sorted by lastUsed timestamp (most recent first).
+ * @returns {Promise<void>}
+ */
 async function loadSessions() {
   const all = getNamedSessions();
   sessions = Object.entries(all)
@@ -1337,6 +1543,11 @@ async function loadSessions() {
   renderSessions(filterSessions());
 }
 
+/**
+ * Render the session list in the sidebar. Shows session cards with
+ * resume/delete actions and supports direct resume by session ID.
+ * @param {Array<{id: string, name: string, lastUsed: string}>} list - Filtered session list.
+ */
 function renderSessions(list) {
   const container = document.getElementById('sessionList');
   const query = document.getElementById('sessionSearch').value.trim();
@@ -1392,6 +1603,13 @@ function renderSessions(list) {
   container.innerHTML = html;
 }
 
+/**
+ * Resume (or switch to) a named session. If a tab for this session is
+ * already open, switches to it. Otherwise creates a new tab, restores
+ * session state, spawns the background terminal, and displays context.
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
 async function resumeSession(sessionId) {
   // Check if tab with this session is already open → just switch to it
   for (const [tabId, tab] of tabs) {
@@ -1431,6 +1649,12 @@ async function resumeSession(sessionId) {
   await displaySessionContext(tab, sessionId);
 }
 
+/**
+ * Resume a session by raw ID (e.g. pasted from CLI output). Creates a
+ * placeholder named-session entry and delegates to resumeSession().
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
 async function resumeSessionById(sessionId) {
   // Resume a session by raw ID — add to namedSessions with short ID as placeholder name
   const placeholderName = sessionId.substring(0, 12);
@@ -1442,6 +1666,13 @@ async function resumeSessionById(sessionId) {
   renderSessions(filterSessions());
 }
 
+/**
+ * Display session context (recent messages) as history bubbles in the
+ * tab's stream output. Called when resuming or restoring a session.
+ * @param {Object} tab - Tab object from the tabs map.
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ */
 async function displaySessionContext(tab, sessionId) {
   if (!sessionId) return;
 
@@ -1486,6 +1717,11 @@ async function displaySessionContext(tab, sessionId) {
 // ── Delete Session ────────────────────────────────────────────
 let pendingDeleteId = null;
 
+/**
+ * Show a confirmation dialog for session deletion.
+ * @param {string} sessionId
+ * @param {string} title - Session display name for the confirmation message.
+ */
 function confirmDeleteSession(sessionId, title) {
   pendingDeleteId = sessionId;
   document.getElementById('deleteMessage').textContent =
@@ -1493,6 +1729,11 @@ function confirmDeleteSession(sessionId, title) {
   document.getElementById('deleteOverlay').classList.add('overlay--visible');
 }
 
+/**
+ * Execute the pending session deletion (confirmed via dialog).
+ * Removes the session from both the CLI backend and named-sessions prefs.
+ * @returns {Promise<void>}
+ */
 async function executeDeleteSession() {
   if (!pendingDeleteId) return;
   await copilot.sessions.delete(pendingDeleteId);
@@ -1508,6 +1749,10 @@ function cancelDeleteSession() {
 }
 
 // ── Skills ───────────────────────────────────────────────────
+/**
+ * Render the skills list in the sidebar. Each skill card shows an icon,
+ * name, active toggle, and an optional delete button for user-created skills.
+ */
 function renderSkills() {
   const container = document.getElementById('skillList');
   container.innerHTML = skills.map(s => {
@@ -1529,6 +1774,10 @@ function renderSkills() {
   }).join('');
 }
 
+/**
+ * Toggle a skill's active state and persist the change.
+ * @param {string} skillId
+ */
 function toggleSkill(skillId) {
   if (activeSkills.has(skillId)) activeSkills.delete(skillId);
   else activeSkills.add(skillId);
@@ -1536,6 +1785,11 @@ function toggleSkill(skillId) {
   renderSkills();
 }
 
+/**
+ * Reload skills from the main process and re-render the sidebar list.
+ * Shows a spinning indicator on the reload button during the operation.
+ * @returns {Promise<void>}
+ */
 async function reloadSkills() {
   const btn = document.querySelector('[aria-label="Skills neu laden"]');
   if (btn) btn.classList.add('sidebar__reload-btn--spinning');
@@ -1552,6 +1806,10 @@ async function reloadSkills() {
 }
 
 // ── Agents ───────────────────────────────────────────────────
+/**
+ * Render the agents list in the sidebar. Each agent card shows an icon,
+ * name, active toggle, and an optional delete button.
+ */
 function renderAgents() {
   const container = document.getElementById('agentList');
   container.innerHTML = agents.map(a => {
@@ -1573,6 +1831,10 @@ function renderAgents() {
   }).join('');
 }
 
+/**
+ * Toggle an agent's active state and persist the change.
+ * @param {string} agentId
+ */
 function toggleAgent(agentId) {
   if (activeAgents.has(agentId)) activeAgents.delete(agentId);
   else activeAgents.add(agentId);
@@ -1580,6 +1842,10 @@ function toggleAgent(agentId) {
   renderAgents();
 }
 
+/**
+ * Reload agents from the main process and re-render the sidebar list.
+ * @returns {Promise<void>}
+ */
 async function reloadAgents() {
   const btn = document.querySelector('[aria-label="Agents neu laden"]');
   if (btn) btn.classList.add('sidebar__reload-btn--spinning');
@@ -1596,6 +1862,11 @@ async function reloadAgents() {
 }
 
 // ── Skill/Agent Delete Confirmation ──────────────────────────
+/**
+ * Show an inline confirmation dialog to delete a user-created skill.
+ * @param {string} dirName - Skill directory name on disk.
+ * @param {string} skillName - Human-readable skill name for display.
+ */
 function confirmDeleteSkill(dirName, skillName) {
   document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
 
@@ -1623,6 +1894,11 @@ function confirmDeleteSkill(dirName, skillName) {
   document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());
 }
 
+/**
+ * Show an inline confirmation dialog to delete a user-created agent.
+ * @param {string} fileSlug - Agent file slug on disk.
+ * @param {string} agentName - Human-readable agent name for display.
+ */
 function confirmDeleteAgent(fileSlug, agentName) {
   document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
 
@@ -1651,6 +1927,11 @@ function confirmDeleteAgent(fileSlug, agentName) {
 }
 
 // ── Plugins ─────────────────────────────────────────────────
+/**
+ * Load installed plugins and all configured marketplace catalogues.
+ * Fetches plugin lists in parallel, updates counts, and re-renders.
+ * @returns {Promise<void>}
+ */
 async function loadPlugins() {
   console.log('[plugins] Lade Plugin-Liste und Marketplaces…');
   try {
@@ -1703,6 +1984,11 @@ async function loadPlugins() {
   renderPlugins();
 }
 
+/**
+ * Determine the installation status of a plugin by name.
+ * @param {string} pluginName
+ * @returns {'installed'|'update-available'|'not-installed'}
+ */
 function getPluginStatus(pluginName) {
   const installed = installedPlugins.find(p => p.name.toLowerCase() === pluginName.toLowerCase());
   if (!installed) return 'not-installed';
@@ -1714,6 +2000,10 @@ function getInstalledVersion(pluginName) {
   return installed ? installed.version : '';
 }
 
+/**
+ * Render the full plugins view: installed plugins section followed by
+ * marketplace sections with search filtering and sidebar navigation.
+ */
 function renderPlugins() {
   const container = document.getElementById('pluginList');
   const sidebar = document.getElementById('pluginSidebar');
@@ -1822,6 +2112,13 @@ function renderPlugins() {
   if (sidebar) sidebar.innerHTML = sidebarHtml;
 }
 
+/**
+ * Render a single plugin tile card with status badge and action buttons.
+ * @param {{name: string, version?: string, description?: string, author?: string}} plugin
+ * @param {'installed'|'update-available'|'not-installed'} status
+ * @param {string} target - Install target string (name@marketplace).
+ * @returns {string} HTML string for the plugin tile.
+ */
 function renderPluginTile(plugin, status, target) {
   const version = getInstalledVersion(plugin.name) || plugin.version || '';
   const desc = plugin.description || '';
@@ -1919,6 +2216,9 @@ window.updatePlugin = async function(name) {
   await loadPlugins();
 };
 
+/**
+ * Show an inline dialog to add a new marketplace URL or install a plugin.
+ */
 function showAddPluginDialog() {
   const container = document.getElementById('pluginList');
   if (!container) return;
@@ -2031,6 +2331,9 @@ window.removeMarketplace = async function(name) {
   loadPlugins().catch(e => console.error('[plugins] loadPlugins nach removeMarketplace:', e));
 };
 
+/**
+ * Switch the main content area from chat to the plugins marketplace view.
+ */
 window.switchToPluginsView = function() {
   window.pluginsViewActive = true;
   const pluginsView = document.getElementById('pluginsView');
@@ -2058,6 +2361,9 @@ window.switchToPluginsView = function() {
   renderPlugins();
 };
 
+/**
+ * Switch the main content area back from plugins to chat view.
+ */
 function switchToChatView() {
   if (!window.pluginsViewActive) return;
   window.pluginsViewActive = false;
@@ -2082,6 +2388,10 @@ function switchToChatView() {
 }
 
 // ── Sidebar Resize ───────────────────────────────────────────
+/**
+ * Initialize the sidebar resize handle with drag behavior.
+ * Restores previously saved width from preferences.
+ */
 function initResize() {
   const handle = document.getElementById('resizeHandle');
   const sidebar = document.getElementById('sidebar');
@@ -2114,6 +2424,11 @@ function initResize() {
 }
 
 // ── Search & Filter ──────────────────────────────────────────
+/**
+ * Filter the sessions list by the current search input value.
+ * Matches against session name and ID (case-insensitive).
+ * @returns {Array<{id: string, name: string, lastUsed: string}>}
+ */
 function filterSessions() {
   const query = document.getElementById('sessionSearch').value.trim();
   const lower = query.toLowerCase();
@@ -2124,6 +2439,11 @@ function filterSessions() {
   );
 }
 
+/**
+ * Check whether a string looks like a raw session ID (8+ alphanum chars).
+ * @param {string} str
+ * @returns {boolean}
+ */
 function isSessionIdLike(str) {
   // Session IDs are typically UUIDs or long hex/alphanum strings (8+ chars)
   return str.length >= 8 && /^[a-z0-9_-]+$/i.test(str);
@@ -2172,6 +2492,11 @@ function formatDate(iso) {
 
 // ── Init ─────────────────────────────────────────────────────
 
+/**
+ * Initialize the session statusbar: load home directory, current working
+ * directory, and app/CLI version into their respective statusbar segments.
+ * @returns {Promise<void>}
+ */
 async function initStatusbar() {
   try {
     const folders = await copilot.folders.read();
@@ -2196,6 +2521,11 @@ async function initStatusbar() {
   } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
 }
 
+/**
+ * Load all application data on startup: skills, agents, sessions, images,
+ * and plugins. Restores persisted active selections from settings.
+ * @returns {Promise<void>}
+ */
 async function initDataLoad() {
   try {
     skills = await copilot.skills.list() || [];
@@ -2224,6 +2554,10 @@ async function initDataLoad() {
   loadPlugins().catch(e => console.warn('[plugins] Hintergrundladen fehlgeschlagen:', e.message));
 }
 
+/**
+ * Initialize the chat input textarea: send on Enter, arrow-key history
+ * navigation, auto-resize on input, and the add-tab button.
+ */
 function initChatInput() {
   const chatInput = document.getElementById('chatInput');
   const btnSend = document.getElementById('btnSend');
@@ -2276,6 +2610,10 @@ function initChatInput() {
   });
 }
 
+/**
+ * Wire up window control buttons (minimize, maximize, close), terminal
+ * toggle, export, scroll-to-bottom, and window resize handling.
+ */
 function initWindowControls() {
   document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
@@ -2317,6 +2655,10 @@ function initWindowControls() {
   });
 }
 
+/**
+ * Initialize the context popup (📊 button) that shows token usage
+ * and category breakdowns fetched from the background terminal.
+ */
 function initContextPopup() {
   const sbContextBtn = document.getElementById('btnSlashContext');
   const contextPopup = document.getElementById('contextPopup');
@@ -2377,6 +2719,10 @@ function initContextPopup() {
   });
 }
 
+/**
+ * Initialize the compact popup (🗜️ button) that triggers /compact
+ * and displays before/after token usage comparison.
+ */
 function initCompactPopup() {
   const compactBtn = document.getElementById('btnSlashCompact');
   const compactPopup = document.getElementById('compactPopup');
@@ -2455,6 +2801,10 @@ function initCompactPopup() {
   });
 }
 
+/**
+ * Initialize all session action buttons: /clear, todo sync, todo add,
+ * and session delete confirmation handlers.
+ */
 function initSlashButtons() {
   document.getElementById('btnSlashClear').addEventListener('click', async () => {
     if (activeTabId == null) return;
@@ -2529,6 +2879,10 @@ function initSlashButtons() {
 
 // ── Session Tools Popup → modules/session-tools.js ───────────
 
+/**
+ * Initialize the settings overlay: theme, font size, sound, dev mode,
+ * denied tools, extra dirs, folder paths, and instructions editor.
+ */
 function initSettings() {
   const settingsOverlay = document.getElementById('settingsOverlay');
   const settTheme = document.getElementById('settTheme');
@@ -2699,6 +3053,11 @@ function initSettings() {
 }
 
 // ── Instructions Editor Modal ──────────────────────────────────────
+/**
+ * Open a modal editor for the copilot instructions markdown file.
+ * @param {string} content - Current file content to pre-fill.
+ * @param {string} filePath - Absolute path shown in the header.
+ */
 function openInstructionsEditor(content, filePath) {
   // Create modal overlay
   const overlay = document.createElement('div');
@@ -2743,6 +3102,9 @@ function openInstructionsEditor(content, filePath) {
   setTimeout(() => textarea.focus(), 100);
 }
 
+/**
+ * Initialize the sidebar collapse button and restore persisted state.
+ */
 function initSidebar() {
   const collapseBtn = document.getElementById('btnCollapseSidebar');
   const sidebar = document.getElementById('sidebar');
@@ -2767,6 +3129,10 @@ function initTestRunner() {
   document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
 }
 
+/**
+ * Initialize the developer console panel: log capture, filtering,
+ * and renderer console re-wiring for live log display.
+ */
 function initDevConsole() {
   document.getElementById('btnDevConsole')?.addEventListener('click', toggleDevConsole);
   document.getElementById('devConsoleClose')?.addEventListener('click', () => {
@@ -2810,6 +3176,10 @@ function initDevConsole() {
   }
 }
 
+/**
+ * Initialize the in-chat search bar (Ctrl+F). Implements incremental
+ * text highlighting with mark elements and keyboard navigation.
+ */
 function initChatSearch() {
   const searchBar = document.getElementById('chatSearchBar');
   const searchInput = document.getElementById('chatSearchInput');
@@ -2903,6 +3273,10 @@ function initChatSearch() {
 }
 
 // ── Keyboard Shortcut System ──────────────────────────────
+/**
+ * @type {Array<{id: string, label: string, category: string, default: {ctrl: boolean, shift: boolean, alt: boolean, key: string}}>}
+ * Configurable keyboard shortcut definitions with default bindings.
+ */
 const SHORTCUT_DEFS = [
   { id: 'newTab',        label: 'Neuer Tab',              category: 'Tabs', default: { ctrl: true,  shift: false, alt: false, key: 't' } },
   { id: 'closeTab',      label: 'Tab schließen',          category: 'Tabs', default: { ctrl: true,  shift: false, alt: false, key: 'w' } },
@@ -2923,6 +3297,11 @@ const FIXED_SHORTCUTS = [
 
 function _getShortcutPrefs() { return getSettings().shortcuts || {}; }
 
+/**
+ * Get the effective keybinding for a shortcut (user override or default).
+ * @param {string} id - Shortcut definition ID.
+ * @returns {{ctrl: boolean, shift: boolean, alt: boolean, key: string}|null}
+ */
 function getShortcut(id) {
   const def = SHORTCUT_DEFS.find(d => d.id === id);
   if (!def) return null;
@@ -2937,6 +3316,12 @@ function saveShortcut(id, binding) {
 
 function resetAllShortcuts() { saveSetting('shortcuts', {}); }
 
+/**
+ * Test whether a keyboard event matches a shortcut binding.
+ * @param {KeyboardEvent} e
+ * @param {{ctrl: boolean, shift: boolean, alt: boolean, key: string}} binding
+ * @returns {boolean}
+ */
 function matchShortcut(e, binding) {
   return e.key === binding.key
     && !!e.ctrlKey  === !!binding.ctrl
@@ -2944,6 +3329,11 @@ function matchShortcut(e, binding) {
     && !!e.altKey   === !!binding.alt;
 }
 
+/**
+ * Format a shortcut binding as a human-readable label (e.g. "Ctrl+Shift+T").
+ * @param {{ctrl: boolean, shift: boolean, alt: boolean, key: string}} binding
+ * @returns {string}
+ */
 function shortcutLabel(binding) {
   const parts = [];
   if (binding.ctrl)  parts.push('Ctrl');
@@ -2953,6 +3343,9 @@ function shortcutLabel(binding) {
   return parts.join('+');
 }
 
+/**
+ * Render the keyboard shortcuts help overlay content, grouped by category.
+ */
 function renderShortcutsHelp() {
   const container = document.getElementById('shortcutsHelpContent');
   if (!container) return;
@@ -2977,6 +3370,10 @@ function renderShortcutsHelp() {
   `).join('');
 }
 
+/**
+ * Initialize the shortcuts settings panel with per-shortcut recording
+ * and reset functionality.
+ */
 function initShortcutsSettings() {
   let _recordingId = null;
 
@@ -3048,6 +3445,10 @@ function initShortcutsSettings() {
   renderShortcutsSettings();
 }
 
+/**
+ * Register the global keydown handler that dispatches all configurable
+ * shortcuts (tab cycling, new/close tab, search, export, etc.).
+ */
 function initKeyboardShortcuts() {
   const searchBar = document.getElementById('chatSearchBar');
   const sc = (id, e) => matchShortcut(e, getShortcut(id));
@@ -3136,6 +3537,10 @@ function initKeyboardShortcuts() {
   renderShortcutsHelp();
 }
 
+/**
+ * Initialize drag-and-drop on the stream area. Dropped files are processed
+ * and inserted into the chat input as @-references or inline code blocks.
+ */
 function initDragDrop() {
   const streamArea = document.getElementById('streamArea');
   const dropOverlay = document.getElementById('dropOverlay');
@@ -3207,6 +3612,10 @@ function initDragDrop() {
   });
 }
 
+/**
+ * Initialize the global tooltip system. Tooltips appear for any element
+ * with a `data-tooltip` attribute after a short hover delay.
+ */
 function initTooltips() {
   const tooltip = document.createElement('div');
   tooltip.className = 'js-tooltip';
@@ -3255,10 +3664,17 @@ function initTooltips() {
 }
 
 // ── Onboarding Wizard ────────────────────────────────────────
+/** @type {number} Current onboarding wizard step (1-based). */
 let _onboardingStep = 1;
+/** @type {number} Current intro-slide index within the final onboarding step. */
 let _onboardingSlide = 0;
+/** @type {number} Total number of onboarding wizard steps. */
 const ONBOARDING_TOTAL_STEPS = 4;
 
+/**
+ * Check if this is the user's first run and launch the onboarding wizard if so.
+ * @returns {Promise<void>}
+ */
 async function initOnboarding() {
   let isFirstRun;
   try {
@@ -3286,6 +3702,10 @@ function updateStepIndicators(step) {
   });
 }
 
+/**
+ * Render a specific onboarding wizard step (CWD, Login, Folders, or Categories).
+ * @param {number} step - Step number (1–4).
+ */
 function showOnboardingStep(step) {
   _onboardingStep = step;
   updateStepIndicators(step);
@@ -3307,6 +3727,12 @@ function showOnboardingStep(step) {
   }
 }
 
+/**
+ * Render the CWD (working directory) selection step of the onboarding wizard.
+ * @param {HTMLElement} body - Container element for step content.
+ * @param {HTMLButtonElement} btnNext - The "Next" button to enable when valid.
+ * @returns {Promise<void>}
+ */
 async function renderCwdStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-cwd">
@@ -3348,6 +3774,12 @@ async function renderCwdStep(body, btnNext) {
   }
 }
 
+/**
+ * Render the GitHub Copilot login check/prompt step.
+ * @param {HTMLElement} body - Container element for step content.
+ * @param {HTMLButtonElement} btnNext - The "Next" button to enable when authenticated.
+ * @returns {Promise<void>}
+ */
 async function renderLoginStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-login">
@@ -3383,6 +3815,12 @@ async function renderLoginStep(body, btnNext) {
   }
 }
 
+/**
+ * Handle the login flow within the onboarding wizard. Opens the auth
+ * window and provides re-check buttons.
+ * @param {HTMLButtonElement} btnNext - The "Next" button to enable on success.
+ * @returns {Promise<void>}
+ */
 async function handleOnboardingLogin(btnNext) {
   const statusEl = document.getElementById('onboarding-login-status');
   if (!statusEl) return;
@@ -3407,6 +3845,13 @@ async function handleOnboardingLogin(btnNext) {
   }
 }
 
+/**
+ * Render the folder setup step: check which required directories exist
+ * and offer to create missing ones.
+ * @param {HTMLElement} body - Container element for step content.
+ * @param {HTMLButtonElement} btnNext - The "Next" button to enable when all folders exist.
+ * @returns {Promise<void>}
+ */
 async function renderFolderStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-folders">
@@ -3426,6 +3871,11 @@ async function renderFolderStep(body, btnNext) {
   }
 }
 
+/**
+ * Render the folder status checklist and a "Create folders" button if needed.
+ * @param {Object<string, {exists: boolean, path: string}>} status - Folder existence status.
+ * @param {HTMLButtonElement} btnNext
+ */
 function renderFolderList(status, btnNext) {
   const list = document.getElementById('onboarding-folder-list');
   if (!list) return;
@@ -3479,6 +3929,13 @@ async function handleCreateFolders(createBtn, btnNext) {
   }
 }
 
+/**
+ * Render the role/category personalization step where users enter their
+ * job role and missing team positions to generate skills and agents.
+ * @param {HTMLElement} body - Container element for step content.
+ * @param {HTMLButtonElement} btnNext - The "Next/Finish" button.
+ * @returns {Promise<void>}
+ */
 async function renderCategoryStep(body, btnNext) {
   const missingRoles = [];
 
@@ -3706,6 +4163,9 @@ function updateIntroNextButton(btnNext) {
   }
 }
 
+/**
+ * Advance the onboarding wizard to the next step, or finish if on the last step.
+ */
 function nextOnboardingStep() {
   if (_onboardingStep >= ONBOARDING_TOTAL_STEPS) {
     finishOnboarding();
@@ -3715,6 +4175,12 @@ function nextOnboardingStep() {
 }
 
 // ── Tutorial Popup ─────────────────────────────────────────
+/**
+ * Show a tutorial popup next to the Skills section header, teaching
+ * the user about hovering for tooltips and reloading. Auto-dismisses
+ * after 30s or when the user clicks the reload button.
+ * @returns {Promise<void>}
+ */
 async function showTutorialPopup() {
   const flags = await copilot.tutorial.getFlags();
   if (flags.tutorialSkillsShown) return;
@@ -3771,6 +4237,11 @@ async function showTutorialPopup() {
   setTimeout(() => close(), 30000);
 }
 
+/**
+ * Show a tutorial popup below the first tab, teaching the user to rename
+ * tabs for session persistence. Auto-dismisses after 30s or on rename.
+ * @returns {Promise<void>}
+ */
 async function showTutorialRenamePopup() {
   const flags = await copilot.tutorial.getFlags();
   if (flags.tutorialRenameShown) return;
@@ -3824,6 +4295,10 @@ async function showTutorialRenamePopup() {
   setTimeout(() => close(), 30000);
 }
 
+/**
+ * Mark onboarding as complete and hide the overlay.
+ * @returns {Promise<void>}
+ */
 async function finishOnboarding() {
   try {
     await copilot.onboarding.complete();
