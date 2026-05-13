@@ -273,3 +273,65 @@ describe('Projektstruktur', () => {
     expect(mainJs).toContain('preload.js');
   });
 });
+
+// ── Keyboard-Shortcuts: HTML/CSS-Integrität ─────────────────
+
+describe('Keyboard-Shortcuts UI-Integrität', () => {
+  const rendererAppJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf-8');
+
+  // HTML-Elemente die der Shortcuts-Code anspricht
+  const shortcutIds = [
+    'btnShortcutsHelp',
+    'btnShortcutsClose',
+    'shortcutsOverlay',
+    'shortcutsHelpContent',
+    'settShortcutsList',
+    'btnResetShortcuts',
+  ];
+
+  test.each(shortcutIds)('HTML enthält Element id="%s"', (id) => {
+    const regex = new RegExp(`id=["']${id}["']`);
+    expect(html).toMatch(regex);
+  });
+
+  test('Settings-Overlay hat einen "shortcuts"-Tab', () => {
+    expect(html).toMatch(/data-tab=["']shortcuts["']/);
+    expect(html).toMatch(/data-panel=["']shortcuts["']/);
+  });
+
+  // CSS-Klassen die im JS via querySelector/innerHTML verwendet werden
+  const shortcutCssClasses = [
+    'overlay__dialog--shortcuts',
+    'shortcuts-help',
+    'shortcuts-group',
+    'shortcuts-group__title',
+    'shortcuts-table',
+    'shortcuts-table__label',
+    'shortcuts-table__binding',
+    'shortcut-kbd',
+    'shortcut-kbd--custom',
+    'shortcut-row',
+    'shortcut-row__label',
+    'shortcut-row__right',
+    'shortcut-record-btn',
+    'shortcut-record-btn--active',
+  ];
+
+  test.each(shortcutCssClasses)('CSS definiert Klasse .%s', (cls) => {
+    const regex = new RegExp(`\\.${cls.replace(/-/g, '\\-')}\\b`);
+    expect(css).toMatch(regex);
+  });
+
+  test('renderer/app.js initialisiert Shortcuts-System', () => {
+    expect(rendererAppJs).toContain('initKeyboardShortcuts');
+    expect(rendererAppJs).toContain('renderShortcutsHelp');
+    expect(rendererAppJs).toContain('initShortcutsSettings');
+  });
+
+  test('renderer/app.js und src/shortcuts.js bleiben in Sync (SHORTCUT_DEFS-IDs)', () => {
+    const { SHORTCUT_DEFS } = require('../src/shortcuts');
+    for (const def of SHORTCUT_DEFS) {
+      expect(rendererAppJs).toMatch(new RegExp(`id:\\s*['"]${def.id}['"]`));
+    }
+  });
+});

@@ -114,6 +114,9 @@
         <button class="action-btn" id="btnSettings" data-tooltip="Einstellungen">
           ⚙️
         </button>
+        <button class="action-btn" id="btnShortcutsHelp" data-tooltip="Tastenkürzel anzeigen (Ctrl+/)">
+          ⌨️
+        </button>
       </div>
     </aside>
 
@@ -280,6 +283,7 @@
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
         <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
+        <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
       </div>
       <div class="settings">
         <!-- Tab: UI -->
@@ -420,9 +424,30 @@
             <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
           </div>
         </div>
+        <!-- Tab: Tastenkürzel -->
+        <div class="settings__panel" data-panel="shortcuts">
+          <div class="settings__group">
+            <div class="settings__hint">Konfiguriere Tastenkürzel. Klicke auf „Ändern" und drücke dann die neue Kombination. Esc bricht ab.</div>
+          </div>
+          <div id="settShortcutsList"></div>
+          <div class="settings__group">
+            <button class="action-btn" id="btnResetShortcuts" style="width:100%;margin-top:8px;">🔄 Alle zurücksetzen</button>
+          </div>
+        </div>
       </div>
       <div class="overlay__actions">
         <button class="action-btn action-btn--primary" id="btnSettingsClose">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shortcuts Help Overlay -->
+  <div class="overlay" id="shortcutsOverlay">
+    <div class="overlay__dialog overlay__dialog--shortcuts">
+      <div class="overlay__title">⌨️ Tastenkürzel</div>
+      <div class="shortcuts-help" id="shortcutsHelpContent"></div>
+      <div class="overlay__actions">
+        <button class="action-btn action-btn--primary" id="btnShortcutsClose">Schließen</button>
       </div>
     </div>
   </div>
