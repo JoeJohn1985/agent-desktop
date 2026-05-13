@@ -1,6 +1,6 @@
 # 📘 Copilot Desktop – Benutzerhandbuch
 
-**Version 0.10.1** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
+**Version 0.20.5** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
 
 ---
 
@@ -10,6 +10,7 @@
 2. [Erste Schritte](#erste-schritte)
    - [Voraussetzungen](#voraussetzungen)
    - [Installation](#installation)
+   - [Onboarding-Wizard](#onboarding-wizard)
    - [Erster Chat](#erster-chat)
 3. [Benutzeroberfläche](#benutzeroberfläche)
    - [Titlebar](#titlebar)
@@ -19,10 +20,12 @@
 4. [Features im Detail](#features-im-detail)
    - [Multi-Session Management](#multi-session-management)
    - [Chat](#chat)
+   - [Tutorial-Popups](#tutorial-popups)
    - [Datei Drag & Drop](#datei-drag--drop)
    - [Skills](#skills)
    - [Todos](#todos)
    - [Session-Actions](#session-actions)
+   - [Session Resume](#session-resume)
    - [Terminal](#terminal)
    - [Settings](#settings)
    - [Themes](#themes)
@@ -58,6 +61,21 @@ npm start
 
 > **Tipp:** Das Setup-Skript `setup.ps1` installiert automatisch alle Abhängigkeiten. Falls es zu Problemen kommt, führe `npm install` manuell aus.
 
+### Onboarding-Wizard
+
+Beim **ersten App-Start** führt dich ein 4-stufiger Onboarding-Wizard durch die Einrichtung:
+
+| Schritt | Inhalt |
+|---|---|
+| **1. GitHub Auth-Check** | Prüft `gh auth status` und leitet bei Bedarf `gh auth login` ein |
+| **2. Ordner-Einrichtung** | Erstellt das Verzeichnis `~/.copilot-desktop/` mit allen nötigen Unterordnern |
+| **3. Starter Agents & Skills** | Auswahl aus 6 Kategorien – jede per Toggle aktivierbar/deaktivierbar |
+| **4. Feature-Einführung** | 3-Slide-Carousel mit den wichtigsten App-Features |
+
+> **Tab-Unlock Fallback:** Falls ein Schritt nicht automatisch abgeschlossen wird, erscheint nach 30 Sekunden ein manueller Unlock-Button. Nach 180 Sekunden wird der nächste Schritt automatisch freigeschaltet.
+
+> **Onboarding zurücksetzen:** Im Developer-Modus (Settings) kann der Wizard jederzeit erneut gestartet werden.
+
 ### Erster Chat
 
 1. **App starten** – Ein leerer Tab „Neuer Chat" öffnet sich automatisch.
@@ -73,7 +91,7 @@ Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  🟢 Copilot Desktop          v0.10.1      _ □ ✕    │  ← Titlebar
+│  🟢 Copilot Desktop          v0.20.5      _ □ ✕    │  ← Titlebar
 ├────────────┬────────────────────────────────────────┤
 │            │  Tab 1 │ Tab 2 │ ➕                    │  ← Tab-Bar
 │  Sessions  ├────────────────────────────────────────┤
@@ -96,7 +114,7 @@ Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich
 Die App verwendet eine frameless Titlebar im Custom-Design:
 
 - **Links:** App-Icon und Titel „Copilot Desktop"
-- **Mitte:** Version-Badge (v0.10.1)
+- **Mitte:** Version-Badge (v0.20.5)
 - **Rechts:** Fenster-Steuerung – Minimieren, Maximieren, Schließen
 
 ### Sidebar
@@ -227,6 +245,17 @@ Sessions sind benannte Copilot CLI Sessions. Du kannst beliebig viele Sessions p
 - **Export:** Über den Export-Button kannst du den gesamten Chat als HTML- oder Textdatei speichern.
 - **Suche:** Mit `Strg+F` öffnest du die Chat-Suche zum Durchsuchen der gesamten Historie.
 
+### Tutorial-Popups
+
+Bei bestimmten Aktionen erscheinen einmalige Tutorial-Popups, die neue Features erklären:
+
+| Popup | Auslöser | Auto-Schließen |
+|---|---|---|
+| **„Skills neu laden"** | Erster Klick auf den Reload-Button | Bei erneutem Reload oder nach 30 Sekunden |
+| **„Tab umbenennen"** | Erster Doppelklick auf einen Tab-Titel | Nach erfolgreicher Umbenennung oder nach 30 Sekunden |
+
+> Die Popups erscheinen jeweils nur beim ersten Mal. Danach werden sie nicht erneut angezeigt.
+
 ### Datei Drag & Drop
 
 Ziehe Dateien direkt in den Chat-Bereich:
@@ -280,6 +309,10 @@ Komprimiert die Session, indem die bisherige Chat-History zusammengefasst wird. 
 #### 🧹 Clear
 
 Löscht den gesamten Session-Kontext. Die Chatverläufe in der Oberfläche bleiben sichtbar, aber Copilot hat keinen Kontext mehr aus vorherigen Nachrichten.
+
+### Session Resume
+
+Beim Laden einer gespeicherten Session werden nur die **letzten Nachrichten** angezeigt – der vollständige Plan wird nicht mehr geladen. Das sorgt für eine übersichtlichere Darstellung beim Fortsetzen einer Session.
 
 ### Terminal
 
@@ -372,4 +405,4 @@ mit `Ctrl+/` oder dem ⌨️-Button.
 
 ---
 
-> **Copilot Desktop v0.10.1** · Entwickelt für GEBIT Solutions
+> **Copilot Desktop v0.20.5** · Entwickelt für GEBIT Solutions

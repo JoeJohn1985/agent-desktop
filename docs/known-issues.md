@@ -2,6 +2,26 @@
 
 Liste bekannter Probleme und offener Punkte. Bitte beim Beheben den Eintrag entfernen oder mit `~~Strikethrough~~` markieren.
 
+## Aktuelle Einschränkungen (v0.20.5)
+
+### Onboarding-Wizard: Tab-Unlock Fallback
+
+Der Onboarding-Wizard setzt nach 180 Sekunden einen automatischen Unlock, falls ein Schritt hängt. In seltenen Fällen (z. B. langsame Netzwerkverbindung bei `gh auth login`) kann der Auto-Unlock greifen, bevor der Schritt tatsächlich abgeschlossen ist. Der manuelle Unlock-Button (nach 30s) ist in solchen Fällen die bessere Option.
+
+---
+
+### Tutorial-Popups: Einmalige Anzeige nicht rücksetzbar
+
+Die Tutorial-Popups („Skills neu laden", „Tab umbenennen") werden pro Benutzer nur einmal angezeigt. Aktuell gibt es keine Möglichkeit, diese über die Settings zurückzusetzen — nur der Onboarding-Wizard kann im Developer-Modus erneut gestartet werden.
+
+---
+
+### Session Resume: Ältere Nachrichten nicht sichtbar
+
+Beim Laden einer gespeicherten Session werden nur die letzten Nachrichten angezeigt. Die vollständige Chat-History ist weiterhin in der Session-Datei vorhanden, wird aber nicht in der UI dargestellt. Ein manuelles Scrollen zur älteren History ist derzeit nicht möglich.
+
+---
+
 ## Linux
 
 ### ~~Preferences-Initialisierung auf Linux überprüfen~~ (gefixt in v0.15.6)

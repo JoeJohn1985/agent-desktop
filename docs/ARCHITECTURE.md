@@ -1,6 +1,6 @@
-# Copilot Desktop — Architektur (arc42)
+﻿# Copilot Desktop — Architektur (arc42)
 
-> **Version:** 0.18.2 · **Stand:** Mai 2026 · **Stack:** Electron 35, node-pty, marked, highlight.js, xterm.js, jest
+> **Version:** 0.20.5 · **Stand:** Juni 2026 · **Stack:** Electron 35, node-pty, marked, highlight.js, xterm.js, jest
 >
 > Diese Dokumentation folgt dem [arc42-Template](https://arc42.org/) (12 Kapitel) und ist **die** Architektur-Referenz für Copilot Desktop. Die frühere Aufteilung in `ARCHITECTURE.md` (technisch-detailliert) und `arc42.md` (strategisch) wurde in dieses Dokument zusammengeführt.
 
@@ -198,7 +198,7 @@
 
 #### preload.js (Context Bridge)
 - Initialisiert `marked` + `highlight.js` + `DOMPurify` einmal, exposet `window.markdown.render(text)`.
-- Exposet `window.copilot.*` mit Namespaces `chat`, `sessions`, `folders`, `preferences`, `instructions`, `skills`, `agents`, `terminal`, `images`, `videos`, `files`, `tests`, `window`, `log`.
+- Exposet `window.copilot.*` mit Namespaces `chat`, `sessions`, `folders`, `preferences`, `instructions`, `skills`, `agents`, `terminal`, `images`, `videos`, `files`, `tests`, `window`, `log`, `tutorial`.
 - Streaming-Events (`copilot:event`, `copilot:done`, `terminal:data`, `images:changed`, `dev-console:log`) werden über `onX(cb) → unsubscribe` gewrappt, damit der Renderer Listener sauber aufräumen kann.
 
 #### src/main-helpers.js
@@ -242,11 +242,45 @@
 |---|---|---|
 | `terminal.js` | 240 | xterm.js-Init, FitAddon, Mirror der `terminal:data`-Streams |
 | `images.js` | 148 | Bild-Thumbnails, Lightbox, Drag&Drop in den Chat |
-| `todos.js` | 149 | Todo-CRUD mit Drag&Drop-Reordering |
+| `todos.js` | 149 | Per-Session-Aufgabenliste mit IPC-Backend (CRUD + Drag&Drop-Reordering) |
 | `session-tools.js` | 129 | UI für Checkpoints / Plan / Named-Sessions |
 | `test-runner.js` | 129 | Frontend für Jest/Playwright/Coverage |
 | `dev-console.js` | 56 | UI-Pendant zur Browser-DevConsole |
 | `utils.js` | 62 | DOM-Hilfen |
+
+### 5.6 First-Run Onboarding Wizard (v0.18.2)
+
+Ein mehrstufiger Wizard, der beim allerersten App-Start den User durch Authentifizierung, Ordner-Konfiguration und Feature-Einführung leitet.
+
+| Schritt | Beschreibung |
+|---|---|
+| 1. Auth | Prüfung/Anleitung für `gh auth login` |
+| 2. Folder Setup | Auswahl des Arbeitsverzeichnisses (via `folders:setup`) |
+| 3. Category Selection | Skill-Kategorien zur Vorinstallation auswählen |
+| 4. Feature Intro | Überblick über App-Features |
+
+**Architektur-Details:**
+- Steuerung über IPC-Handler: `onboarding:getStatus`, `onboarding:setComplete`, `folders:setup`, `onboarding:getCategories`, `onboarding:installCategory`
+- Onboarding-Status wird in `~/.copilot-desktop/folders.json` persistiert
+- Während des Onboardings sind Tabs gesperrt (Tab-Locking); ein Auto-Unlock greift nach 180 s Inaktivität als Safety-Net
+- Reset via `dev:setOnboardingComplete(false)` — löscht auch `tutorialSkillsShown` und `tutorialRenameShown`
+
+### 5.7 Tutorial-Flags System (v0.20.5)
+
+Ein leichtgewichtiges System für kontextsensitive Tutorial-Popups, die einmalig bei relevanten User-Aktionen eingeblendet werden.
+
+**Speicherort:** `~/.copilot-desktop/folders.json` (als zusätzliche Keys neben der Ordner-Konfiguration — bewusst *nicht* in `preferences.json`, da die Flags ordnerunabhängig und nicht exportierbar sein sollen).
+
+**Registrierte Tutorial-Flags (Key-Whitelist):**
+- `tutorialSkillsShown` — wurde die Skills-Einführung angezeigt?
+- `tutorialRenameShown` — wurde das Tab-Umbenennen-Tutorial angezeigt?
+
+**Architektur:**
+- **IPC-Handler:** `tutorial:getFlags` (liest alle Flags), `tutorial:setFlag` (setzt einen Flag; validiert Key gegen Whitelist)
+- **Preload-Bridge:** `window.copilot.tutorial.getFlags()` / `window.copilot.tutorial.setFlag(key, value)`
+- **Renderer:** `showTutorialPopup()` (Skills) und `showTutorialRenamePopup()` (Rename) sind async-Funktionen, die erst den Flag via IPC prüfen
+- **Auto-Close:** Beide Popups schließen automatisch bei Nutzeraktion ODER nach 30 s Timeout; ein `closed`-Guard verhindert Doppel-Aufrufe des IPC-Setters
+- **CustomEvent `tab:renamed`:** Wird in `commit()` von `startTabRename` gefeuert (`document.dispatchEvent(new CustomEvent('tab:renamed'))`); das Rename-Tutorial lauscht auf dieses Event als Trigger zum Schließen
 
 ---
 
@@ -328,7 +362,33 @@ collectPtyOutput sammelt bis PTY_QUIET_MS Stille  ──► Renderer (Popup)
 10. Renderer lädt index.html → app.js
 11. Renderer ruft preferences:read → bekommt persistenten State
 12. Tabs werden aus openTabs wiederhergestellt
+13. Onboarding-Status prüfen → ggf. Wizard anzeigen (v0.18.2)
+14. Nach Onboarding: Tutorial-Flags prüfen → ggf. Skills-Tutorial-Popup (v0.20.5)
 ```
+
+### 6.3.1 Tutorial-Popup Eventflow (v0.20.5)
+
+```
+Renderer                          Main (IPC)               folders.json
+   │                                │                          │
+   │ showTutorialPopup()            │                          │
+   │─── tutorial:getFlags ─────────▶│── read ────────────────▶│
+   │◄── { tutorialSkillsShown: … } ─┤                          │
+   │                                │                          │
+   │  [Flag == false → Popup zeigen]│                          │
+   │                                │                          │
+   │  (User klickt ODER 30s Timer)  │                          │
+   │─── tutorial:setFlag ──────────▶│── write ───────────────▶│
+   │    ('tutorialSkillsShown',true) │                          │
+   │                                │                          │
+   │  [closed-Guard verhindert      │                          │
+   │   doppelten setFlag-Call]       │                          │
+```
+
+**CustomEvent `tab:renamed`:**
+- Quelle: `commit()` in `startTabRename` (renderer/app.js)
+- Event: `document.dispatchEvent(new CustomEvent('tab:renamed'))`
+- Listener: `showTutorialRenamePopup()` registriert einen `once`-Listener auf `tab:renamed`; bei Empfang wird das Popup geschlossen und der Flag gesetzt
 
 ### 6.4 IPC-Kommunikation
 
@@ -414,6 +474,29 @@ Die Kommunikation zwischen Main und Renderer Process erfolgt über IPC-Channels,
 | `window:close` | on | Fenster schließen |
 | `log:write` | on | Log-Eintrag aus Renderer in Datei-Logger |
 
+#### 6.4.7 Namespace: `onboarding` (First-Run Wizard, v0.18.2)
+
+| Channel | Typ | Beschreibung |
+|---|---|---|
+| `onboarding:getStatus` | handle | Prüft ob Onboarding abgeschlossen ist |
+| `onboarding:setComplete` | handle | Markiert Onboarding als abgeschlossen |
+| `onboarding:getCategories` | handle | Verfügbare Skill-Kategorien für Vorinstallation |
+| `onboarding:installCategory` | handle | Installiert eine Skill-Kategorie |
+| `folders:setup` | handle | Initialer Ordner-Setup (Teil des Onboarding-Flows) |
+
+#### 6.4.8 Namespace: `tutorial` (Tutorial-Flags, v0.20.5)
+
+| Channel | Typ | Beschreibung |
+|---|---|---|
+| `tutorial:getFlags` | handle | Alle Tutorial-Flags aus `folders.json` lesen |
+| `tutorial:setFlag` | handle | Einzelnen Tutorial-Flag setzen (Key-Whitelist: `tutorialSkillsShown`, `tutorialRenameShown`) |
+
+#### 6.4.9 Namespace: `dev` (Entwickler-Helfer)
+
+| Channel | Typ | Beschreibung |
+|---|---|---|
+| `dev:setOnboardingComplete` | handle | Onboarding-Status setzen/zurücksetzen (Reset löscht auch Tutorial-Flags) |
+
 ---
 
 ## 7. Verteilungssicht
@@ -443,6 +526,8 @@ Die Kommunikation zwischen Main und Renderer Process erfolgt über IPC-Channels,
 | Todos | `~/.copilot/session-state/<uuid>/todos.json` | JSON: `[{id, text, status, createdAt}]` | `src/sessions.js` |
 | Preferences | `userData/preferences.json` (+ `.bak`) | JSON | `src/preferences.js` |
 | Folders-Config | `~/.copilot-desktop/folders.json` | JSON | `src/scanners.js` |
+| Tutorial-Flags | `~/.copilot-desktop/folders.json` (Keys: `tutorialSkillsShown`, `tutorialRenameShown`) | JSON (boolean-Werte) | `main.js` (IPC `tutorial:*`) |
+| Onboarding-Status | `~/.copilot-desktop/folders.json` (Key: `onboardingComplete`) | JSON (boolean) | `main.js` (IPC `onboarding:*`) |
 | Logs | `~/.copilot-desktop/logs/copilot-desktop-<YYYY-MM-DD>.log` | Plaintext, tagesrotiert | `src/logger.js` |
 | Skills | `~/.copilot/skills/<name>/SKILL.md` | YAML-Frontmatter + Markdown | nur Read |
 | Sub-Agents | `~/.copilot/agents/` | Markdown | nur Read |
@@ -589,6 +674,9 @@ Parst die TUI-Ausgabe des `/context`-Befehls in strukturierte Daten:
 | 6 | PATH-Augmentation für Linux/macOS (v0.15.4) | User muss `.bashrc` so anpassen, dass Electron es sourct (geht nicht) | Pragmatisch, deckt 95% der Fälle ab; injection vorhersagbar |
 | 7 | Markdown-Init im Preload, nicht im Renderer | Rendering im Renderer | `marked`/`hljs`/`DOMPurify` einmal geladen, kein Bundling im Renderer nötig |
 | 8 | Logger-Hook auf `console.*` | strukturiertes Logger-Objekt überall durchreichen | Existierende `console.log`-Aufrufe „just work“; etwas magisch, aber praktisch |
+| 9 | Tutorial-Flags in `folders.json` statt `preferences.json` (v0.20.5) | Eigene Datei oder `preferences.json` | `folders.json` existiert bereits in `~/.copilot-desktop/`; Flags sind applikationsweit (nicht per Workspace) und sollen bei Preferences-Export *nicht* mitgehen. Zusätzliche Datei wäre Overhead — `folders.json` ist der pragmatische Kompromiss. |
+| 10 | Onboarding-Wizard mit Tab-Locking (v0.18.2) | Separate Onboarding-Window oder First-Launch-Detektion im Renderer | Single-Window-UX; Tabs werden während Onboarding gesperrt → User kann nicht versehentlich ins leere UI interagieren. Auto-Unlock nach 180 s als Safety-Net. |
+| 11 | Tutorial-Popups mit 30 s Auto-Close + closed-Guard (v0.20.5) | Popups bleiben bis User schließt | Nicht-invasiv: User wird nicht blockiert; closed-Guard verhindert Race-Conditions bei gleichzeitigem User-Klick und Timer-Ablauf |
 
 ---
 
