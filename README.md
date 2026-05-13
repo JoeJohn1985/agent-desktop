@@ -1,20 +1,40 @@
 # Copilot Desktop
 
-**Copilot Desktop** is an Electron-based desktop app that wraps the GitHub Copilot CLI in a polished chat interface. It supports multiple named sessions, toggleable AI skills and agents, markdown rendering, file drag & drop, model switching, and automatic task routing to sub-agents based on complexity — all in a clean, themeable UI.
+**Copilot Desktop** is an Electron-based desktop app that wraps the GitHub Copilot CLI in a polished chat interface. It supports multiple named sessions, toggleable AI skills and agents, a first-run onboarding wizard, plugin marketplace, todos, markdown rendering, file drag & drop, model switching, and automatic task routing to sub-agents based on complexity — all in a clean, themeable UI.
 
 ## Features
 
-- 💬 **Multi-Session Management** — Create, rename, and switch between named sessions
+### Core Chat
+- 💬 **Multi-Session Management** — Create, rename, and switch between named sessions; only named sessions are shown in the session list
+- 📝 **Markdown Rendering** — Full markdown support including code blocks with syntax highlighting
+- 📂 **File Drag & Drop** — Drop files directly into the chat
+- 🔎 **Chat Search** — Search through conversation history
+- 📋 **Session Resume** — Loading a session into a tab shows the last few messages as context
+
+### Skills & Agents
 - 🧠 **Skill Toggles** — Enable/disable AI skills per session; active skills are injected into prompts automatically
 - 🤖 **Agent Toggles** — Enable/disable custom agents per session; active agents are injected as `/agent <name>` prefix automatically
 - 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were active
-- 📝 **Markdown Rendering** — Full markdown support including code blocks with syntax highlighting
+
+### Onboarding & Tutorials
+- 🚀 **First-Run Onboarding Wizard** — Four-step guided setup on first launch:
+  1. GitHub authentication check (`gh auth login`)
+  2. Folder structure setup (`~/.copilot-desktop/`)
+  3. Starter agents & skills selection (6 categories, individually toggleable)
+  4. Feature introduction via 3-slide carousel
+- 💡 **Tutorial Popups** — Contextual hints for Skills reload and Tab rename; auto-close on action or after 30 seconds
+
+### Productivity
+- ✅ **Todos** — Per-session task list with add, complete, and delete (🗑️) actions
+- 🔌 **Plugin Manager** — Browse and manage skill/agent marketplaces; install, update, and remove plugins
+- ⌨️ **Keyboard Shortcuts** — Configurable shortcuts with a built-in shortcut overlay
+- ⏱️ **Tab-Unlock Fallback** — Manual unlock button after 30s inactivity; automatic unlock after 180s for hanging sub-agent tabs
+
+### Customisation
 - 🎨 **Themes** — Multiple built-in color themes
-- 🔒 **Permission System** — Configurable tool permissions (read, write, shell, etc.)
-- 📂 **File Drag & Drop** — Drop files directly into the chat
-- 🔎 **Chat Search** — Search through conversation history
-- ⚙️ **Settings Dialog** — Model selection, permissions, folder paths, and preferences
 - 🔀 **Model Switcher** — Switch between AI models directly from the status bar
+- 🔒 **Permission System** — Configurable tool permissions (read, write, shell, etc.)
+- ⚙️ **Settings Dialog** — Model selection, permissions, folder paths (including custom agents directory), and preferences
 
 ## Skills
 
@@ -102,16 +122,19 @@ npm start
 
 ```
 copilot-desktop/
-├── main.js              # Electron main process, IPC handlers, skill/agent scanner
+├── main.js              # Electron main process, IPC handlers, skill/agent/tutorial scanner
 ├── src/
 │   ├── agents.js        # Agent directory scanner (*.agent.md)
 │   ├── scanners.js      # Skill directory scanner
 │   └── ipc/             # IPC handler modules
 ├── renderer/
-│   ├── app.js           # Frontend logic, chat UI, skill/agent toggles
-│   └── styles.css       # Styles and themes
-├── preload.js           # Electron preload script (IPC bridge)
-├── __tests__/           # Vitest test suites
+│   ├── app.js           # Frontend logic, chat UI, skill/agent toggles, onboarding, tutorials
+│   ├── modules/
+│   │   └── todos.js     # Per-session todos module
+│   ├── index.html       # App shell, onboarding wizard markup
+│   └── styles.css       # Styles, themes, onboarding, shortcuts overlay
+├── preload.js           # Electron preload script (IPC bridge incl. tutorial namespace)
+├── __tests__/           # Jest test suites (939+ tests)
 ├── CHANGELOG.md         # Version history
 └── package.json
 ```
