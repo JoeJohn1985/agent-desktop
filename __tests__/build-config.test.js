@@ -193,3 +193,67 @@ describe('PORTABLE_README.txt (End-User-Doku im ZIP)', () => {
     expect(readmeTxt).toMatch(/SmartScreen/);
   });
 });
+
+// ── Release-Workflow (.github/workflows/release.yml) ────────
+
+describe('Release-Workflow', () => {
+  const WORKFLOW_PATH = path.join(ROOT, '.github', 'workflows', 'release.yml');
+  const workflow = fs.existsSync(WORKFLOW_PATH) ? fs.readFileSync(WORKFLOW_PATH, 'utf-8') : '';
+
+  test('release.yml existiert', () => {
+    expect(fs.existsSync(WORKFLOW_PATH)).toBe(true);
+  });
+
+  test('triggert auf Tag-Push v*.*.*', () => {
+    expect(workflow).toMatch(/tags:\s*\n\s*-\s*['"]?v\*\.\*\.\*/);
+  });
+
+  test('erlaubt manuellen Dispatch fuer Dry-Runs', () => {
+    expect(workflow).toMatch(/workflow_dispatch:/);
+  });
+
+  test('laeuft auf windows-latest', () => {
+    expect(workflow).toMatch(/runs-on:\s*windows-latest/);
+  });
+
+  test('hat explizit contents: write permission fuer Release-Upload', () => {
+    expect(workflow).toMatch(/permissions:\s*\n\s*contents:\s*write/);
+  });
+
+  test('verifiziert package.json version gegen Tag', () => {
+    expect(workflow).toMatch(/package\.json version/);
+  });
+
+  test('ruft npm test auf', () => {
+    expect(workflow).toMatch(/npm test/);
+  });
+
+  test('ruft npm run dist:portable auf', () => {
+    expect(workflow).toMatch(/npm run dist:portable/);
+  });
+
+  test('sucht ZIP in dist-portable\\ (matched build-portable.ps1 output)', () => {
+    expect(workflow).toMatch(/dist-portable/);
+    expect(workflow).toMatch(/\*portable\*\.zip/);
+  });
+
+  test('laedt ZIP immer als workflow-artifact hoch (Sichtbarkeit auch ohne Release)', () => {
+    expect(workflow).toMatch(/actions\/upload-artifact@v\d/);
+  });
+
+  test('nutzt softprops/action-gh-release fuer Release-Erstellung', () => {
+    expect(workflow).toMatch(/softprops\/action-gh-release@v\d/);
+  });
+
+  test('haengt Prerelease-Flag automatisch an Tags mit Bindestrich (zB v1.0.0-rc1)', () => {
+    expect(workflow).toMatch(/prerelease:\s*\$\{\{\s*contains\(/);
+  });
+
+  test('CSC_IDENTITY_AUTO_DISCOVERY=false fuer code-signing-freien Build', () => {
+    expect(workflow).toMatch(/CSC_IDENTITY_AUTO_DISCOVERY:\s*['"]?false/);
+  });
+
+  test('fail_on_unmatched_files: true verhindert leeren Release', () => {
+    expect(workflow).toMatch(/fail_on_unmatched_files:\s*true/);
+  });
+});

@@ -136,6 +136,14 @@ npm run dist:portable
 # → dist-portable\copilot-desktop-vX.Y.Z-portable.zip
 ```
 
+Or trigger the CI release workflow by pushing a tag:
+
+```powershell
+npm version minor
+git push origin main --follow-tags
+# → ZIP attached to https://github.com/<owner>/<repo>/releases/latest
+```
+
 End-users extract the ZIP and double-click `start.bat`. The app
 auto-detects new releases in the background and presents a
 Firefox-style "Restart to apply" notification. See
