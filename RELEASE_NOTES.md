@@ -1,28 +1,36 @@
-# Release Notes v0.20.5
+# Release Notes v0.21.0
 
 ## Was ist neu?
 
-### Tutorial-System: Smarter und zuverlässiger 🎓
+### Vollständige JSDoc-Dokumentation 📚
 
-Die Tutorial-Popups wurden grundlegend überarbeitet:
+Der gesamte Quellcode ist jetzt lückenlos mit JSDoc-Kommentaren dokumentiert:
 
-- **Auto-close bei Nutzeraktion**: Das Tutorial-Popup schließt sich automatisch, wenn der Nutzer die beworbene Aktion ausführt (z. B. Reload-Button klicken oder Tab umbenennen) — kein manuelles Wegklicken mehr nötig.
-- **30-Sekunden-Timeout**: Popups schließen sich nach 30 Sekunden automatisch, auch wenn keine Aktion erfolgt.
-- **Tutorial-Flags in `folders.json`**: Die Flags `tutorialSkillsShown` und `tutorialRenameShown` werden jetzt in der zentralen `folders.json` gespeichert statt separat — sauberere Datenhaltung.
+- **`main.js`**: Alle IPC-Handler (`~30`), Modul-Variablen und Funktionen mit `@ipc`, `@param`, `@returns` vollständig beschrieben.
+- **`preload.js`**: Alle 22 `copilot.*`-Namespaces dokumentiert — jede Methode und jeder Event-Subscriber mit Callback-Typen.
+- **`renderer/app.js`**: 114 JSDoc-Blöcke — Tab-Management, Chat-Flow, Skills/Agents, Sessions, Plugins, Onboarding, Tutorial und Helpers vollständig abgedeckt.
+- **`renderer/modules/todos.js`** und **`src/scanners.js`**: Verbleibende Lücken geschlossen.
 
-### `tab:renamed` Event 🏷️
+### Merge-Konflikt-Fixes 🔧
 
-Bei jeder erfolgreichen Tab-Umbenennung wird jetzt ein `tab:renamed` CustomEvent gefeuert. Andere Komponenten (z. B. Tutorial-Popups) können darauf reagieren.
+Zwei Merge-Konflikte in der Renderer-Schicht wurden behoben:
 
-### UI-Verbesserungen
+- **`renderer/app.js`**: `initShortcutsSettings()` und der Onboarding-Toggle (Entwicklertools) werden jetzt beide korrekt in `initSettings()` initialisiert.
+- **`renderer/index.html`**: Settings-Tabs „Tastenkürzel" und „Entwicklertools" erscheinen beide vollständig im UI.
 
-- **Todo-Icon**: Das Lösch-Icon in der Todo-Liste ist jetzt durchgehend 🗑️ (Mülleimer-Emoji) — kein Mix aus verschiedenen Icons mehr.
-- **Session-Context**: Der Context-Block zeigt nur noch die relevanten Nachrichten — der Plan wird nicht mehr angezeigt.
+### Dokumentation auf aktuellem Stand 📝
+
+- **USER-GUIDE**: Onboarding-Wizard, Tutorial-Popups und Session Resume erklärt.
+- **ARCHITECTURE**: Neue Architektur-Abschnitte für Onboarding (Sec 5.6) und Tutorial-Flags (Sec 5.7), 3 neue ADRs, erweiterte IPC-Tabellen.
+- **known-issues**: Bekannte Einschränkungen für v0.20.5 dokumentiert.
+- **README**: Feature-Liste neu strukturiert, Testanzahl auf 939+ aktualisiert.
 
 ## Bug Fixes
-- Event-Listener Leak in Tutorial-Popups behoben: Durch einen `closed`-Guard werden Event-Listener bei bereits geschlossenem Popup nicht mehr doppelt registriert.
+- Merge-Konflikt in `renderer/app.js` (`initShortcutsSettings` + Onboarding-Toggle) behoben
+- Merge-Konflikt in `renderer/index.html` (Shortcuts-Tab + Devtools-Tab) behoben
 
 ## Technische Details
-- Tutorial-Flags über neue IPC-Handler `tutorial:getFlags` / `tutorial:setFlag` (mit Key-Whitelist) verwaltbar
-- `dev:setOnboardingComplete` setzt jetzt auch alle Tutorial-Flags zurück
-- 2 neue Testdateien: `tutorial-flags.test.js` (327 Tests), erweitertes `onboarding-auth.test.js` (208 Tests)
+- 114 neue JSDoc-Blöcke in `app.js` (65 Funktionen, 49 Variablen)
+- 441 Zeilen neue Dokumentation in `preload.js`
+- 339 Zeilen neue Dokumentation in `main.js`
+- 3 neue ADRs in `ARCHITECTURE.md` (#9 Flag-Speicherort, #10 Tab-Locking, #11 Auto-Close-Guard)

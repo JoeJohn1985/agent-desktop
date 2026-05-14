@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.21.0] - 2026-05-14
+
+### Added
+- JSDoc-Kommentare vollständig für alle Hauptdateien ergänzt:
+  - `main.js`: 15+ Modul-Variablen/Konstanten, 14 Funktionen, ~30 IPC-Handler mit `@ipc`, `@param`, `@returns`
+  - `preload.js`: Alle 22 `copilot.*`-Namespaces, jede IPC-Methode und Event-Subscriber mit Callback-Typen
+  - `renderer/app.js`: 114 JSDoc-Blöcke (65 Funktionen, 49 Variablen) — Tab-Management, Chat-Flow, Skills/Agents, Sessions, Plugins, Onboarding, Tutorial, Helpers
+  - `renderer/modules/todos.js`: 6 Funktionen + `@type` für `currentTodos`
+  - `src/scanners.js`: 3 fehlende Funktionen nachgetragen
+
+### Fixed
+- Merge-Konflikt in `renderer/app.js` behoben: `initShortcutsSettings()` und Onboarding-Toggle (Dev Tools) koexistieren korrekt in `initSettings()`
+- Merge-Konflikt in `renderer/index.html` behoben: Shortcuts-Tab und Devtools-Tab werden beide vollständig gerendert
+
+### Changed
+- `docs/USER-GUIDE.md`: Onboarding-Wizard (4 Schritte), Tutorial-Popups, Session Resume dokumentiert; Version auf v0.20.5 aktualisiert
+- `docs/ARCHITECTURE.md`: Onboarding-Wizard-Architektur (Sec 5.6), Tutorial-Flags-System (Sec 5.7), neue IPC-Namespaces `onboarding:*` / `tutorial:*` / `dev:*`, 3 neue ADRs (#9–#11), `tab:renamed` CustomEvent, Persistenz-Tabelle erweitert
+- `docs/known-issues.md`: Bekannte Einschränkungen v0.20.5 ergänzt
+- `README.md`: Feature-Liste in Gruppen gegliedert (Core, Skills/Agents, Onboarding, Productivity, Customisation), Onboarding-Wizard und weitere Features dokumentiert, Testanzahl auf 939+ aktualisiert
+
 ## [0.20.5] - 2026-05-14
 
 ### Added

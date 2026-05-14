@@ -3014,9 +3014,7 @@ function initSettings() {
 
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
-<<<<<<< Updated upstream
   initShortcutsSettings();
-=======
 
   // Dev tools: Onboarding toggle
   async function loadDevOnboardingState() {
@@ -3049,7 +3047,6 @@ function initSettings() {
   });
 
   document.querySelector('.settings__tab[data-tab="devtools"]')?.addEventListener('click', loadDevOnboardingState);
->>>>>>> Stashed changes
 }
 
 // ── Instructions Editor Modal ──────────────────────────────────────
