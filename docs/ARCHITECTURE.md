@@ -312,7 +312,7 @@ User              Renderer            Preload          Main              Copilot
 **Detaillierter Ablauf:**
 
 1. User tippt Nachricht in `<textarea>` (`renderer/app.js`)
-2. `sendMessage()` sammelt: `text`, `activeSkills`, `model`, `sessionId`, `allowedTools`, `deniedTools`, `extraDirs`, `resume`-Flag
+2. `sendMessage()` sammelt: `text`, `activeSkills`, `model`, `sessionId`, `allowedTools`, `deniedTools`, `extraDirs`, `resume`-Flag, `autopilot`-Flag
 3. IPC-Call `copilot:send` → `main.js`
 4. `spawnCopilot(tabId, prompt, options)` spawnt `copilot` CLI-Prozess mit `--output-format json --stream on`
 5. JSONL-Events (`text`, `tool_call`, `thinking`, `confirmation`, `model`, `mcp_servers`, `active_skills`, `active_instructions`, `session_id`, `cwd`) werden zeilenweise geparst

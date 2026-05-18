@@ -172,13 +172,15 @@ Der Hauptbereich rechts neben der Sidebar enthält alle Chat-relevanten Elemente
 
 #### Session-Actions Bar
 
-Direkt unter der Tab-Bar findest du drei Aktionen:
+Direkt unter der Tab-Bar findest du fünf Aktionen:
 
 | Button | Aktion | Beschreibung |
 |---|---|---|
 | 📊 Kontext | Token-Auslastung anzeigen | Popup mit farbcodierter Auslastung und Kategorien |
 | 📐 Compact | Session komprimieren | Fasst die bisherige Chat-History zusammen |
 | 🧹 Clear | Session-Kontext löschen | Entfernt den gesamten Kontext der Session |
+| 🤖 Autopilot | Autopilot-Modus umschalten | Aktiviert `--autopilot` für den nächsten CLI-Aufruf (pro Tab) |
+| 🧠 Model | KI-Modell für diesen Tab wählen | Öffnet ein Dropdown zur Modellauswahl (pro Tab, optional) |
 
 > Die Kontext-Auslastung wird **pro Tab** individuell berechnet.
 
@@ -291,7 +293,7 @@ Jede Session verfügt über eine eigene Todo-Liste. Todos werden in einer `todos
 
 ### Session-Actions
 
-Die Session-Actions Bar bietet drei wichtige Aktionen für die aktive Session:
+Die Session-Actions Bar bietet fünf wichtige Aktionen für die aktive Session:
 
 #### 📊 Kontext anzeigen
 
@@ -309,6 +311,23 @@ Komprimiert die Session, indem die bisherige Chat-History zusammengefasst wird. 
 #### 🧹 Clear
 
 Löscht den gesamten Session-Kontext. Die Chatverläufe in der Oberfläche bleiben sichtbar, aber Copilot hat keinen Kontext mehr aus vorherigen Nachrichten.
+
+#### 🤖 Autopilot
+
+Schaltet den Autopilot-Modus für den aktiven Tab ein oder aus. Wenn aktiviert (Button leuchtet grün), wird bei jedem Chat-Send das `--autopilot`-Flag an den Copilot CLI übergeben.
+
+- **Pro-Tab-State:** Jeder Tab hat einen eigenen Autopilot-Status, der beim Tab-Wechsel korrekt wiederhergestellt wird.
+- **Kein Reset durch Nachrichten:** Der Autopilot bleibt aktiv, bis er manuell deaktiviert wird.
+- **Visuelles Feedback:** Der Button erhält die grüne Akzentfarbe wenn aktiv.
+
+#### 🧠 Model
+
+Öffnet ein Dropdown zur tab-spezifischen Modellauswahl. Das gewählte Modell wird als `--model`-Argument an den nächsten CLI-Aufruf übergeben.
+
+- **Pro-Tab-State:** Jeder Tab hat ein eigenes ausgewähltes Modell (unabhängig von anderen Tabs).
+- **Kein Reset durch Nachrichten:** Das gewählte Modell bleibt aktiv, bis ein anderes gewählt wird.
+- **Visuelles Feedback:** Der Button zeigt den Label des gewählten Modells (z. B. „🧠 Claude Sonnet 4.6") und leuchtet grün wenn ein Modell aktiv ist.
+- **Standard:** Ohne explizite Auswahl wird kein `--model`-Argument übergeben (Copilot CLI verwendet den Default).
 
 ### Session Resume
 
