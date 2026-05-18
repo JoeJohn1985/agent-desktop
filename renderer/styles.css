@@ -1637,6 +1637,18 @@ mark.chat-search-highlight--active {
   pointer-events: none;
 }
 
+.session-actions__btn--active {
+  background: var(--accent, #2ea043);
+  border-color: var(--accent, #2ea043);
+  color: #fff;
+}
+
+.session-actions__btn--active:hover {
+  background: var(--accent-hover, #3fb950);
+  border-color: var(--accent-hover, #3fb950);
+  color: #fff;
+}
+
 /* Session Statusbar (info items, under input bar) */
 .session-statusbar {
   display: flex;
@@ -1685,6 +1697,15 @@ mark.chat-search-highlight--active {
   padding: 4px 0;
   z-index: 1000;
   animation: model-dropdown-in 0.12s ease-out;
+}
+
+.model-dropdown--below {
+  top: calc(100% + 4px);
+  bottom: auto;
+}
+
+.model-select-wrapper {
+  position: relative;
 }
 @keyframes model-dropdown-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -3699,8 +3720,6 @@ mark.chat-search-highlight--active {
   display: flex;
   gap: 12px;
 }
-<<<<<<< Updated upstream
-=======
 
 /* ── Tutorial Popup ──────────────────────────────────────── */
 .tutorial-popup {
@@ -3788,4 +3807,3 @@ mark.chat-search-highlight--active {
   border-top: none;
   right: auto;
 }
->>>>>>> Stashed changes

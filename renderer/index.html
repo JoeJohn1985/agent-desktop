@@ -161,6 +161,10 @@
         <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Context</button>
         <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
         <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
+        <button class="session-actions__btn" id="btnAutopilot" data-tooltip="Autopilot">🤖 Autopilot</button>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model für diesen Tab auswählen">🧠 Model</button>
+        </div>
         <div class="session-actions__spacer"></div>
         <div class="pinned-tools" id="pinnedTools"></div>
         <div class="tools-popup-wrapper">
@@ -253,7 +257,7 @@
       </div>
       <!-- Session Info Bar (under input, session-wide info) -->
       <div class="session-statusbar" id="sessionStatusbar">
-        <span class="session-statusbar__item session-statusbar__item--clickable" id="sbModel" data-tooltip="Modell wechseln">🧠 –</span>
+        <span class="session-statusbar__item" id="sbModel" data-tooltip="Aktuell verwendetes Modell">🧠 –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item" id="sbMcp" data-tooltip="MCP Server">🔌 –</span>
         <span class="session-statusbar__sep">·</span>

@@ -306,6 +306,9 @@ function spawnCopilot(tabId, prompt, options = {}) {
   if (options.effort) {
     args.push('--reasoning-effort', options.effort);
   }
+  if (options.autopilot) {
+    args.push('--autopilot');
+  }
 
   const proc = spawn(COPILOT_BIN, args, {
     cwd: options.cwd || COPILOT_CWD,

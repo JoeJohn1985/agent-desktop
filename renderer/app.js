@@ -60,7 +60,7 @@ let historySavedInput = '';
 /**
  * Map of all open chat tabs. Each entry holds the tab's DOM elements, session
  * state, processing flags, terminal reference, and context metadata.
- * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, context: Object}>}
+ * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, autopilot: boolean, context: Object}>}
  */
 const tabs = new Map();
 /** @type {Map<string, {toolName: string, arguments: Object}>} Pending tool calls awaiting completion, keyed by toolCallId. */
@@ -576,6 +576,8 @@ async function createTab(label) {
     _unlockBtnEl: null,
     allowedTools: new Set(),
     sessionDeniedTools: [],  // per-session denied tools [{name, enabled}]
+    autopilot: false,
+    selectedModel: null,
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
   });
 
@@ -591,6 +593,9 @@ async function createTab(label) {
  * @param {string} tabId - ID of the tab to activate.
  */
 function switchTab(tabId) {
+  // Close model dropdown if open
+  document.querySelector('.model-dropdown--below')?.remove();
+
   // If plugins view is active, switch back to chat view
   switchToChatView();
 
@@ -643,6 +648,13 @@ function switchTab(tabId) {
 
   // Refresh session tools list for this tab
   renderSessionTools();
+
+  // Update autopilot button for this tab
+  const autopilotBtn = document.getElementById('btnAutopilot');
+  autopilotBtn.classList.toggle('session-actions__btn--active', !!activeTab?.autopilot);
+
+  // Update model select button for this tab
+  updateModelSelectBtn();
   
   document.getElementById('chatInput')?.focus();
 }
@@ -1054,6 +1066,8 @@ function sendMessage() {
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
     addDirs: getEffectiveExtraDirs(),
+    autopilot: tab.autopilot || undefined,
+    model: tab.selectedModel || undefined,
   });
 
   // Update lastUsed for sorting
@@ -1394,19 +1408,38 @@ function getAvailableModels() {
 }
 
 /**
- * Initialize the model switcher dropdown on the statusbar. Clicking the
- * model segment opens a dropdown of available models for quick switching.
+ * Update the tab-header model select button to reflect the active tab's
+ * selected model state. Called on tab switch and after model selection.
  */
-function initModelSwitcher() {
-  const sbModel = document.getElementById('sbModel');
-  if (!sbModel) return;
+function updateModelSelectBtn() {
+  const btn = document.getElementById('btnModelSelect');
+  if (!btn) return;
+  const tab = tabs.get(activeTabId);
+  const modelId = tab?.selectedModel;
+  if (modelId) {
+    const found = DEFAULT_MODELS.find(m => m.id === modelId);
+    btn.textContent = `🧠 ${found ? found.label : modelId}`;
+    btn.classList.add('session-actions__btn--active');
+  } else {
+    btn.textContent = '🧠 Model';
+    btn.classList.remove('session-actions__btn--active');
+  }
+}
+
+/**
+ * Initialize the tab-specific model selector button in the session-actions bar.
+ * Clicking the button opens a dropdown that sets tab.selectedModel, which is
+ * then passed as --model to the Copilot process on the next sendMessage() call.
+ */
+function initTabModelSelector() {
+  const btn = document.getElementById('btnModelSelect');
+  if (!btn) return;
 
   let activeCloseHandler = null;
 
-  sbModel.addEventListener('click', (e) => {
+  btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    // Close existing dropdown if any
-    const existing = document.querySelector('.model-dropdown');
+    const existing = document.querySelector('.model-dropdown--below');
     if (existing) {
       existing.remove();
       if (activeCloseHandler) {
@@ -1418,27 +1451,35 @@ function initModelSwitcher() {
 
     const models = getAvailableModels();
     const tab = tabs.get(activeTabId);
-    const currentModel = tab?.context?.model || '';
+    const currentModel = tab?.selectedModel || '';
 
     const dropdown = document.createElement('div');
-    dropdown.className = 'model-dropdown';
+    dropdown.className = 'model-dropdown model-dropdown--below';
 
     models.forEach(m => {
-      const isActive = currentModel === m.id || currentModel === m.label
-        || currentModel.includes(m.id);
+      const isActive = currentModel === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
       item.innerHTML = `<span class="model-dropdown__check">${isActive ? '✓' : ''}</span><span class="model-dropdown__label">${escapeHtml(m.label)}</span><span class="model-dropdown__id">${escapeHtml(m.id)}</span>`;
-      item.addEventListener('click', () => switchModel(m));
+      item.addEventListener('click', () => {
+        dropdown.remove();
+        if (activeCloseHandler) {
+          document.removeEventListener('click', activeCloseHandler, true);
+          activeCloseHandler = null;
+        }
+        if (!activeTabId) return;
+        const t = tabs.get(activeTabId);
+        if (!t) return;
+        t.selectedModel = m.id;
+        updateModelSelectBtn();
+      });
       dropdown.appendChild(item);
     });
 
-    const statusbar = document.getElementById('sessionStatusbar');
-    statusbar.appendChild(dropdown);
+    btn.closest('.model-select-wrapper').appendChild(dropdown);
 
-    // Close on outside click
     activeCloseHandler = (ev) => {
-      if (!dropdown.contains(ev.target) && ev.target !== sbModel) {
+      if (!dropdown.contains(ev.target) && ev.target !== btn) {
         dropdown.remove();
         document.removeEventListener('click', activeCloseHandler, true);
         activeCloseHandler = null;
@@ -1446,40 +1487,6 @@ function initModelSwitcher() {
     };
     setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
   });
-}
-
-/**
- * Switch the active tab's model by sending a `/model <id>` slash command.
- * Optimistically updates the UI and rolls back on failure.
- * @param {{id: string, label: string}} model - The model to switch to.
- * @returns {Promise<void>}
- */
-async function switchModel(model) {
-  // Close dropdown
-  const dropdown = document.querySelector('.model-dropdown');
-  if (dropdown) dropdown.remove();
-
-  if (!activeTabId) return;
-  const tab = tabs.get(activeTabId);
-  if (!tab) return;
-
-  // Save previous state for rollback
-  const prevModel = tab.context.model;
-  const prevLabel = document.getElementById('sbModel')?.textContent || '';
-
-  // Optimistically update display
-  tab.context.model = model.id;
-  updateStatusbar('sbModel', `🧠 ${model.label}`);
-
-  // Send slash command — `/model <id>` (with argument) outputs text, no TUI
-  try {
-    await copilot.terminal.sendSlash(activeTabId, `/model ${model.id}`);
-  } catch (err) {
-    console.error('[ModelSwitcher] Failed to switch model:', err);
-    // Rollback on error
-    tab.context.model = prevModel;
-    document.getElementById('sbModel').textContent = prevLabel;
-  }
 }
 
 // ── Session Export ──────────────────────────────────────────
@@ -2833,6 +2840,14 @@ function initSlashButtons() {
     }
   });
 
+  document.getElementById('btnAutopilot').addEventListener('click', () => {
+    if (activeTabId == null) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab) return;
+    tab.autopilot = !tab.autopilot;
+    document.getElementById('btnAutopilot').classList.toggle('session-actions__btn--active', tab.autopilot);
+  });
+
   document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());
   document.getElementById('todoInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
@@ -3495,6 +3510,9 @@ function initKeyboardShortcuts() {
     if (sc('toggleSidebar', e)) { e.preventDefault(); document.getElementById('btnCollapseSidebar').click(); return; }
 
     if (e.key === 'Escape') {
+      // Close model dropdown first (highest priority)
+      const modelDd = document.querySelector('.model-dropdown--below');
+      if (modelDd) { modelDd.remove(); return; }
       const testPopup = document.getElementById('testRunnerPopup');
       if (testPopup && testPopup.style.display !== 'none') { closeTestRunner(); return; }
       const shortcutsOverlay = document.getElementById('shortcutsOverlay');
@@ -4337,6 +4355,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initKeyboardShortcuts();
   initDragDrop();
   initTooltips();
-  initModelSwitcher();
+  initTabModelSelector();
   initOnboarding();
 });
