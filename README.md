@@ -27,13 +27,14 @@
 ### Productivity
 - ✅ **Todos** — Per-session task list with add, complete, and delete (🗑️) actions
 - 🤖 **Autopilot Toggle** — Per-tab toggle that passes `--autopilot` to the Copilot CLI; state persists across tab switches
+- ✏️ **Rich-Text Editor** — Optional contenteditable input with formatting toolbar (Bold, Italic, Strikethrough, UL, OL); converted to Markdown on send
 - 🔌 **Plugin Manager** — Browse and manage skill/agent marketplaces; install, update, and remove plugins
 - ⌨️ **Keyboard Shortcuts** — Configurable shortcuts with a built-in shortcut overlay
 - ⏱️ **Tab-Unlock Fallback** — Manual unlock button after 30s inactivity; automatic unlock after 180s for hanging sub-agent tabs
 
 ### Customisation
 - 🎨 **Themes** — Multiple built-in color themes
-- 🔀 **Model Switcher** — Switch between AI models per tab from the session toolbar
+- 🔀 **Model Switcher** — Switch between AI models per tab; selection persists across app restarts for all sessions
 - 🔒 **Permission System** — Configurable tool permissions (read, write, shell, etc.)
 - ⚙️ **Settings Dialog** — Model selection, permissions, folder paths (including custom agents directory), and preferences
 

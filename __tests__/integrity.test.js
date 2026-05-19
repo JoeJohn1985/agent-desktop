@@ -280,8 +280,9 @@ describe('Keyboard-Shortcuts UI-Integrität', () => {
   const rendererAppJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf-8');
 
   // HTML-Elemente die der Shortcuts-Code anspricht
+  // Note: btnShortcutsHelp was intentionally removed from the sidebar;
+  // app.js uses optional chaining (?.) so it gracefully handles its absence.
   const shortcutIds = [
-    'btnShortcutsHelp',
     'btnShortcutsClose',
     'shortcutsOverlay',
     'shortcutsHelpContent',

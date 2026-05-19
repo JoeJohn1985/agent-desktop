@@ -872,7 +872,7 @@ body {
 }
 
 /* ── Settings Dialog ─────────────────────────────────── */
-.overlay__dialog--settings { min-width: 460px; max-width: 540px; max-height: 80vh; display: flex; flex-direction: column; }
+.overlay__dialog--settings { min-width: 620px; max-width: 620px; max-height: 80vh; display: flex; flex-direction: column; }
 .settings__tabs {
   display: flex;
   gap: 0;
@@ -1725,13 +1725,14 @@ mark.chat-search-highlight--active {
   background: var(--bg-hover);
 }
 .model-dropdown__item--active {
+  background: var(--bg-hover);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
   color: var(--accent);
   font-weight: 600;
 }
 .model-dropdown__check {
-  width: 14px;
-  text-align: center;
-  flex-shrink: 0;
+  display: none;
 }
 .model-dropdown__label {
   flex: 1;
@@ -1751,7 +1752,7 @@ mark.chat-search-highlight--active {
   background: var(--bg-base);
 }
 .chat-input {
-  flex: 1;
+  width: 100%;
   min-height: 36px;
   max-height: 120px;
   padding: 6px 12px;
@@ -1793,6 +1794,69 @@ mark.chat-search-highlight--active {
   flex-shrink: 0;
 }
 .chat-terminal-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Rich-Text Editor ──────────────────────────────────── */
+.chat-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.rich-text-toolbar {
+  display: none;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.rich-text-toolbar.visible {
+  display: flex;
+}
+.rt-btn {
+  height: 24px;
+  min-width: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.rt-btn:hover {
+  background: var(--bg-hover);
+}
+.rt-btn:active, .rt-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.chat-input-rich {
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.4;
+}
+.chat-input-rich:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.chat-input-rich:focus {
+  border-color: var(--accent);
+}
+.rich-text-toolbar.visible + .chat-input,
+.rich-text-toolbar.visible + .chat-input + .chat-input-rich {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+#btnToggleRichText.active {
   background: var(--accent);
   color: #fff;
 }

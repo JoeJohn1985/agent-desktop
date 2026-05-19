@@ -55,6 +55,8 @@ const inputHistory = [];
 let historyIndex = -1;
 /** @type {string} Saved input text before browsing history. */
 let historySavedInput = '';
+/** @type {boolean} Rich-Text-Editor mode toggle (global). */
+let richTextMode = false;
 
 // Multi-Tab State
 /**
@@ -190,6 +192,14 @@ async function restoreOpenTabs() {
         tab.sessionId = t.sessionId;
         // Load denied tools from namedSessions
         tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
+        // Restore persisted model for this session
+        if (t.sessionId) {
+          const sessionModel = getSessionModel(t.sessionId);
+          if (sessionModel) {
+            tab.selectedModel = sessionModel;
+            updateModelSelectBtn(tabId);
+          }
+        }
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
         // Render pinned tools now that sessionDeniedTools are loaded
@@ -222,7 +232,7 @@ function saveSetting(key, value) {
 // ── Named Sessions (persistent, CLI-sicher) ──────────────────
 /**
  * Retrieve the named-sessions map from preferences.
- * @returns {Object<string, {name: string, deniedTools: string[], lastUsed: string}>}
+ * @returns {Object<string, {name: string, deniedTools: Array, lastUsed: string}>}
  */
 function getNamedSessions() {
   return getPref('namedSessions', {});
@@ -297,6 +307,31 @@ function saveSessionDeniedTools(sessionId, tools) {
     all[sessionId].deniedTools = tools;
     setPref('namedSessions', all);
   }
+}
+
+/**
+ * Get the persisted model for a specific session.
+ * Uses a dedicated 'sessionModels' preference map so model selection is
+ * preserved for all sessions, not just explicitly named ones.
+ * @param {string} sessionId
+ * @returns {string|null}
+ */
+function getSessionModel(sessionId) {
+  const models = getPref('sessionModels', {});
+  return models[sessionId] || null;
+}
+
+/**
+ * Persist the selected model for a specific session.
+ * Stores in a dedicated 'sessionModels' pref (separate from namedSessions)
+ * so the model is saved for all sessions — including unnamed ones.
+ * @param {string} sessionId
+ * @param {string} modelId
+ */
+function saveSessionModel(sessionId, modelId) {
+  const models = getPref('sessionModels', {});
+  models[sessionId] = modelId;
+  setPref('sessionModels', models);
 }
 
 function getDeniedTools() {
@@ -415,6 +450,10 @@ function applyDevMode(enabled) {
     const panel = document.getElementById('devConsolePanel');
     if (panel) panel.style.display = 'none';
   }
+  const onboardingResetGroup = document.getElementById('settOnboardingResetGroup');
+  const onboardingResetSeparator = document.getElementById('settOnboardingResetSeparator');
+  if (onboardingResetGroup) onboardingResetGroup.style.display = enabled ? '' : 'none';
+  if (onboardingResetSeparator) onboardingResetSeparator.style.display = enabled ? '' : 'none';
 }
 
 // ── Notification Sound ──────────────────────────────────────
@@ -577,7 +616,7 @@ async function createTab(label) {
     allowedTools: new Set(),
     sessionDeniedTools: [],  // per-session denied tools [{name, enabled}]
     autopilot: false,
-    selectedModel: null,
+    selectedModel: DEFAULT_MODEL_ID,
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
   });
 
@@ -954,14 +993,65 @@ function hideUnlockButton(tabId) {
 
 // ── Send Message ─────────────────────────────────────────────
 /**
+ * Convert HTML from the rich-text contenteditable to Markdown.
+ */
+function convertHtmlToMarkdown(html) {
+  // Process ordered lists
+  html = html.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
+    let idx = 0;
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__, content) => {
+      idx++;
+      return idx + '. ' + content.replace(/<[^>]+>/g, '').trim() + '\n';
+    });
+  });
+  // Process unordered lists
+  html = html.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__, content) => {
+      return '- ' + content.replace(/<[^>]+>/g, '').trim() + '\n';
+    });
+  });
+  // Bold
+  html = html.replace(/<(b|strong)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
+  // Italic
+  html = html.replace(/<(i|em)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*');
+  // Strikethrough
+  html = html.replace(/<(s|strike|del)[^>]*>([\s\S]*?)<\/\1>/gi, '~~$2~~');
+  // Line breaks
+  html = html.replace(/<br\s*\/?>/gi, '\n');
+  html = html.replace(/<\/p>/gi, '\n');
+  html = html.replace(/<\/div>/gi, '\n');
+  // Remove remaining HTML tags
+  html = html.replace(/<[^>]+>/g, '');
+  // Decode HTML entities
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = html;
+  html = textarea.value;
+  // Collapse multiple blank lines
+  html = html.replace(/\n{3,}/g, '\n\n');
+  return html;
+}
+
+/**
  * Send the current chat input to the Copilot CLI backend.
  * Handles slash-command detection, input history, skill/agent prefix
  * injection, denied-tools merging, and UI state updates.
  */
 function sendMessage() {
   const input = document.getElementById('chatInput');
-  const text = input.value.trim();
-  if (!text || activeTabId == null) return;
+  const richInput = document.getElementById('chatInputRich');
+  let text;
+
+  if (richTextMode) {
+    const html = richInput.innerHTML.trim();
+    if (!html || html === '<br>') return;
+    text = convertHtmlToMarkdown(html).trim();
+    if (!text) return;
+  } else {
+    text = input.value.trim();
+    if (!text) return;
+  }
+
+  if (activeTabId == null) return;
 
   // Add to input history
   if (!inputHistory.length || inputHistory[inputHistory.length - 1] !== text) {
@@ -975,8 +1065,12 @@ function sendMessage() {
 
   // Detect slash commands → open terminal
   if (text.startsWith('/')) {
-    input.value = '';
-    input.style.height = 'auto';
+    if (richTextMode) {
+      richInput.innerHTML = '';
+    } else {
+      input.value = '';
+      input.style.height = 'auto';
+    }
     openTerminal(activeTabId, tab.sessionId, text);
     return;
   }
@@ -1067,15 +1161,19 @@ function sendMessage() {
     allowAllPaths: settings.allowAllPaths === true,
     addDirs: getEffectiveExtraDirs(),
     autopilot: tab.autopilot || undefined,
-    model: tab.selectedModel || undefined,
+    model: tab.selectedModel || DEFAULT_MODEL_ID,
   });
 
   // Update lastUsed for sorting
   if (tab.sessionId) touchSession(tab.sessionId);
 
   // Clear input
-  input.value = '';
-  input.style.height = 'auto';
+  if (richTextMode) {
+    richInput.innerHTML = '';
+  } else {
+    input.value = '';
+    input.style.height = 'auto';
+  }
 
   scrollToBottom(tab.streamEl);
 }
@@ -1301,7 +1399,7 @@ function initCopilotIPC() {
           tab.context.model = modelName;
           tab.statusEl.textContent = `● Modell: ${modelName}`;
           tab.statusEl.style.display = 'block';
-          updateStatusbar('sbModel', `🧠 ${modelName}`);
+          updateModelSelectBtn(tabId);
         }
         break;
       }
@@ -1324,6 +1422,8 @@ function initCopilotIPC() {
         // Store sessionId for resume
         if (event.sessionId) {
           tab.sessionId = event.sessionId;
+          // Persist selected model for this new session
+          if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
           saveOpenTabs();
           // Start background terminal for this session
           copilot.terminal.spawnBackground(tabId, event.sessionId).catch(e => {
@@ -1394,13 +1494,14 @@ window.confirmDeleteAgent = confirmDeleteAgent;
 // ── Model Switcher ────────────────────────────────────────────
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
 // the background terminal. We use a preferences-stored model list instead.
+const DEFAULT_MODEL_ID = 'claude-sonnet-4.6';
 const DEFAULT_MODELS = [
-  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
-  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { id: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
-  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex' },
-  { id: 'gpt-4.1', label: 'GPT-4.1' },
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
+  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
+  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
+  { id: 'claude-opus-4.7', label: 'Claude Opus 4.7', short: 'Opus 4.7' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
+  { id: 'gpt-4.1', label: 'GPT-4.1', short: 'GPT-4.1' },
 ];
 
 function getAvailableModels() {
@@ -1411,19 +1512,16 @@ function getAvailableModels() {
  * Update the tab-header model select button to reflect the active tab's
  * selected model state. Called on tab switch and after model selection.
  */
-function updateModelSelectBtn() {
+function updateModelSelectBtn(tabId) {
   const btn = document.getElementById('btnModelSelect');
   if (!btn) return;
-  const tab = tabs.get(activeTabId);
-  const modelId = tab?.selectedModel;
-  if (modelId) {
-    const found = DEFAULT_MODELS.find(m => m.id === modelId);
-    btn.textContent = `🧠 ${found ? found.label : modelId}`;
-    btn.classList.add('session-actions__btn--active');
-  } else {
-    btn.textContent = '🧠 Model';
-    btn.classList.remove('session-actions__btn--active');
-  }
+  const tab = tabs.get(tabId ?? activeTabId);
+  // Explicit selection takes priority, fallback to actual model from session,
+  // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
+  const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
+  const found = DEFAULT_MODELS.find(m => m.id === modelId);
+  btn.textContent = `🧠 ${found ? found.short : modelId}`;
+  btn.classList.remove('session-actions__btn--active');
 }
 
 /**
@@ -1450,7 +1548,8 @@ function initTabModelSelector() {
     }
 
     const models = getAvailableModels();
-    const tab = tabs.get(activeTabId);
+    const openedForTabId = activeTabId;
+    const tab = tabs.get(openedForTabId);
     const currentModel = tab?.selectedModel || '';
 
     const dropdown = document.createElement('div');
@@ -1460,18 +1559,18 @@ function initTabModelSelector() {
       const isActive = currentModel === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
-      item.innerHTML = `<span class="model-dropdown__check">${isActive ? '✓' : ''}</span><span class="model-dropdown__label">${escapeHtml(m.label)}</span><span class="model-dropdown__id">${escapeHtml(m.id)}</span>`;
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span><span class="model-dropdown__id">${escapeHtml(m.id)}</span>`;
       item.addEventListener('click', () => {
         dropdown.remove();
         if (activeCloseHandler) {
           document.removeEventListener('click', activeCloseHandler, true);
           activeCloseHandler = null;
         }
-        if (!activeTabId) return;
-        const t = tabs.get(activeTabId);
+        const t = tabs.get(openedForTabId);
         if (!t) return;
         t.selectedModel = m.id;
-        updateModelSelectBtn();
+        if (t.sessionId) saveSessionModel(t.sessionId, m.id);
+        updateModelSelectBtn(openedForTabId);
       });
       dropdown.appendChild(item);
     });
@@ -1637,6 +1736,13 @@ async function resumeSession(sessionId) {
 
   // Restore session denied tools from namedSessions
   tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
+
+  // Restore persisted model for this session
+  const sessionModel = getSessionModel(sessionId);
+  if (sessionModel) {
+    tab.selectedModel = sessionModel;
+    updateModelSelectBtn(tabId);
+  }
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
@@ -2567,10 +2673,14 @@ async function initDataLoad() {
  */
 function initChatInput() {
   const chatInput = document.getElementById('chatInput');
+  const chatInputRich = document.getElementById('chatInputRich');
   const btnSend = document.getElementById('btnSend');
+  const btnToggle = document.getElementById('btnToggleRichText');
+  const toolbar = document.getElementById('richTextToolbar');
 
   btnSend.addEventListener('click', () => sendMessage());
 
+  // Normal textarea key handling
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -2606,6 +2716,45 @@ function initChatInput() {
   chatInput.addEventListener('input', () => {
     chatInput.style.height = 'auto';
     chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+  });
+
+  // Rich-Text contenteditable key handling
+  chatInputRich.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.ctrlKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    // Normal Enter and Shift+Enter insert line break (default behavior)
+  });
+
+  // Rich-Text toolbar buttons
+  toolbar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rt-btn');
+    if (!btn) return;
+    e.preventDefault();
+    const cmd = btn.dataset.cmd;
+    document.execCommand(cmd, false, null);
+    chatInputRich.focus();
+  });
+
+  // Toggle Rich-Text mode
+  btnToggle.addEventListener('click', () => {
+    richTextMode = !richTextMode;
+    btnToggle.classList.toggle('active', richTextMode);
+    btnToggle.textContent = richTextMode ? '📝' : '✏️';
+    toolbar.classList.toggle('visible', richTextMode);
+
+    if (richTextMode) {
+      chatInput.style.display = 'none';
+      chatInputRich.style.display = '';
+      chatInputRich.focus();
+      btnSend.setAttribute('data-tooltip', 'Senden (Strg+Enter)');
+    } else {
+      chatInputRich.style.display = 'none';
+      chatInput.style.display = '';
+      chatInput.focus();
+      btnSend.setAttribute('data-tooltip', 'Senden (Enter)');
+    }
   });
 
   document.getElementById('sessionSearch').addEventListener('input', () => {
@@ -2931,6 +3080,7 @@ function initSettings() {
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
     settingsOverlay.classList.add('overlay--visible');
+    loadDevOnboardingState();
   });
 
   document.getElementById('btnSettingsClose').addEventListener('click', () => {
@@ -3061,7 +3211,7 @@ function initSettings() {
     }
   });
 
-  document.querySelector('.settings__tab[data-tab="devtools"]')?.addEventListener('click', loadDevOnboardingState);
+  document.querySelector('.settings__tab[data-tab="ui"]')?.addEventListener('click', loadDevOnboardingState);
 }
 
 // ── Instructions Editor Modal ──────────────────────────────────────

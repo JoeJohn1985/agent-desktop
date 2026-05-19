@@ -1,36 +1,37 @@
-# Release Notes v0.21.0
+# Release Notes v0.23.0
 
 ## Was ist neu?
 
-### Vollständige JSDoc-Dokumentation 📚
+### Rich-Text-Editor im Chat ✏️
 
-Der gesamte Quellcode ist jetzt lückenlos mit JSDoc-Kommentaren dokumentiert:
+Der Chat-Input unterstützt jetzt einen optionalen Rich-Text-Modus:
 
-- **`main.js`**: Alle IPC-Handler (`~30`), Modul-Variablen und Funktionen mit `@ipc`, `@param`, `@returns` vollständig beschrieben.
-- **`preload.js`**: Alle 22 `copilot.*`-Namespaces dokumentiert — jede Methode und jeder Event-Subscriber mit Callback-Typen.
-- **`renderer/app.js`**: 114 JSDoc-Blöcke — Tab-Management, Chat-Flow, Skills/Agents, Sessions, Plugins, Onboarding, Tutorial und Helpers vollständig abgedeckt.
-- **`renderer/modules/todos.js`** und **`src/scanners.js`**: Verbleibende Lücken geschlossen.
+- **Toggle-Button** (✏️ / 📝) neben dem Eingabefeld — jederzeit zwischen Plaintext und Rich-Text wechseln
+- **Toolbar** mit Bold, Italic, Strikethrough, ungeordneten und geordneten Listen
+- **Tastatur-Shortcuts**: Enter = Zeilenumbruch im Rich-Text-Modus, Strg+Enter = Nachricht senden
+- **Automatische Konvertierung**: HTML wird beim Senden transparent zu Markdown umgewandelt — das Backend erhält immer sauberes Markdown
 
-### Merge-Konflikt-Fixes 🔧
+### Model-Dropdown Redesign 🎨
 
-Zwei Merge-Konflikte in der Renderer-Schicht wurden behoben:
+Das aktive Model wird jetzt deutlicher hervorgehoben:
 
-- **`renderer/app.js`**: `initShortcutsSettings()` und der Onboarding-Toggle (Entwicklertools) werden jetzt beide korrekt in `initSettings()` initialisiert.
-- **`renderer/index.html`**: Settings-Tabs „Tastenkürzel" und „Entwicklertools" erscheinen beide vollständig im UI.
+- **Accent-Balken** links vom aktiven Eintrag statt eines Häkchens
+- **Hintergrund-Highlighting** für das gewählte Model
+- **Neue Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7 → GPT-5.3 → GPT-4.1
 
-### Dokumentation auf aktuellem Stand 📝
+### Button-Reihenfolge in Session-Actions
 
-- **USER-GUIDE**: Onboarding-Wizard, Tutorial-Popups und Session Resume erklärt.
-- **ARCHITECTURE**: Neue Architektur-Abschnitte für Onboarding (Sec 5.6) und Tutorial-Flags (Sec 5.7), 3 neue ADRs, erweiterte IPC-Tabellen.
-- **known-issues**: Bekannte Einschränkungen für v0.20.5 dokumentiert.
-- **README**: Feature-Liste neu strukturiert, Testanzahl auf 939+ aktualisiert.
+Die Buttons in der Session-Leiste folgen jetzt einer einheitlichen Logik:
+**Model → Autopilot → Context → Compact → Clear**
 
 ## Bug Fixes
-- Merge-Konflikt in `renderer/app.js` (`initShortcutsSettings` + Onboarding-Toggle) behoben
-- Merge-Konflikt in `renderer/index.html` (Shortcuts-Tab + Devtools-Tab) behoben
+- **Model-Persistenz nach Restart**: Das zuletzt gewählte Model wird nach App-Neustart korrekt wiederhergestellt (beide Restore-Pfade: named Sessions und anonyme Sessions)
+- **Model-Persistenz für neue Sessions**: Neuer dedizierter `sessionModels`-Pref-Key verhindert, dass neu erstellte Sessions ihr gewähltes Model nach Restart verlieren
+- Dead Code in `updateModelSelectBtn` entfernt
+- Integrity-Test bereinigt (`btnShortcutsHelp` entfernt)
 
 ## Technische Details
-- 114 neue JSDoc-Blöcke in `app.js` (65 Funktionen, 49 Variablen)
-- 441 Zeilen neue Dokumentation in `preload.js`
-- 339 Zeilen neue Dokumentation in `main.js`
-- 3 neue ADRs in `ARCHITECTURE.md` (#9 Flag-Speicherort, #10 Tab-Locking, #11 Auto-Close-Guard)
+- Rich-Text-Editor auf Basis von `contenteditable` mit HTML→Markdown-Konvertierung beim Senden
+- `sessionModels`-Pref-Key entkoppelt von `namedSessions` — unabhängige Persistenz
+- `updateModelSelectBtn()` wird in beiden Session-Restore-Pfaden nach dem Setzen von `tab.selectedModel` aufgerufen
+- Dokumentation aktualisiert: USER-GUIDE.md, ARCHITECTURE.md, README.md

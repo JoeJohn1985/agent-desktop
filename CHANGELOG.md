@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.23.0] - 2026-05-29
+
+### Added
+- **Rich-Text-Editor Toggle**: Neuer ✏️/📝-Button im Chat-Input — umschalten zwischen Plaintext und Rich-Text-Modus. Toolbar mit Bold, Italic, Strikethrough, UL, OL. Enter = Zeilenumbruch, Strg+Enter = Senden. HTML wird beim Senden zu Markdown konvertiert.
+- **Model-Dropdown Redesign**: Aktives Model wird mit Accent-Balken links + Hintergrund hervorgehoben (kein Häkchen mehr)
+- **Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7 → GPT-5.3 → GPT-4.1
+- **Button-Reihenfolge**: Model → Autopilot → Context → Compact → Clear
+
+### Fixed
+- **Model-Persistenz nach App-Restart**: `updateModelSelectBtn()` wird jetzt korrekt nach `tab.selectedModel = sessionModel` aufgerufen in beiden Restore-Pfaden
+- **Model-Persistenz für neue Sessions**: `saveSessionModel` nutzt jetzt eigenen `sessionModels`-Pref-Key (unabhängig von `namedSessions`) — neue Sessions verlieren ihr gewähltes Model nicht mehr nach Restart
+- **Dead Code** in `updateModelSelectBtn` entfernt
+- **Integrity-Test** bereinigt (`btnShortcutsHelp` entfernt)
+
+### Changed
+- Dokumentation aktualisiert: USER-GUIDE.md, ARCHITECTURE.md, README.md
+
 ## [0.21.0] - 2026-05-14
 
 ### Added

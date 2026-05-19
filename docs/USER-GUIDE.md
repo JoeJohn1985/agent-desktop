@@ -209,8 +209,18 @@ Der zentrale Bereich für die Kommunikation mit Copilot:
 - **Terminal-Toggle** (links) – Terminal ein-/ausblenden.
 - **Export-Button** – Chat als HTML oder Text exportieren.
 - **Textarea** mit Placeholder „Nachricht eingeben…"
-- **Senden-Button** (oder `Enter`).
-- `Shift+Enter` für einen Zeilenumbruch innerhalb der Nachricht.
+- **Rich-Text-Toggle** (✏️) – Wechselt zwischen einfacher Textarea und dem Rich-Text-Editor.
+- **Senden-Button** (oder `Enter` / `Strg+Enter` im Rich-Text-Modus).
+- `Shift+Enter` für einen Zeilenumbruch innerhalb der Nachricht (Textarea-Modus).
+
+##### Rich-Text-Editor
+
+Klick auf den ✏️-Button aktiviert den Rich-Text-Modus:
+
+- **Formatierungs-Toolbar** (erscheint über dem Eingabefeld): **B**old, *I*talic, S̶trike, Aufzählung (UL), Nummerierung (OL).
+- **Senden:** `Strg+Enter` (Enter erzeugt Zeilenumbruch).
+- Die Formatierung wird beim Senden automatisch in **Markdown** umgewandelt (`**fett**`, `*kursiv*`, `~~durchgestrichen~~`, `- Liste`).
+- Umschalten zurück zur Textarea mit erneutem Klick auf den Toggle-Button.
 
 ### Session-Statusbar
 
@@ -218,11 +228,12 @@ Am unteren Rand zeigt die Statusbar kontextuelle Informationen zur aktiven Sessi
 
 | Icon | Information |
 |---|---|
-| 🧠 | Aktives KI-Modell (z. B. „Claude Sonnet 4") |
 | 🔌 | Anzahl verbundener MCP-Server |
 | 🛠 | Anzahl aktiver Skills |
 | 📋 | Anzahl geladener Instructions |
 | 📂 | Aktuelles Arbeitsverzeichnis (CWD) |
+
+> **Hinweis:** Das aktive KI-Modell wird nicht mehr in der Statusbar, sondern direkt im **🧠 Model-Button** der Session-Aktionsleiste angezeigt.
 
 ---
 
@@ -326,8 +337,9 @@ Schaltet den Autopilot-Modus für den aktiven Tab ein oder aus. Wenn aktiviert (
 
 - **Pro-Tab-State:** Jeder Tab hat ein eigenes ausgewähltes Modell (unabhängig von anderen Tabs).
 - **Kein Reset durch Nachrichten:** Das gewählte Modell bleibt aktiv, bis ein anderes gewählt wird.
-- **Visuelles Feedback:** Der Button zeigt den Label des gewählten Modells (z. B. „🧠 Claude Sonnet 4.6") und leuchtet grün wenn ein Modell aktiv ist.
-- **Standard:** Ohne explizite Auswahl wird kein `--model`-Argument übergeben (Copilot CLI verwendet den Default).
+- **Visuelles Feedback:** Der Button zeigt den Kurznamen des gewählten Modells (z. B. „🧠 Sonnet 4.6").
+- **Persistenz:** Das gewählte Modell wird session-spezifisch gespeichert und nach App-Neustart automatisch wiederhergestellt — auch für unbenannte Sessions.
+- **Standard:** Ohne explizite Auswahl wird `claude-sonnet-4.6` verwendet.
 
 ### Session Resume
 

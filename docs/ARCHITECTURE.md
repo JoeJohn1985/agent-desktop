@@ -235,6 +235,8 @@
 - Ein langer prozeduraler Layer (~2.4k Zeilen), zerlegt in Sektionen für Chat, Tabs, Settings, Theme, Search, Skills, Agents, Folders, Instructions.
 - Empfängt `copilot:event` (assistant-text-delta, tool-use, tool-result, …) und rendert sie inkrementell mit `window.markdown.render`.
 - Verwaltet Tabs als Array; Persistenz über `preferences.openTabs`.
+- **Rich-Text-Editor:** Globales Flag `richTextMode` steuert, ob Eingabe über `<textarea>` oder `contenteditable`-div erfolgt. `convertHtmlToMarkdown()` wandelt `execCommand`-formatiertes HTML vor dem Senden in Markdown um.
+- **Modell-Persistenz:** `getSessionModel(sessionId)` / `saveSessionModel(sessionId, modelId)` nutzen den dedizierten Pref-Key `sessionModels` (flache Map `{sessionId → modelId}`) — unabhängig von `namedSessions`, damit die Auswahl auch für unbenannte Sessions erhalten bleibt.
 
 ### 5.5 Renderer-Module
 

@@ -116,9 +116,6 @@
         <button class="action-btn" id="btnSettings" data-tooltip="Einstellungen">
           ⚙️
         </button>
-        <button class="action-btn" id="btnShortcutsHelp" data-tooltip="Tastenkürzel anzeigen (Ctrl+/)">
-          ⌨️
-        </button>
       </div>
     </aside>
 
@@ -158,13 +155,13 @@
       </div>
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
-        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Context</button>
-        <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
-        <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
-        <button class="session-actions__btn" id="btnAutopilot" data-tooltip="Autopilot">🤖 Autopilot</button>
         <div class="model-select-wrapper">
           <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model für diesen Tab auswählen">🧠 Model</button>
         </div>
+        <button class="session-actions__btn" id="btnAutopilot" data-tooltip="Autopilot">🤖 Autopilot</button>
+        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Context</button>
+        <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
+        <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
         <div class="session-actions__spacer"></div>
         <div class="pinned-tools" id="pinnedTools"></div>
         <div class="tools-popup-wrapper">
@@ -252,13 +249,22 @@
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
         <button class="chat-terminal-btn" id="btnExportChat" data-tooltip="Chat als Markdown exportieren">📥</button>
-        <textarea class="chat-input" id="chatInput" placeholder="Nachricht eingeben…" rows="1"></textarea>
+        <div class="chat-input-wrapper">
+          <div class="rich-text-toolbar" id="richTextToolbar">
+            <button class="rt-btn" data-cmd="bold" data-tooltip="Fett (Ctrl+B)"><b>B</b></button>
+            <button class="rt-btn" data-cmd="italic" data-tooltip="Kursiv (Ctrl+I)"><i>I</i></button>
+            <button class="rt-btn" data-cmd="strikethrough" data-tooltip="Durchgestrichen">S̶</button>
+            <button class="rt-btn" data-cmd="insertUnorderedList" data-tooltip="Aufzählung">UL</button>
+            <button class="rt-btn" data-cmd="insertOrderedList" data-tooltip="Nummerierung">OL</button>
+          </div>
+          <textarea class="chat-input" id="chatInput" placeholder="Nachricht eingeben…" rows="1"></textarea>
+          <div class="chat-input chat-input-rich" id="chatInputRich" contenteditable="true" style="display:none;" data-placeholder="Nachricht eingeben…"></div>
+        </div>
+        <button class="chat-terminal-btn" id="btnToggleRichText" data-tooltip="Rich-Text-Editor umschalten">✏️</button>
         <button class="chat-send" id="btnSend" data-tooltip="Senden (Enter)">➤</button>
       </div>
       <!-- Session Info Bar (under input, session-wide info) -->
       <div class="session-statusbar" id="sessionStatusbar">
-        <span class="session-statusbar__item" id="sbModel" data-tooltip="Aktuell verwendetes Modell">🧠 –</span>
-        <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item" id="sbMcp" data-tooltip="MCP Server">🔌 –</span>
         <span class="session-statusbar__sep">·</span>
         <span class="session-statusbar__item" id="sbSkills" data-tooltip="Skills">🛠️ –</span>
@@ -290,7 +296,6 @@
         <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
-        <button class="settings__tab" data-tab="devtools">Entwicklertools</button>
       </div>
       <div class="settings">
         <!-- Tab: UI -->
@@ -327,6 +332,15 @@
               </label>
             </div>
             <div class="settings__hint">Aktiviert Entwickler-Werkzeuge: Test Runner (🧪) und Developer Console (🖥️) in der Sidebar.</div>
+          </div>
+          <div class="settings__separator" id="settOnboardingResetSeparator" style="display:none;"></div>
+          <div class="settings__group" id="settOnboardingResetGroup" style="display:none;">
+            <label class="settings__label">Onboarding zurücksetzen</label>
+            <div class="settings__hint">Zeigt den Einrichtungs-Wizard beim nächsten App-Start erneut an.</div>
+            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
+              <span id="devOnboardingStatus"></span>
+              <button class="action-btn" id="btnDevOnboardingToggle"></button>
+            </div>
           </div>
         </div>
         <!-- Tab: Copilot Konfiguration -->
@@ -439,20 +453,6 @@
           <div id="settShortcutsList"></div>
           <div class="settings__group">
             <button class="action-btn" id="btnResetShortcuts" style="width:100%;margin-top:8px;">🔄 Alle zurücksetzen</button>
-          </div>
-        </div>
-        <!-- Tab: Entwicklertools -->
-        <div class="settings__panel" data-panel="devtools">
-          <div class="settings__group">
-            <label class="settings__label">🛠 Entwicklertools</label>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">Onboarding zurücksetzen</label>
-            <div class="settings__hint">Zeigt den Einrichtungs-Wizard beim nächsten App-Start erneut an.</div>
-            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
-              <span id="devOnboardingStatus"></span>
-              <button class="action-btn" id="btnDevOnboardingToggle"></button>
-            </div>
           </div>
         </div>
       </div>
