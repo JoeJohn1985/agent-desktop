@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.6] - 2026-05-28
+
+### Added
+- **Application Icon**: `assets/icon.png` (512×512 RGBA) used across window, titlebar, tab bar, and dock
+- **Linux Desktop Integration**: `assets/copilot-desktop.desktop` with `StartupWMClass=copilot-desktop` for correct taskbar grouping
+- **WM_CLASS fix**: Forces `--class copilot-desktop` via Chromium switch on Linux so all panels recognise the app
+- **electron-builder icon config**: Icon configured for Win/macOS/Linux builds
+
 ## [0.24.0] - 2026-05-21
 
 ### Added

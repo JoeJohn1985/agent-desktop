@@ -1,9 +1,14 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 const yaml = require('yaml');
+
+// Force WM_CLASS on Linux (must be set before app 'ready')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('class', 'copilot-desktop');
+}
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty, buildEnv } = require('./src/main-helpers');
@@ -11,6 +16,8 @@ const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderCo
 const { scanAgentsDirectory } = require('./src/agents');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
+
+app.name = 'copilot-desktop';
 
 // ── File Logger Init ────────────────────────────────────────
 initLogger();
@@ -204,12 +211,15 @@ function cleanupPty(tabId, exitCode, extraCleanup) {
  * and external-link interception. Registers cleanup on window close.
  */
 function createWindow() {
+  const appIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 500,
     title: 'Copilot Desktop',
+    icon: appIcon,
     backgroundColor: '#f5f3ef',
     frame: false,
     titleBarStyle: 'hidden',
@@ -1545,6 +1555,9 @@ registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers, termina
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
   console.log(`[app] Copilot Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
+  }
   createWindow();
   startImageWatcher();
 });

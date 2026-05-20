@@ -817,9 +817,15 @@ function renderTabs() {
       el.appendChild(badge);
     }
 
+    const iconImg = document.createElement('img');
+    iconImg.className = 'tab__icon';
+    iconImg.src = '../assets/icon.png';
+    iconImg.alt = '';
+    el.appendChild(iconImg);
+
     const labelSpan = document.createElement('span');
     labelSpan.className = 'tab__label';
-    labelSpan.textContent = tab.label;
+    labelSpan.textContent = tab.label.replace(/^🤖\s*/, '');
     el.appendChild(labelSpan);
 
     // Edit (pencil) button — visible on hover

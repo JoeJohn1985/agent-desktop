@@ -164,7 +164,7 @@ body {
   display: flex; align-items: center; gap: 10px;
   font-size: 17px; font-weight: 600;
 }
-.titlebar__icon { font-size: 20px; }
+.titlebar__icon { width: 20px; height: 20px; object-fit: contain; }
 .titlebar__center {
   position: absolute;
   left: 50%;
@@ -782,6 +782,12 @@ body {
   white-space: nowrap;
   overflow: hidden;
   transition: all 0.15s ease;
+}
+.tab__icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .tab__label {
   overflow: hidden;
