@@ -2572,6 +2572,9 @@ window.toggleSection = function(name) {
     el.style.display = isHidden ? '' : 'none';
     if (search) search.style.display = isHidden ? '' : 'none';
     if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !isHidden);
+    const collapsed = getPref('sidebarSectionsCollapsed', {});
+    collapsed[name] = !isHidden;
+    setPref('sidebarSectionsCollapsed', collapsed);
   }
 };
 
@@ -3281,6 +3284,20 @@ function initSidebar() {
     collapseBtn.setAttribute('data-tooltip', isCollapsed ? 'Sidebar erweitern' : 'Sidebar minimieren');
     setPref('sidebarCollapsed', isCollapsed);
   });
+
+  // Restore section collapse states
+  const sectionsCollapsed = getPref('sidebarSectionsCollapsed', {});
+  for (const [name, isCollapsed] of Object.entries(sectionsCollapsed)) {
+    if (!isCollapsed) continue;
+    const el = document.getElementById(name + 'Content');
+    const chevron = document.getElementById(name + 'Chevron');
+    const search = el?.parentElement?.querySelector('.sidebar__search');
+    if (el) {
+      el.style.display = 'none';
+      if (search) search.style.display = 'none';
+      if (chevron) chevron.classList.add('sidebar__chevron--collapsed');
+    }
+  }
 }
 
 function initTestRunner() {
