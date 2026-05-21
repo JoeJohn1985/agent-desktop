@@ -1891,8 +1891,8 @@ function renderSkills() {
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}</div>
         </div>
-        ${cliToggleBtn}
         ${deleteBtn}
+        ${cliToggleBtn}
         <div class="skill-card__toggle"></div>
       </div>
     `;
