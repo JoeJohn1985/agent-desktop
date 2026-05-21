@@ -1873,7 +1873,34 @@ mark.chat-search-highlight--active {
   overflow-y: auto;
   white-space: pre-wrap;
   word-wrap: break-word;
-  line-height: 1.4;
+  line-height: 1.5;
+}
+.chat-input-rich ul,
+.chat-input-rich ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.chat-input-rich ul {
+  list-style-type: disc;
+}
+.chat-input-rich ol {
+  list-style-type: decimal;
+}
+.chat-input-rich li {
+  margin: 2px 0;
+}
+.chat-input-rich b,
+.chat-input-rich strong {
+  font-weight: 700;
+}
+.chat-input-rich i,
+.chat-input-rich em {
+  font-style: italic;
+}
+.chat-input-rich s,
+.chat-input-rich strike,
+.chat-input-rich del {
+  text-decoration: line-through;
 }
 .chat-input-rich:empty::before {
   content: attr(data-placeholder);
