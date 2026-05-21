@@ -1,16 +1,26 @@
 # Changelog
 
-## [0.24.0] - 2026-05-30
+## [0.24.0] - 2026-05-21
 
 ### Added
 - **Skills in CLI deaktivieren**: Neuer Toggle-Button pro Skill in der Sidebar — Skills können direkt über die Desktop App in `~/.copilot/settings.json` deaktiviert werden (CLI lädt diese dann nicht mehr)
 - IPC-Handler `skills:getDisabled` und `skills:setDisabled` für Lesen/Schreiben der `disabledSkills` in settings.json
 - Visuelles Feedback: Deaktivierte Skills erscheinen mit reduzierter Opacity und farblich markiertem Button
+- **Sidebar-Collapse-State persistieren**: Eingeklappte Sidebar-Bereiche werden in Preferences gespeichert und beim App-Start wiederhergestellt
+- **Content-Sync Plain↔Rich**: Beim Umschalten des Chat-Input-Modus wird der Inhalt jetzt übertragen (Plain→Rich als Text, Rich→Plain als Markdown)
+
+### Fixed
+- **Rich-Text Listen-Darstellung**: `ul`/`ol` im Rich-Text-Editor werden mit korrekter Einrückung und Listenpunkten/-nummern gerendert
+- **Button-Reihenfolge Skill-Card**: Löschen-Button erscheint jetzt vor dem CLI-Deaktivieren-Button
+- **Content-Sync bei leerem Inhalt**: Sync findet jetzt auch statt wenn das Feld geleert wurde
+
+### Removed
+- **Durchgestrichen-Button** aus Rich-Text-Toolbar entfernt
 
 ## [0.23.0] - 2026-05-29
 
 ### Added
-- **Rich-Text-Editor Toggle**: Neuer ✏️/📝-Button im Chat-Input — umschalten zwischen Plaintext und Rich-Text-Modus. Toolbar mit Bold, Italic, Strikethrough, UL, OL. Enter = Zeilenumbruch, Strg+Enter = Senden. HTML wird beim Senden zu Markdown konvertiert.
+- **Rich-Text-Editor Toggle**: Neuer ✏️/📝-Button im Chat-Input — umschalten zwischen Plaintext und Rich-Text-Modus. Toolbar mit Bold, Italic, UL, OL. Enter = Zeilenumbruch, Strg+Enter = Senden. HTML wird beim Senden zu Markdown konvertiert.
 - **Model-Dropdown Redesign**: Aktives Model wird mit Accent-Balken links + Hintergrund hervorgehoben (kein Häkchen mehr)
 - **Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7 → GPT-5.3 → GPT-4.1
 - **Button-Reihenfolge**: Model → Autopilot → Context → Compact → Clear
