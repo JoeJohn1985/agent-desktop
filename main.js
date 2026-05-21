@@ -705,6 +705,44 @@ ipcMain.handle('skills:delete', async (_event, dirName) => {
 });
 
 /**
+ * @ipc skills:getDisabled — Liest disabledSkills aus ~/.copilot/settings.json
+ * @returns {Promise<string[]>}
+ */
+ipcMain.handle('skills:getDisabled', async () => {
+  const settingsPath = path.join(os.homedir(), '.copilot', 'settings.json');
+  try {
+    if (!fs.existsSync(settingsPath)) return [];
+    const raw = fs.readFileSync(settingsPath, 'utf-8');
+    const obj = JSON.parse(raw);
+    return Array.isArray(obj.disabledSkills) ? obj.disabledSkills : [];
+  } catch (e) {
+    return [];
+  }
+});
+
+/**
+ * @ipc skills:setDisabled — Schreibt disabledSkills in ~/.copilot/settings.json
+ * @param {string[]} disabledSkills
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+ipcMain.handle('skills:setDisabled', async (_event, disabledSkills) => {
+  if (!Array.isArray(disabledSkills)) return { success: false, error: 'Ungültige Eingabe' };
+  const settingsPath = path.join(os.homedir(), '.copilot', 'settings.json');
+  try {
+    let obj = {};
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf-8');
+      obj = JSON.parse(raw);
+    }
+    obj.disabledSkills = disabledSkills;
+    fs.writeFileSync(settingsPath, JSON.stringify(obj, null, 2), 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/**
  * @ipc agents:delete — Deletes an agent .agent.md file.
  * @param {string} fileSlug - Agent file slug (alphanumeric, dashes, underscores only)
  * @returns {Promise<{success: boolean, error?: string}>}
@@ -1466,6 +1504,24 @@ function scanSkills() {
   // 2) User skills from ~/.copilot/skills/
   const userSkillsDir = folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
   skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
+
+  // 3) Plugin skills from ~/.copilot/installed-plugins/
+  const installedPluginsBase = path.join(os.homedir(), '.copilot', 'installed-plugins');
+  if (fs.existsSync(installedPluginsBase)) {
+    const marketplaceDirs = fs.readdirSync(installedPluginsBase, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+    for (const marketplaceDir of marketplaceDirs) {
+      const marketplacePath = path.join(installedPluginsBase, marketplaceDir.name);
+      const pluginDirs = fs.readdirSync(marketplacePath, { withFileTypes: true })
+        .filter(d => d.isDirectory());
+      for (const pluginDir of pluginDirs) {
+        const pluginSkillsDir = path.join(marketplacePath, pluginDir.name, 'skills');
+        if (fs.existsSync(pluginSkillsDir)) {
+          skills.push(...scanSkillDirectory(pluginSkillsDir, 'plugin', userSkillIcon));
+        }
+      }
+    }
+  }
 
   return skills;
 }

@@ -604,6 +604,38 @@ body {
   background: var(--bg-hover);
 }
 
+/* ── Skill CLI Disabled State ────────────────────────── */
+.skill-card--cli-disabled {
+  opacity: 0.55;
+}
+
+.skill-card__cli-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.skill-card__cli-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.skill-card__cli-toggle--enable {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.skill-card__cli-toggle--disable {
+  border-color: var(--text-muted);
+}
+
 /* ── Sidebar Confirm Overlay ─────────────────────────── */
 .sidebar-confirm {
   position: fixed;

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0] - 2026-05-30
+
+### Added
+- **Skills in CLI deaktivieren**: Neuer Toggle-Button pro Skill in der Sidebar — Skills können direkt über die Desktop App in `~/.copilot/settings.json` deaktiviert werden (CLI lädt diese dann nicht mehr)
+- IPC-Handler `skills:getDisabled` und `skills:setDisabled` für Lesen/Schreiben der `disabledSkills` in settings.json
+- Visuelles Feedback: Deaktivierte Skills erscheinen mit reduzierter Opacity und farblich markiertem Button
+
 ## [0.23.0] - 2026-05-29
 
 ### Added

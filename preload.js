@@ -278,6 +278,10 @@ contextBridge.exposeInMainWorld('copilot', {
     list: () => ipcRenderer.invoke('skills:list'),
     /** @ipc skills:delete @param {string} dirName - Skill directory name @returns {Promise<{success: boolean, error?: string}>} */
     delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
+    /** @ipc skills:getDisabled @returns {Promise<string[]>} */
+    getDisabled: () => ipcRenderer.invoke('skills:getDisabled'),
+    /** @ipc skills:setDisabled @param {string[]} list @returns {Promise<{success: boolean, error?: string}>} */
+    setDisabled: (list) => ipcRenderer.invoke('skills:setDisabled', list),
   },
 
   // ── Agents ────────────────────────────────────────────────

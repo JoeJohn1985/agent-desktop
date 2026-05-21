@@ -45,6 +45,8 @@ let sessions = [];
 let activeSessionId = null;
 /** @type {Set<string>} IDs of currently enabled skills (persisted to preferences). */
 let activeSkills = new Set();
+/** @type {Set<string>} DirNames of skills disabled in ~/.copilot/settings.json */
+let disabledSkills = new Set();
 /** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
 let activeAgents = new Set();
 /** @type {string} User home directory path, loaded from main process at startup. */
@@ -1870,16 +1872,26 @@ function renderSkills() {
   const container = document.getElementById('skillList');
   container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
+    const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
     const deleteBtn = s.source === 'user' && s.dirName
       ? `<button class="skill-card__delete" onclick="event.stopPropagation(); confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
       : '';
+    const cliToggleBtn = s.dirName
+      ? `<button class="skill-card__cli-toggle ${isCLIDisabled ? 'skill-card__cli-toggle--enable' : 'skill-card__cli-toggle--disable'}"
+               onclick="event.stopPropagation(); toggleSkillDisabled('${escapeAttr(s.dirName)}')"
+               data-tooltip="${isCLIDisabled ? 'Skill in Copilot CLI aktivieren' : 'Skill in Copilot CLI deaktivieren'}"
+               aria-label="${isCLIDisabled ? 'In CLI aktivieren' : 'In CLI deaktivieren'}">
+         ${isCLIDisabled ? '✓' : '⊘'}
+       </button>`
+      : '';
     return `
-      <div class="skill-card ${isActive ? 'skill-card--active' : ''}"
+      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''}"
            onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${s.icon}</span>
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}</div>
         </div>
+        ${cliToggleBtn}
         ${deleteBtn}
         <div class="skill-card__toggle"></div>
       </div>
@@ -1899,6 +1911,17 @@ function toggleSkill(skillId) {
 }
 
 /**
+ * Toggle a skill's CLI-disabled state and persist to ~/.copilot/settings.json.
+ * @param {string} dirName
+ */
+async function toggleSkillDisabled(dirName) {
+  if (disabledSkills.has(dirName)) disabledSkills.delete(dirName);
+  else disabledSkills.add(dirName);
+  await copilot.skills.setDisabled([...disabledSkills]);
+  renderSkills();
+}
+
+/**
  * Reload skills from the main process and re-render the sidebar list.
  * Shows a spinning indicator on the reload button during the operation.
  * @returns {Promise<void>}
@@ -1910,6 +1933,8 @@ async function reloadSkills() {
     skills = await copilot.skills.list() || [];
     const savedActiveSkills = getSettings().activeSkills || [];
     activeSkills = new Set(savedActiveSkills);
+    const savedDisabledSkills = await copilot.skills.getDisabled() || [];
+    disabledSkills = new Set(savedDisabledSkills);
     renderSkills();
   } catch (e) {
     console.warn('[skills] Reload fehlgeschlagen:', e.message);

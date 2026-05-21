@@ -30,13 +30,25 @@ function registerPluginsIPC() {
           const plugins = [];
           const lines = output.split('\n');
           for (const line of lines) {
-            const match = line.match(/•\s+(\S+)\s+\(([^)]+)\)\s+v?(\S+)(\s+\[update available\])?/i);
+            // Primary format: • name@marketplace (v1.0.0) [update available]
+            const match = line.match(/•\s+([^@\s]+)@(\S+)\s+\(v?([^)]+)\)(\s+\[update available\])?/i);
             if (match) {
               plugins.push({
                 name: match[1],
                 marketplace: match[2],
                 version: match[3],
                 updateAvailable: !!match[4],
+              });
+              continue;
+            }
+            // Fallback format: • name (marketplace) v1.0.0 [update available]
+            const fallbackMatch = line.match(/•\s+(\S+)\s+\(([^)]+)\)\s+v?(\S+)(\s+\[update available\])?/i);
+            if (fallbackMatch) {
+              plugins.push({
+                name: fallbackMatch[1],
+                marketplace: fallbackMatch[2],
+                version: fallbackMatch[3],
+                updateAvailable: !!fallbackMatch[4],
               });
             }
           }
