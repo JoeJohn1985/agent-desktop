@@ -2773,21 +2773,18 @@ function initChatInput() {
     toolbar.classList.toggle('visible', richTextMode);
 
     if (richTextMode) {
-      // Sync plain text → rich text
-      const plainText = chatInput.value;
-      if (plainText) chatInputRich.innerText = plainText;
+      // Sync plain text → rich text (immer, auch bei leerem Inhalt)
+      chatInputRich.innerText = chatInput.value;
       chatInput.style.display = 'none';
       chatInputRich.style.display = '';
       chatInputRich.focus();
       btnSend.setAttribute('data-tooltip', 'Senden (Strg+Enter)');
     } else {
-      // Sync rich text → plain text (markdown)
+      // Sync rich text → plain text / markdown (immer, auch bei leerem Inhalt)
       const markdown = convertHtmlToMarkdown(chatInputRich.innerHTML).trim();
-      if (markdown) {
-        chatInput.value = markdown;
-        chatInput.style.height = 'auto';
-        chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
-      }
+      chatInput.value = markdown;
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
       chatInputRich.style.display = 'none';
       chatInput.style.display = '';
       chatInput.focus();
