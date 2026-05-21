@@ -1897,11 +1897,6 @@ mark.chat-search-highlight--active {
 .chat-input-rich em {
   font-style: italic;
 }
-.chat-input-rich s,
-.chat-input-rich strike,
-.chat-input-rich del {
-  text-decoration: line-through;
-}
 .chat-input-rich:empty::before {
   content: attr(data-placeholder);
   color: var(--text-muted);
