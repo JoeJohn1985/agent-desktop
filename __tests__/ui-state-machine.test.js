@@ -402,3 +402,220 @@ describe('Tab + Terminal Interaktions-Szenarien', () => {
     expect(result.terminalOpen).toBe(false); // Bug-Fix verifiziert!
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// Tab-Input State Machine (mirrors per-tab input state in app.js)
+// ══════════════════════════════════════════════════════════════
+
+class TabInputStateMachine {
+  constructor() {
+    this.tabs = new Map();
+    this.activeTabId = null;
+    this.richTextMode = false;
+    // Simulated DOM state
+    this.inputText = '';
+    this.richHtml = '';
+  }
+
+  createTab(tabId, label = '🤖 Copilot') {
+    this.tabs.set(tabId, {
+      label,
+      sessionId: null,
+      isProcessing: false,
+      inputText: '',
+      inputRichHtml: '',
+      inputRichMode: false,
+    });
+    this.switchTab(tabId);
+    return tabId;
+  }
+
+  /**
+   * Switch tab: save current input state, then restore target tab state.
+   * Mirrors app.js switchTab() input save/restore logic.
+   * @param {string} tabId - Target tab ID.
+   */
+  switchTab(tabId) {
+    if (!this.tabs.has(tabId)) throw new Error(`Tab ${tabId} existiert nicht`);
+
+    // Save current input state to previous active tab
+    if (this.activeTabId) {
+      const prevTab = this.tabs.get(this.activeTabId);
+      if (prevTab) {
+        prevTab.inputText = this.inputText;
+        prevTab.inputRichHtml = this.richHtml;
+        prevTab.inputRichMode = this.richTextMode;
+      }
+    }
+
+    this.activeTabId = tabId;
+    const activeTab = this.tabs.get(tabId);
+
+    // Restore input state from new active tab
+    this.inputText = activeTab.inputText || '';
+    this.richHtml = activeTab.inputRichHtml || '';
+    this.richTextMode = activeTab.inputRichMode || false;
+  }
+
+  /**
+   * Simulate sending a message — clears input state on the active tab.
+   * Mirrors app.js sendMessage() clear logic.
+   * @returns {string|null} The sent text, or null if empty/no tab.
+   */
+  sendMessage() {
+    if (!this.activeTabId) return null;
+    const tab = this.tabs.get(this.activeTabId);
+    if (!tab) return null;
+
+    const text = this.richTextMode ? this.richHtml.trim() : this.inputText.trim();
+    if (!text) return null;
+
+    if (tab.isProcessing) return null;
+
+    // Clear input (mirrors app.js)
+    if (this.richTextMode) {
+      this.richHtml = '';
+    } else {
+      this.inputText = '';
+    }
+
+    // Clear tab input state
+    tab.inputText = '';
+    tab.inputRichHtml = '';
+
+    return text;
+  }
+}
+
+describe('Tab-Input State Machine', () => {
+  let sm;
+
+  beforeEach(() => {
+    sm = new TabInputStateMachine();
+  });
+
+  test('neuer Tab hat leeren Input-State', () => {
+    sm.createTab('t1');
+    const tab = sm.tabs.get('t1');
+    expect(tab.inputText).toBe('');
+    expect(tab.inputRichHtml).toBe('');
+    expect(tab.inputRichMode).toBe(false);
+  });
+
+  test('switchTab speichert Input-State des vorherigen Tabs', () => {
+    sm.createTab('t1');
+    sm.createTab('t2');
+
+    // Wechsel zu t1, dort Text eingeben
+    sm.switchTab('t1');
+    sm.inputText = 'Hallo aus Tab 1';
+
+    // Wechsel zu t2 → t1-State wird gespeichert
+    sm.switchTab('t2');
+    const t1 = sm.tabs.get('t1');
+    expect(t1.inputText).toBe('Hallo aus Tab 1');
+  });
+
+  test('switchTab stellt Input-State des neuen Tabs wieder her', () => {
+    sm.createTab('t1');
+    sm.createTab('t2');
+
+    // Text in t2 eingeben
+    sm.inputText = 'Text in Tab 2';
+    // Wechsel zu t1
+    sm.switchTab('t1');
+    expect(sm.inputText).toBe('');
+
+    // Wechsel zurück zu t2 → Text wiederhergestellt
+    sm.switchTab('t2');
+    expect(sm.inputText).toBe('Text in Tab 2');
+  });
+
+  test('switchTab stellt richTextMode korrekt pro Tab her', () => {
+    sm.createTab('t1');
+    sm.createTab('t2');
+
+    // In t2: Rich-Mode aktivieren und HTML eingeben
+    sm.richTextMode = true;
+    sm.richHtml = '<b>Bold text</b>';
+
+    // Wechsel zu t1 → Plain-Mode
+    sm.switchTab('t1');
+    expect(sm.richTextMode).toBe(false);
+    expect(sm.richHtml).toBe('');
+
+    // Zurück zu t2 → Rich-Mode wiederhergestellt
+    sm.switchTab('t2');
+    expect(sm.richTextMode).toBe(true);
+    expect(sm.richHtml).toBe('<b>Bold text</b>');
+  });
+
+  test('sendMessage leert Tab-Input-State', () => {
+    sm.createTab('t1');
+    sm.inputText = 'Nachricht zum Senden';
+
+    const sent = sm.sendMessage();
+    expect(sent).toBe('Nachricht zum Senden');
+
+    const tab = sm.tabs.get('t1');
+    expect(tab.inputText).toBe('');
+    expect(tab.inputRichHtml).toBe('');
+    expect(sm.inputText).toBe('');
+  });
+
+  test('sendMessage im Rich-Mode leert richHtml', () => {
+    sm.createTab('t1');
+    sm.richTextMode = true;
+    sm.richHtml = '<b>Rich Nachricht</b>';
+
+    const sent = sm.sendMessage();
+    expect(sent).toBe('<b>Rich Nachricht</b>');
+
+    const tab = sm.tabs.get('t1');
+    expect(tab.inputText).toBe('');
+    expect(tab.inputRichHtml).toBe('');
+    expect(sm.richHtml).toBe('');
+  });
+
+  test('sendMessage gibt null zurück bei leerem Input', () => {
+    sm.createTab('t1');
+    sm.inputText = '';
+    expect(sm.sendMessage()).toBeNull();
+  });
+
+  test('sendMessage gibt null zurück wenn Tab processing', () => {
+    sm.createTab('t1');
+    sm.inputText = 'Test';
+    sm.tabs.get('t1').isProcessing = true;
+    expect(sm.sendMessage()).toBeNull();
+  });
+
+  test('erster Tab (kein vorheriger): switchTab ohne Fehler', () => {
+    // activeTabId ist null → kein prevTab zu speichern
+    expect(() => sm.createTab('t1')).not.toThrow();
+    expect(sm.activeTabId).toBe('t1');
+  });
+
+  test('Input-State bleibt isoliert zwischen Tabs', () => {
+    sm.createTab('t1');
+    sm.createTab('t2');
+    sm.createTab('t3');
+
+    sm.switchTab('t1');
+    sm.inputText = 'Tab 1 text';
+
+    sm.switchTab('t2');
+    sm.inputText = 'Tab 2 text';
+
+    sm.switchTab('t3');
+    sm.inputText = 'Tab 3 text';
+
+    // Verifiziere: Jeder Tab hat seinen eigenen Text
+    sm.switchTab('t1');
+    expect(sm.inputText).toBe('Tab 1 text');
+    sm.switchTab('t2');
+    expect(sm.inputText).toBe('Tab 2 text');
+    sm.switchTab('t3');
+    expect(sm.inputText).toBe('Tab 3 text');
+  });
+});

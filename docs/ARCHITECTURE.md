@@ -235,7 +235,7 @@
 - Ein langer prozeduraler Layer (~2.4k Zeilen), zerlegt in Sektionen für Chat, Tabs, Settings, Theme, Search, Skills, Agents, Folders, Instructions.
 - Empfängt `copilot:event` (assistant-text-delta, tool-use, tool-result, …) und rendert sie inkrementell mit `window.markdown.render`.
 - Verwaltet Tabs als Array; Persistenz über `preferences.openTabs`.
-- **Rich-Text-Editor:** Globales Flag `richTextMode` steuert, ob Eingabe über `<textarea>` oder `contenteditable`-div erfolgt. `convertHtmlToMarkdown()` wandelt `execCommand`-formatiertes HTML vor dem Senden in Markdown um.
+- **Rich-Text-Editor:** Globales Flag `richTextMode` steuert, ob Eingabe über `<textarea>` oder `contenteditable`-div erfolgt. `convertHtmlToMarkdown()` wandelt `execCommand`-formatiertes HTML vor dem Senden in Markdown um. Der Modus wird pro Tab gespeichert (`inputRichMode`) und bei Tab-Wechsel mit der globalen Variable synchronisiert.
 - **Modell-Persistenz:** `getSessionModel(sessionId)` / `saveSessionModel(sessionId, modelId)` nutzen den dedizierten Pref-Key `sessionModels` (flache Map `{sessionId → modelId}`) — unabhängig von `namedSessions`, damit die Auswahl auch für unbenannte Sessions erhalten bleibt.
 
 ### 5.5 Renderer-Module
@@ -466,6 +466,8 @@ Die Kommunikation zwischen Main und Renderer Process erfolgt über IPC-Channels,
 | `folders:browse` | handle | Verzeichnis-Auswahl-Dialog |
 | `folders:browse-file` | handle | Datei-Auswahl-Dialog |
 | `skills:list` | handle | Skills aus `~/.copilot/skills/` scannen |
+| `skills:getDisabled` | handle | Liest `disabledSkills` aus `~/.copilot/settings.json` |
+| `skills:setDisabled` | handle | Schreibt `disabledSkills` in `~/.copilot/settings.json` |
 | `agents:list` | handle | Sub-Agents aus `~/.copilot/agents/` scannen |
 | `files:processDropped` | handle | Drag&Drop-Dateien verarbeiten |
 | `tests:run` | handle | Jest-Suite spawnen |
@@ -621,9 +623,14 @@ Jedes Tab-Objekt im Renderer speichert:
   status: "idle" | "streaming" | "waiting",
   chatHistory: [],
   contextPercent: 6,
-  terminalReady: true
+  terminalReady: true,
+  inputText: "",           // gespeicherter Plain-Text-Inhalt des Chat-Inputs
+  inputRichHtml: "",       // gespeicherter Rich-Text-HTML des Chat-Inputs
+  inputRichMode: false     // ob dieser Tab im Rich-Text-Modus war
 }
 ```
+
+Beim Tab-Wechsel wird der aktuelle Input-State (Text, Rich-HTML, Modus) im vorherigen Tab gespeichert und aus dem neuen Tab wiederhergestellt. Nach `sendMessage()` werden `inputText` und `inputRichHtml` geleert.
 
 #### Skill Injection
 

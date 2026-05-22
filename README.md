@@ -13,6 +13,7 @@
 
 ### Skills & Agents
 - 🧠 **Skill Toggles** — Enable/disable AI skills per session; active skills are injected into prompts automatically
+- ⊘ **CLI Skill Disable** — Globally disable skills in the Copilot CLI via `~/.copilot/settings.json` (persisted across sessions)
 - 🤖 **Agent Toggles** — Enable/disable custom agents per session; active agents are injected as `/agent <name>` prefix automatically
 - 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were active
 
@@ -27,7 +28,8 @@
 ### Productivity
 - ✅ **Todos** — Per-session task list with add, complete, and delete (🗑️) actions
 - 🤖 **Autopilot Toggle** — Per-tab toggle that passes `--autopilot` to the Copilot CLI; state persists across tab switches
-- ✏️ **Rich-Text Editor** — Optional contenteditable input with formatting toolbar (Bold, Italic, Strikethrough, UL, OL); converted to Markdown on send
+- ✏️ **Rich-Text Editor** — Optional contenteditable input with formatting toolbar (Bold, Italic, UL, OL); converted to Markdown on send
+- 📝 **Per-Tab Chat Input** — Draft text, rich HTML, and editor mode are saved per tab and restored on switch; nothing is lost when changing tabs
 - 🔌 **Plugin Manager** — Browse and manage skill/agent marketplaces; install, update, and remove plugins
 - ⌨️ **Keyboard Shortcuts** — Configurable shortcuts with a built-in shortcut overlay
 - ⏱️ **Tab-Unlock Fallback** — Manual unlock button after 30s inactivity; automatic unlock after 180s for hanging sub-agent tabs

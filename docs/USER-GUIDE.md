@@ -134,6 +134,7 @@ Die Sidebar befindet sich am linken Rand und ist über den **Collapse-Button** (
 
 - Liste aller verfügbaren KI-Skills mit Icon, Name und Beschreibung.
 - Jeder Skill hat einen **Toggle-Schalter** zum Aktivieren und Deaktivieren.
+- Über den **⊘-Button** kann ein Skill zusätzlich global in der Copilot CLI deaktiviert werden (gespeichert in `~/.copilot/settings.json` unter `disabledSkills`). Deaktivierte Skills werden ausgegraut dargestellt.
 - Aktive Skills werden automatisch als Prompt-Präfix in jede Nachricht injiziert.
 - Skills werden aus dem Verzeichnis `~/.copilot/skills/` geladen (SKILL.md Dateien).
 
@@ -169,6 +170,7 @@ Der Hauptbereich rechts neben der Sidebar enthält alle Chat-relevanten Elemente
 - **Doppelklick** auf einen Tab-Titel zum Umbenennen.
 - ✕ **Schließen-Button** pro Tab.
 - **Status-Badge** „Working" erscheint, während Copilot eine Antwort generiert.
+- **Pro-Tab-Input:** Die Chat-Eingabe (Text, Rich-Text-HTML und Modus) wird beim Tab-Wechsel gespeichert und wiederhergestellt — angefangene Nachrichten gehen beim Wechsel nicht verloren.
 
 #### Session-Actions Bar
 
@@ -217,9 +219,9 @@ Der zentrale Bereich für die Kommunikation mit Copilot:
 
 Klick auf den ✏️-Button aktiviert den Rich-Text-Modus:
 
-- **Formatierungs-Toolbar** (erscheint über dem Eingabefeld): **B**old, *I*talic, S̶trike, Aufzählung (UL), Nummerierung (OL).
+- **Formatierungs-Toolbar** (erscheint über dem Eingabefeld): **B**old, *I*talic, Aufzählung (UL), Nummerierung (OL).
 - **Senden:** `Strg+Enter` (Enter erzeugt Zeilenumbruch).
-- Die Formatierung wird beim Senden automatisch in **Markdown** umgewandelt (`**fett**`, `*kursiv*`, `~~durchgestrichen~~`, `- Liste`).
+- Die Formatierung wird beim Senden automatisch in **Markdown** umgewandelt (`**fett**`, `*kursiv*`, `- Liste`).
 - Umschalten zurück zur Textarea mit erneutem Klick auf den Toggle-Button.
 
 ### Session-Statusbar
@@ -285,6 +287,7 @@ Skills sind KI-Erweiterungen, die Copilot spezialisierte Fähigkeiten verleihen.
   (Wird vom Setup-Skript automatisch angelegt; bei manueller Installation
   ggf. selbst erstellen: `mkdir ~/.copilot/skills`.)
 - In der Sidebar kannst du Skills per **Toggle-Schalter** aktivieren und deaktivieren.
+- Über den **⊘-Button** kannst du Skills auch global in der Copilot CLI deaktivieren. Der Status wird in `~/.copilot/settings.json` unter `disabledSkills` gespeichert und gilt CLI-weit.
 - Aktive Skills werden als Prompt-Präfix in jede Nachricht injiziert.
 - **Skill-Tags** unter jeder Chat-Nachricht zeigen, welche Skills zum Zeitpunkt des Sendens aktiv waren.
 
