@@ -620,6 +620,9 @@ async function createTab(label) {
     autopilot: false,
     selectedModel: DEFAULT_MODEL_ID,
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
+    inputText: '',
+    inputRichHtml: '',
+    inputRichMode: false,
   });
 
   switchTab(tabId);
@@ -634,6 +637,18 @@ async function createTab(label) {
  * @param {string} tabId - ID of the tab to activate.
  */
 function switchTab(tabId) {
+  // Save current input state to the active tab before switching
+  if (activeTabId) {
+    const prevTab = tabs.get(activeTabId);
+    if (prevTab) {
+      const chatInput = document.getElementById('chatInput');
+      const chatInputRich = document.getElementById('chatInputRich');
+      prevTab.inputText = chatInput?.value || '';
+      prevTab.inputRichHtml = chatInputRich?.innerHTML || '';
+      prevTab.inputRichMode = richTextMode;
+    }
+  }
+
   // Close model dropdown if open
   document.querySelector('.model-dropdown--below')?.remove();
 
@@ -696,8 +711,44 @@ function switchTab(tabId) {
 
   // Update model select button for this tab
   updateModelSelectBtn();
-  
-  document.getElementById('chatInput')?.focus();
+
+  // Restore input state for the newly activated tab
+  const chatInput = document.getElementById('chatInput');
+  const chatInputRich = document.getElementById('chatInputRich');
+  const btnToggle = document.getElementById('btnToggleRichText');
+  const toolbar = document.querySelector('.rich-text-toolbar');
+  const btnSend = document.getElementById('btnSend');
+
+  if (activeTab) {
+    chatInput.value = activeTab.inputText || '';
+    chatInputRich.innerHTML = activeTab.inputRichHtml || '';
+
+    richTextMode = activeTab.inputRichMode || false;
+    btnToggle?.classList.toggle('active', richTextMode);
+    if (btnToggle) btnToggle.textContent = richTextMode ? '📝' : '✏️';
+    toolbar?.classList.toggle('visible', richTextMode);
+
+    if (richTextMode) {
+      chatInput.style.display = 'none';
+      chatInputRich.style.display = '';
+      btnSend?.setAttribute('data-tooltip', 'Senden (Strg+Enter)');
+    } else {
+      chatInput.style.display = '';
+      chatInputRich.style.display = 'none';
+      btnSend?.setAttribute('data-tooltip', 'Senden (Enter)');
+    }
+
+    chatInput.style.height = 'auto';
+    if (chatInput.value) {
+      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+    }
+  }
+
+  if (richTextMode) {
+    chatInputRich?.focus();
+  } else {
+    chatInput?.focus();
+  }
 }
 
 /**
@@ -996,6 +1047,8 @@ function hideUnlockButton(tabId) {
 // ── Send Message ─────────────────────────────────────────────
 /**
  * Convert HTML from the rich-text contenteditable to Markdown.
+ * @param {string} html - The innerHTML from the contenteditable element.
+ * @returns {string} Markdown-formatted text.
  */
 function convertHtmlToMarkdown(html) {
   // Process ordered lists
@@ -1176,6 +1229,10 @@ function sendMessage() {
     input.value = '';
     input.style.height = 'auto';
   }
+
+  // Clear tab input state
+  tab.inputText = '';
+  tab.inputRichHtml = '';
 
   scrollToBottom(tab.streamEl);
 }
