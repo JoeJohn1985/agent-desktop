@@ -914,6 +914,12 @@ function startTabRename(tabId, tabEl, labelSpan) {
     }
   };
 
+  // Prevent clicks/mousedowns inside the input from bubbling to the tab
+  // element, which would trigger switchTab() → renderTabs() and destroy
+  // the input before the user has finished editing.
+  input.addEventListener('mousedown', (e) => e.stopPropagation());
+  input.addEventListener('click', (e) => e.stopPropagation());
+
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
