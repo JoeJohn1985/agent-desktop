@@ -371,6 +371,7 @@ body {
   justify-content: center;
   opacity: 0;
   pointer-events: none;
+  margin-left: auto;
 }
 
 .sidebar__header:hover .sidebar__reload-btn {
@@ -414,7 +415,6 @@ body {
   border-radius: 10px;
   min-width: 18px;
   text-align: center;
-  margin-left: auto;
 }
 
 .sidebar__search {
