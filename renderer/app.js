@@ -920,6 +920,12 @@ function startTabRename(tabId, tabEl, labelSpan) {
     }
   };
 
+  // Prevent clicks/mousedowns inside the input from bubbling to the tab
+  // element, which would trigger switchTab() → renderTabs() and destroy
+  // the input before the user has finished editing.
+  input.addEventListener('mousedown', (e) => e.stopPropagation());
+  input.addEventListener('click', (e) => e.stopPropagation());
+
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
@@ -1564,7 +1570,6 @@ const DEFAULT_MODELS = [
   { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
-  { id: 'claude-opus-4.7', label: 'Claude Opus 4.7', short: 'Opus 4.7' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
   { id: 'gpt-4.1', label: 'GPT-4.1', short: 'GPT-4.1' },
 ];
