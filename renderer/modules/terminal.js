@@ -3,7 +3,7 @@
 // Constants TERMINAL_SCROLLBACK, TERMINAL_FIT_DELAY_MS from utils.js
 'use strict';
 
-async function openTerminal(tabId, sessionId, slashCommand, cwd) {
+async function openTerminal(tabId, sessionId, slashCommand) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
@@ -115,7 +115,7 @@ async function openTerminal(tabId, sessionId, slashCommand, cwd) {
   });
 
   // Spawn PTY (reuses background PTY if available)
-  const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand, cwd);
+  const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand);
   if (!result.success) {
     instance.writeln(`\r\n\x1b[31m⚠️ ${result.error}\x1b[0m`);
   }

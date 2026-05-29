@@ -1845,12 +1845,6 @@ async function pickSessionCwd(sessionId) {
       tab.cwd = selected;
       if (tab.id === activeTabId) {
         loadProjectSkillsAndAgents(selected);
-        // Restart terminal with new CWD if it's currently open
-        if (tab.terminal && tab.terminal.alive) {
-          closeTerminalForTab(tab.id);
-          // Kurz warten bis PTY cleanup durch, dann Terminal mit neuem CWD neu öffnen
-          setTimeout(() => openTerminal(tab.id, tab.sessionId, null, selected), 300);
-        }
       }
     }
   }
