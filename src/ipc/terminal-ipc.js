@@ -90,7 +90,9 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
     });
 
     const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
-    ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
+    const copilotCmd = `copilot --allow-all-tools${resumeArg}`;
+    const startCmd = cwd ? `cd "${cwd.replace(/"/g, '\\"')}" && ${copilotCmd}` : copilotCmd;
+    ptyProcess.write(`${startCmd}\r`);
 
     return { success: true };
   });
@@ -199,7 +201,9 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
     });
 
     const resumeArg = sessionId ? ` --resume=${sessionId}` : '';
-    ptyProcess.write(`copilot --allow-all-tools${resumeArg}\r`);
+    const copilotCmd = `copilot --allow-all-tools${resumeArg}`;
+    const startCmd = cwd ? `cd "${cwd.replace(/"/g, '\\"')}" && ${copilotCmd}` : copilotCmd;
+    ptyProcess.write(`${startCmd}\r`);
 
     if (slashCommand) {
       let lastDataTime = Date.now();
