@@ -2890,6 +2890,15 @@ async function initStatusbar() {
       if (tab) tab.cwd = cwd;
     }
   } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
+
+  try {
+    const ver = await copilot.chat.getVersions();
+    const el = document.getElementById('sbVersion');
+    if (el) {
+      el.textContent = `🏷️ v${ver.app}`;
+      el.setAttribute('data-tooltip', `App: v${ver.app}\nCLI: ${ver.cli}`);
+    }
+  } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
 }
 
 /**
