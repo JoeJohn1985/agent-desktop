@@ -702,6 +702,9 @@ function switchTab(tabId) {
   } else {
     updateStatusbar('sbCwd', '📁 –');
   }
+
+  // Reload project skills/agents for the newly active tab's CWD
+  loadProjectSkillsAndAgents(activeTab?.cwd || null);
   
   // Update context button for this tab
   const ctxBtn = document.getElementById('btnSlashContext');
