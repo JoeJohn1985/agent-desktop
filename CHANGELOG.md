@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.25.0] - 2026-05-21
+
+### Added
+- **CWD pro Session**: Arbeitsverzeichnis (CWD) kann per Klick auf 📂 in der Statusbar pro Tab/Session gewählt werden
+- CWD wird für benannte Sessions persistiert und beim Restore wiederhergestellt
+- `saveSessionCwd` / `getSessionCwd` in `src/named-sessions.js` für testbare Persistenz-Logik
+- `sendMessage()` übergibt `cwd` an `copilot.chat.send()` — CLI startet im gewählten Verzeichnis
+- Tab-Wechsel aktualisiert die Statusbar-CWD-Anzeige korrekt
+
 ## [0.24.6] - 2026-05-28
 
 ### Added

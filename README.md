@@ -6,6 +6,7 @@
 
 ### Core Chat
 - 💬 **Multi-Session Management** — Create, rename, and switch between named sessions; only named sessions are shown in the session list
+- 📂 **Per-Session CWD** — Choose a working directory per session via the statusbar; persisted across app restarts
 - 📝 **Markdown Rendering** — Full markdown support including code blocks with syntax highlighting
 - 📂 **File Drag & Drop** — Drop files directly into the chat
 - 🔎 **Chat Search** — Search through conversation history

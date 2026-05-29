@@ -1716,7 +1716,7 @@ function saveSessionCwd(sessionId, cwd) {
  */
 function getSessionCwd(sessionId) {
   const entry = getNamedSessions()[sessionId];
-  return entry?.cwd || null;
+  return entry?.cwd ?? null;
 }
 
 /**

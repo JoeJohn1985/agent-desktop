@@ -233,7 +233,7 @@ Am unteren Rand zeigt die Statusbar kontextuelle Informationen zur aktiven Sessi
 | 🔌 | Anzahl verbundener MCP-Server |
 | 🛠 | Anzahl aktiver Skills |
 | 📋 | Anzahl geladener Instructions |
-| 📂 | Aktuelles Arbeitsverzeichnis (CWD) |
+| 📂 | Aktuelles Arbeitsverzeichnis (CWD) — klickbar zum Wechseln |
 
 > **Hinweis:** Das aktive KI-Modell wird nicht mehr in der Statusbar, sondern direkt im **🧠 Model-Button** der Session-Aktionsleiste angezeigt.
 
@@ -251,6 +251,7 @@ Sessions sind benannte Copilot CLI Sessions. Du kannst beliebig viele Sessions p
 | **Session fortsetzen** | In der Sidebar auf die Session-Karte klicken |
 | **Session umbenennen** | Doppelklick auf den Tab-Titel oder Rechtsklick in der Sidebar |
 | **Session löschen** | Hover über die Session-Karte → 🗑️ → Bestätigungsdialog |
+| **CWD wählen** | Klick auf 📂 in der Statusbar → Ordner-Auswahl-Dialog; CWD wird pro Session persistiert |
 
 ### Chat
 

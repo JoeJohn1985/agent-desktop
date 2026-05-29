@@ -79,6 +79,28 @@ function createNamedSessionsManager(store) {
     store.namedSessions[sessionId].deniedTools = tools;
   }
 
+  /**
+   * Save the working directory for a named session.
+   * Does nothing if the session does not exist (unbenannte Session).
+   * @param {string} sessionId - Session identifier.
+   * @param {string} cwd - Working directory path.
+   */
+  function saveSessionCwd(sessionId, cwd) {
+    if (!store.namedSessions || !store.namedSessions[sessionId]) return;
+    store.namedSessions[sessionId].cwd = cwd;
+  }
+
+  /**
+   * Get the persisted CWD for a session.
+   * @param {string} sessionId - Session identifier.
+   * @returns {string|null} The stored cwd or null if not set/unknown.
+   */
+  function getSessionCwd(sessionId) {
+    const entry = (store.namedSessions || {})[sessionId];
+    if (!entry) return null;
+    return entry.cwd ?? null;
+  }
+
   function getSortedList() {
     const all = getAll();
     return Object.entries(all)
@@ -86,7 +108,7 @@ function createNamedSessionsManager(store) {
       .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
   }
 
-  return { getAll, getName, getEntry, setName, remove, touch, getDeniedTools, saveDeniedTools, getSortedList };
+  return { getAll, getName, getEntry, setName, remove, touch, getDeniedTools, saveDeniedTools, saveSessionCwd, getSessionCwd, getSortedList };
 }
 
 module.exports = {
