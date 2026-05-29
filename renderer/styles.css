@@ -499,28 +499,27 @@ body {
 .session-card:hover .session-card__delete { opacity: 0.6; }
 .session-card__delete:hover { opacity: 1 !important; background: var(--bg-hover); }
 
-.session-card__cwd {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px 4px 8px;
-  font-size: 11px;
+.session-card__cwd-btn {
+  background: none;
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s;
-  overflow: hidden;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  opacity: 0;
+  pointer-events: none;
 }
-.session-card__cwd:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
+.session-card:hover .session-card__cwd-btn {
+  opacity: 1;
+  pointer-events: auto;
 }
-.session-card__cwd-icon { flex-shrink: 0; font-size: 10px; }
-.session-card__cwd-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
+.session-card__cwd-btn:hover { background: var(--bg-active); }
+.session-card__cwd-btn--empty { opacity: 0.35; }
+.session-card:hover .session-card__cwd-btn--empty {
+  opacity: 0.6;
+  pointer-events: auto;
 }
 
 /* ── Skill Cards ──────────────────────────────────────── */

@@ -1811,11 +1811,8 @@ function renderSessions(list) {
   let html = list.map(s => {
     const isLive = openSessionIds.has(s.id);
     const title = s.name;
-    const cwdDisplay = s.cwd ? _cwdBasename(s.cwd) : null;
     const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
-    const cwdLabel = cwdDisplay
-      ? escapeHtml(cwdDisplay)
-      : '<span style="color:var(--text-muted);font-style:italic">Kein CWD</span>';
+    const cwdBtnClass = s.cwd ? 'session-card__cwd-btn' : 'session-card__cwd-btn session-card__cwd-btn--empty';
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
@@ -1823,11 +1820,8 @@ function renderSessions(list) {
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
             <div class="session-card__title">${escapeHtml(title)}</div>
           </div>
+          <button class="${cwdBtnClass}" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}" aria-label="Arbeitsverzeichnis ändern">📁</button>
           <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
-        </div>
-        <div class="session-card__cwd" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}">
-          <span class="session-card__cwd-icon">📁</span>
-          <span class="session-card__cwd-label">${cwdLabel}</span>
         </div>
       </div>
     `;
