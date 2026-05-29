@@ -420,7 +420,7 @@ contextBridge.exposeInMainWorld('copilot', {
      * @param {string} sessionId
      * @returns {Promise<Object>}
      */
-    spawnBackground: (tabId, sessionId) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId),
+    spawnBackground: (tabId, sessionId, cwd) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId, cwd),
     /** @ipc terminal:get-buffer @param {number} tabId @returns {Promise<string[]>} Buffered output lines */
     getBuffer: (tabId) => ipcRenderer.invoke('terminal:get-buffer', tabId),
     /**

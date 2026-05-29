@@ -54,7 +54,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
 
   ipcMain.handle('terminal:available', () => !!pty);
 
-  ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId) => {
+  ipcMain.handle('terminal:spawn-background', (_event, tabId, sessionId, cwd) => {
     console.log('[bg-terminal] spawn request tabId:', tabId, 'sessionId:', sessionId);
     if (terminalProcesses.has(tabId)) { console.log('[bg-terminal] already running'); return { success: true, alreadyRunning: true }; }
     if (!pty) return { success: false, error: 'node-pty not available' };
@@ -64,7 +64,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: COPILOT_CWD,
+      cwd: cwd || COPILOT_CWD,
       env: buildEnv({ TERM: 'xterm-256color' }),
     });
 
