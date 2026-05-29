@@ -115,7 +115,7 @@ async function openTerminal(tabId, sessionId, slashCommand) {
   });
 
   // Spawn PTY (reuses background PTY if available)
-  const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand, tab.cwd || null);
+  const result = await copilot.terminal.spawn(tabId, sessionId, slashCommand);
   if (!result.success) {
     instance.writeln(`\r\n\x1b[31m⚠️ ${result.error}\x1b[0m`);
   }

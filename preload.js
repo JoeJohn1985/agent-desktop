@@ -412,7 +412,7 @@ contextBridge.exposeInMainWorld('copilot', {
      * @param {string} [slashCommand] - Initial slash command to execute
      * @returns {Promise<Object>} Spawn result
      */
-    spawn: (tabId, sessionId, slashCommand, cwd) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand, cwd),
+    spawn: (tabId, sessionId, slashCommand) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand),
     /**
      * Spawns a background terminal (no UI, for automated commands).
      * @ipc terminal:spawn-background
@@ -420,7 +420,7 @@ contextBridge.exposeInMainWorld('copilot', {
      * @param {string} sessionId
      * @returns {Promise<Object>}
      */
-    spawnBackground: (tabId, sessionId, cwd) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId, cwd),
+    spawnBackground: (tabId, sessionId) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId),
     /** @ipc terminal:get-buffer @param {number} tabId @returns {Promise<string[]>} Buffered output lines */
     getBuffer: (tabId) => ipcRenderer.invoke('terminal:get-buffer', tabId),
     /**
