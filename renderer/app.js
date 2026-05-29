@@ -192,6 +192,7 @@ async function restoreOpenTabs() {
       const tab = tabs.get(tabId);
       if (tab) {
         tab.sessionId = t.sessionId;
+        tab.cwd = t.sessionId ? getSessionCwd(t.sessionId) : null;
         // Load denied tools from namedSessions
         tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
         // Restore persisted model for this session
@@ -610,6 +611,7 @@ async function createTab(label) {
     statusEl,
     label: tabLabel,
     sessionId: null,    // filled after first response
+    cwd: null,          // per-tab working directory
     isProcessing: false,
     lastActivityAt: null,
     _inactivityTimer: null,
@@ -691,6 +693,15 @@ function switchTab(tabId) {
   }
 
   renderTabs();
+
+  // Update sbCwd for this tab
+  if (activeTab && activeTab.cwd) {
+    updateStatusbar('sbCwd', `📁 ${shortenPath(activeTab.cwd)}`);
+  } else if (activeTab && activeTab.context && activeTab.context.cwd) {
+    updateStatusbar('sbCwd', `📁 ${shortenPath(activeTab.context.cwd)}`);
+  } else {
+    updateStatusbar('sbCwd', '📁 –');
+  }
   
   // Update context button for this tab
   const ctxBtn = document.getElementById('btnSlashContext');
@@ -1229,6 +1240,7 @@ function sendMessage() {
     addDirs: getEffectiveExtraDirs(),
     autopilot: tab.autopilot || undefined,
     model: tab.selectedModel || DEFAULT_MODEL_ID,
+    cwd: tab.cwd || undefined,
   });
 
   // Update lastUsed for sorting
@@ -1455,10 +1467,32 @@ function initCopilotIPC() {
 
       case 'session.skills_loaded': {
         const skillsList = event.data.skills || [];
+        console.log('[skills_loaded] event.data:', JSON.stringify(event.data));
         updateStatusbar('sbSkills', `🛠️ ${skillsList.length} Skills`);
         tab.context.skills = skillsList.length;
+        tab.context.skillsList = skillsList;
         tab.statusEl.textContent = '● Skills geladen';
         tab.statusEl.style.display = 'block';
+        // Update sidebar skills with project skills from event
+        if (skillsList.length > 0) {
+          const projectSkills = skillsList
+            .filter(s => s.source === 'project' || (s.path && s.path.includes('.github')))
+            .map(s => ({
+              id: s.id || s.name || s.slug,
+              name: s.name || s.slug || 'Unknown',
+              icon: s.icon || '📂',
+              description: (s.description || '') + ' [Projekt]',
+              source: 'project',
+              dirName: s.dirName || s.slug || null,
+            }));
+          // Merge project skills that aren't already in the global list
+          for (const ps of projectSkills) {
+            if (!skills.find(sk => sk.id === ps.id)) {
+              skills.push(ps);
+            }
+          }
+          renderSkills();
+        }
         break;
       }
 
@@ -1483,6 +1517,7 @@ function initCopilotIPC() {
         if (cwdMatch) {
           const cwd = cwdMatch[1].trim();
           tab.context.cwd = cwd;
+          if (!tab.cwd) tab.cwd = cwd;
           const short = shortenPath(cwd);
           updateStatusbar('sbCwd', `📁 ${short}`);
         }
@@ -1495,6 +1530,8 @@ function initCopilotIPC() {
           tab.sessionId = event.sessionId;
           // Persist selected model for this new session
           if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
+          // Persist CWD for this session
+          if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           saveOpenTabs();
           // Start background terminal for this session
           copilot.terminal.spawnBackground(tabId, event.sessionId).catch(e => {
@@ -1659,8 +1696,27 @@ function initTabModelSelector() {
 }
 
 // ── Session Export ──────────────────────────────────────────
-function openCwd() {
-  copilot.chat.openCwd();
+/**
+ * Save the CWD for a named session in preferences.
+ * @param {string} sessionId
+ * @param {string} cwd
+ */
+function saveSessionCwd(sessionId, cwd) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].cwd = cwd;
+    setPref('namedSessions', all);
+  }
+}
+
+/**
+ * Get the persisted CWD for a session.
+ * @param {string} sessionId
+ * @returns {string|null}
+ */
+function getSessionCwd(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return entry?.cwd || null;
 }
 
 /**
@@ -2728,6 +2784,17 @@ async function initStatusbar() {
       el.setAttribute('data-tooltip', `App: v${ver.app}\nCLI: ${ver.cli}`);
     }
   } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
+
+  // Click handler for sbCwd — open folder picker to set per-tab CWD
+  document.getElementById('sbCwd')?.addEventListener('click', async () => {
+    const selected = await copilot.folders.browse();
+    if (!selected) return;
+    const tab = tabs.get(activeTabId);
+    if (!tab) return;
+    tab.cwd = selected;
+    updateStatusbar('sbCwd', `📁 ${shortenPath(selected)}`);
+    if (tab.sessionId) saveSessionCwd(tab.sessionId, selected);
+  });
 }
 
 /**
