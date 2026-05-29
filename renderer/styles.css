@@ -414,6 +414,7 @@ body {
   border-radius: 10px;
   min-width: 18px;
   text-align: center;
+  margin-left: auto;
 }
 
 .sidebar__search {
@@ -655,6 +656,23 @@ body {
 .skill-card__cli-toggle--disable {
   border-color: var(--text-muted);
 }
+
+/* ── MCP Server Cards ────────────────────────────────── */
+.mcp-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+}
+.mcp-card__status { font-size: 10px; width: 14px; text-align: center; }
+.mcp-card__info { flex: 1; min-width: 0; }
+.mcp-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-card__label { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+.mcp-card--connected { opacity: 1; }
+.mcp-card--disconnected { opacity: 0.5; }
+.mcp-card--empty { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 8px 10px; }
 
 /* ── Sidebar Confirm Overlay ─────────────────────────── */
 .sidebar-confirm {
