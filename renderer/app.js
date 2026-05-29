@@ -213,7 +213,7 @@ async function restoreOpenTabs() {
         renderPinnedTools();
         // Start background terminal for restored tab
         if (t.sessionId) {
-          copilot.terminal.spawnBackground(tabId, t.sessionId).catch(e => {
+          copilot.terminal.spawnBackground(tabId, t.sessionId, tab.cwd || null).catch(e => {
             console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
           });
         }
@@ -1522,7 +1522,7 @@ function initCopilotIPC() {
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           saveOpenTabs();
           // Start background terminal for this session
-          copilot.terminal.spawnBackground(tabId, event.sessionId).catch(e => {
+          copilot.terminal.spawnBackground(tabId, event.sessionId, tab.cwd || null).catch(e => {
             console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
             showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
           });
@@ -1889,10 +1889,13 @@ async function resumeSession(sessionId) {
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // Restore persisted CWD for this session
+  const sessionCwd = getSessionCwd(sessionId);
+  if (sessionCwd) tab.cwd = sessionCwd;
   // Update lastUsed timestamp
   touchSession(sessionId);
   // Start background terminal for instant /context access
-  copilot.terminal.spawnBackground(tabId, sessionId).catch(e => {
+  copilot.terminal.spawnBackground(tabId, sessionId, tab.cwd || null).catch(e => {
     console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
     showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
   });
