@@ -508,17 +508,14 @@ body {
   padding: 2px 4px;
   border-radius: 4px;
   transition: color 0.15s, background 0.15s;
+}
+.session-card__cwd-btn:hover { background: var(--bg-active); }
+.session-card__cwd-btn--empty {
   opacity: 0;
   pointer-events: none;
 }
-.session-card:hover .session-card__cwd-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-.session-card__cwd-btn:hover { background: var(--bg-active); }
-.session-card__cwd-btn--empty { opacity: 0.35; }
 .session-card:hover .session-card__cwd-btn--empty {
-  opacity: 0.6;
+  opacity: 0.5;
   pointer-events: auto;
 }
 
