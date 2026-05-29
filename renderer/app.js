@@ -1770,7 +1770,7 @@ function exportChat() {
 async function loadSessions() {
   const all = getNamedSessions();
   sessions = Object.entries(all)
-    .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '' }))
+    .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '', cwd: entry.cwd || null }))
     .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
   document.getElementById('sessionCount').textContent = sessions.length;
   renderSessions(filterSessions());
@@ -1804,9 +1804,18 @@ function renderSessions(list) {
   }
 
   const openSessionIds = new Set([...tabs.values()].map(t => t.sessionId).filter(Boolean));
+  function _cwdBasename(p) {
+    if (!p) return '';
+    return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p;
+  }
   let html = list.map(s => {
     const isLive = openSessionIds.has(s.id);
     const title = s.name;
+    const cwdDisplay = s.cwd ? _cwdBasename(s.cwd) : null;
+    const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
+    const cwdLabel = cwdDisplay
+      ? escapeHtml(cwdDisplay)
+      : '<span style="color:var(--text-muted);font-style:italic">Kein CWD</span>';
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
@@ -1815,6 +1824,10 @@ function renderSessions(list) {
             <div class="session-card__title">${escapeHtml(title)}</div>
           </div>
           <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
+        </div>
+        <div class="session-card__cwd" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}">
+          <span class="session-card__cwd-icon">📁</span>
+          <span class="session-card__cwd-label">${cwdLabel}</span>
         </div>
       </div>
     `;
@@ -1834,6 +1847,29 @@ function renderSessions(list) {
   }
 
   container.innerHTML = html;
+}
+
+/**
+ * Open a folder dialog to pick/change the CWD for a session card.
+ * Updates persistent storage and any open tabs using this session.
+ * @param {string} sessionId
+ */
+async function pickSessionCwd(sessionId) {
+  const selected = await copilot.openFolderDialog();
+  if (!selected) return;
+  saveSessionCwd(sessionId, selected);
+
+  for (const [, tab] of tabs) {
+    if (tab.sessionId === sessionId) {
+      tab.cwd = selected;
+      if (tab.id === activeTabId) {
+        updateStatusbar('sbCwd', `📁 ${shortenPath(selected)}`);
+        loadProjectSkillsAndAgents(selected);
+      }
+    }
+  }
+
+  await loadSessions();
 }
 
 /**
