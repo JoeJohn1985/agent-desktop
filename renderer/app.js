@@ -2088,7 +2088,8 @@ async function loadProjectSkillsAndAgents(cwd) {
 
   renderSkills();
   renderAgents();
-}
+  // Update sbSkills with the real total (includes project skills)
+  updateStatusbar('sbSkills', `🛠️ ${skills.length} Skills`);
 
 /**
  * Render the agents list in the sidebar. Each agent card shows an icon,
