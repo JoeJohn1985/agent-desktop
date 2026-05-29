@@ -53,6 +53,7 @@
       <div class="sidebar__section" data-icon="🛠️">
         <div class="sidebar__header" onclick="toggleSection('skills')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
+          <span class="sidebar__badge" id="skillsCount"></span>
           <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadSkills()" data-tooltip="Skills neu laden" aria-label="Skills neu laden">↻</button>
         </div>
         <div class="sidebar__content" id="skillsContent">
@@ -64,10 +65,22 @@
       <div class="sidebar__section" data-icon="🤖">
         <div class="sidebar__header" onclick="toggleSection('agents')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
+          <span class="sidebar__badge" id="agentsCount"></span>
           <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadAgents()" data-tooltip="Agents neu laden" aria-label="Agents neu laden">↻</button>
         </div>
         <div class="sidebar__content" id="agentsContent">
           <div class="sidebar__list" id="agentList"></div>
+        </div>
+      </div>
+
+      <!-- MCP-Server Sektion -->
+      <div class="sidebar__section" data-icon="🔌">
+        <div class="sidebar__header" onclick="toggleSection('mcp')">
+          <span class="sidebar__header-left"><span class="sidebar__chevron" id="mcpChevron">▾</span> 🔌 MCP-Server</span>
+          <span class="sidebar__badge" id="mcpCount" data-tooltip="Verbunden / Gesamt"></span>
+        </div>
+        <div class="sidebar__content" id="mcpContent">
+          <div class="sidebar__list" id="mcpList"></div>
         </div>
       </div>
 

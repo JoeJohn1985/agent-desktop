@@ -1995,6 +1995,8 @@ function cancelDeleteSession() {
  */
 function renderSkills() {
   const container = document.getElementById('skillList');
+  const countEl = document.getElementById('skillsCount');
+  if (countEl) countEl.textContent = skills.length > 0 ? skills.length : '';
   container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
@@ -2173,6 +2175,8 @@ async function loadProjectSkillsAndAgents(cwd) {
  */
 function renderAgents() {
   const container = document.getElementById('agentList');
+  const countEl = document.getElementById('agentsCount');
+  if (countEl) countEl.textContent = agents.length > 0 ? agents.length : '';
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
     const isProject = a.source === 'project';
