@@ -306,6 +306,11 @@ function spawnCopilot(tabId, prompt, options = {}) {
       args.push('--add-dir', dir);
     }
   }
+  // Always include the global default CWD as an additional allowed path
+  // so skills/files there remain accessible even when a session overrides CWD.
+  if (options.cwd && options.cwd !== COPILOT_CWD) {
+    args.push('--add-dir', COPILOT_CWD);
+  }
 
   if (options.sessionId) {
     args.push('--resume=' + options.sessionId);
