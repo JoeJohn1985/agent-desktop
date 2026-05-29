@@ -1,6 +1,6 @@
 {
   "name": "copilot-desktop",
-  "version": "0.24.1",
+  "version": "0.24.6",
   "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
   "main": "main.js",
   "scripts": {
@@ -21,6 +21,7 @@
     "productName": "copilot-desktop",
     "asar": true,
     "npmRebuild": false,
+    "icon": "assets/icon.png",
     "files": [
       "main.js",
       "preload.js",
@@ -39,6 +40,7 @@
       "output": "dist"
     },
     "win": {
+      "icon": "assets/icon.png",
       "target": [
         {
           "target": "dir",
@@ -47,6 +49,12 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "icon": "assets/icon.png"
     }
   },
   "author": "MSchneider",
