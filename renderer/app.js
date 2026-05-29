@@ -1849,7 +1849,7 @@ function renderSessions(list) {
  * @param {string} sessionId
  */
 async function pickSessionCwd(sessionId) {
-  const selected = await copilot.openFolderDialog();
+  const selected = await copilot.folders.browse();
   if (!selected) return;
   saveSessionCwd(sessionId, selected);
 
