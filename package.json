@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "check": "eslint . && jest",
     "pack:portable": "electron-builder --win dir",
     "dist:portable": "pwsh -NoProfile -ExecutionPolicy Bypass -File build/portable/build-portable.ps1"
   },
