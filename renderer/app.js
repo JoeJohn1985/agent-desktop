@@ -1848,9 +1848,8 @@ async function pickSessionCwd(sessionId) {
         // Restart terminal with new CWD if it's currently open
         if (tab.terminal && tab.terminal.alive) {
           closeTerminalForTab(tab.id);
-          copilot.terminal.spawnBackground(tab.id, tab.sessionId, selected).catch(e => {
-            console.warn('[terminal] Neustart nach CWD-Wechsel fehlgeschlagen:', e.message);
-          });
+          // Kurz warten bis PTY cleanup durch, dann Terminal mit neuem CWD neu öffnen
+          setTimeout(() => openTerminal(tab.id, tab.sessionId, null, selected), 300);
         }
       }
     }

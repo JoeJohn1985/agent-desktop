@@ -154,7 +154,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
     }
   });
 
-  ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand) => {
+  ipcMain.handle('terminal:spawn', (_event, tabId, sessionId, slashCommand, cwd) => {
     if (!pty) {
       return { success: false, error: 'node-pty ist nicht installiert. Bitte "npm install" und ggf. "npx electron-rebuild" ausführen.' };
     }
@@ -179,7 +179,7 @@ function registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: COPILOT_CWD,
+      cwd: cwd || COPILOT_CWD,
       env: buildEnv({ TERM: 'xterm-256color' }),
     });
 

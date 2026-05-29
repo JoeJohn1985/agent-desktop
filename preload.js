@@ -412,7 +412,7 @@ contextBridge.exposeInMainWorld('copilot', {
      * @param {string} [slashCommand] - Initial slash command to execute
      * @returns {Promise<Object>} Spawn result
      */
-    spawn: (tabId, sessionId, slashCommand) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand),
+    spawn: (tabId, sessionId, slashCommand, cwd) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand, cwd),
     /**
      * Spawns a background terminal (no UI, for automated commands).
      * @ipc terminal:spawn-background
