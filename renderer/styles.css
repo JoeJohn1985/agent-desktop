@@ -1746,39 +1746,6 @@ mark.chat-search-highlight--active {
 }
 
 /* Session Statusbar (info items, under input bar) */
-.session-statusbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 16px;
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-overlay);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  overflow: visible;
-  white-space: nowrap;
-  position: relative;
-}
-
-.session-statusbar__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.session-statusbar__item--clickable {
-  cursor: pointer;
-  transition: color 0.15s;
-}
-.session-statusbar__item--clickable:hover {
-  color: var(--text-primary);
-}
-
-.session-statusbar__sep {
-  color: var(--border, #45475a);
-  font-size: 10px;
-}
 
 /* ── Model Switcher Dropdown ──────────────────────────── */
 .model-dropdown {

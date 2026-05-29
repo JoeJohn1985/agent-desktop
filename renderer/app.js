@@ -698,15 +698,6 @@ function switchTab(tabId) {
 
   renderTabs();
 
-  // Update sbCwd for this tab
-  if (activeTab && activeTab.cwd) {
-    updateStatusbar('sbCwd', `📁 ${shortenPath(activeTab.cwd)}`);
-  } else if (activeTab && activeTab.context && activeTab.context.cwd) {
-    updateStatusbar('sbCwd', `📁 ${shortenPath(activeTab.context.cwd)}`);
-  } else {
-    updateStatusbar('sbCwd', '📁 –');
-  }
-
   // Reload project skills/agents for the newly active tab's CWD
   loadProjectSkillsAndAgents(activeTab?.cwd || null);
   
@@ -1470,7 +1461,6 @@ function initCopilotIPC() {
       case 'session.mcp_servers_loaded': {
         const servers = event.data.servers || [];
         const connected = servers.filter(s => s.status === 'connected');
-        updateStatusbar('sbMcp', `🔌 ${connected.length}/${servers.length} MCP`);
         tab.context.mcp = `${connected.length}/${servers.length}`;
         tab.context.mcpServers = servers;
         if (tabId === activeTabId) {
@@ -1485,7 +1475,6 @@ function initCopilotIPC() {
 
       case 'session.skills_loaded': {
         const skillsList = event.data.skills || [];
-        updateStatusbar('sbSkills', `🛠️ ${skillsList.length} Skills`);
         tab.context.skills = skillsList.length;
         tab.context.skillsList = skillsList;
         tab.statusEl.textContent = '● Skills geladen';
@@ -1519,8 +1508,6 @@ function initCopilotIPC() {
           const cwd = cwdMatch[1].trim();
           tab.context.cwd = cwd;
           if (!tab.cwd) tab.cwd = cwd;
-          const short = shortenPath(cwd);
-          updateStatusbar('sbCwd', `📁 ${short}`);
         }
         break;
       }
@@ -1857,7 +1844,6 @@ async function pickSessionCwd(sessionId) {
     if (tab.sessionId === sessionId) {
       tab.cwd = selected;
       if (tab.id === activeTabId) {
-        updateStatusbar('sbCwd', `📁 ${shortenPath(selected)}`);
         loadProjectSkillsAndAgents(selected);
       }
     }
@@ -2190,8 +2176,6 @@ async function loadProjectSkillsAndAgents(cwd) {
 
   renderSkills();
   renderAgents();
-  // Update sbSkills with the real total (includes project skills)
-  updateStatusbar('sbSkills', `🛠️ ${skills.length} Skills`);
 
   // Persist merged mcpServers back to tab context
   const tab = tabs.find(t => t.id === activeTabId);
@@ -2738,7 +2722,6 @@ window.switchToPluginsView = function() {
   const streamArea = document.getElementById('streamArea');
   const terminalPanel = document.getElementById('terminalPanel');
   const chatInputBar = document.querySelector('.chat-input-bar');
-  const sessionStatusbar = document.getElementById('sessionStatusbar');
   const tabPlugins = document.getElementById('tabPlugins');
 
   // Hide chat content, show plugin view (both inside terminal-container)
@@ -2746,7 +2729,6 @@ window.switchToPluginsView = function() {
   if (streamArea) streamArea.style.display = 'none';
   if (terminalPanel) terminalPanel.style.display = 'none';
   if (chatInputBar) chatInputBar.style.display = 'none';
-  if (sessionStatusbar) sessionStatusbar.style.display = 'none';
   if (pluginsView) pluginsView.style.display = 'flex';
 
   // Deactivate all chat tabs, activate plugin tab
@@ -2769,14 +2751,12 @@ function switchToChatView() {
   const streamArea = document.getElementById('streamArea');
   const terminalPanel = document.getElementById('terminalPanel');
   const chatInputBar = document.querySelector('.chat-input-bar');
-  const sessionStatusbar = document.getElementById('sessionStatusbar');
   const tabPlugins = document.getElementById('tabPlugins');
 
   if (pluginsView) pluginsView.style.display = 'none';
   if (sessionActions) sessionActions.style.display = '';
   if (streamArea) streamArea.style.display = '';
   if (chatInputBar) chatInputBar.style.display = '';
-  if (sessionStatusbar) sessionStatusbar.style.display = '';
   // terminalPanel nur zeigen wenn es vorher sichtbar war (collapsed state respektieren)
   const terminalCollapsed = terminalPanel && terminalPanel.classList.contains('terminal-panel--collapsed');
   if (terminalPanel && !terminalCollapsed) terminalPanel.style.display = '';
@@ -2905,33 +2885,11 @@ async function initStatusbar() {
 
   try {
     const cwd = await copilot.chat.getCwd();
-    if (cwd) {
-      const short = shortenPath(cwd);
-      updateStatusbar('sbCwd', `📁 ${short}`);
+    if (cwd && !tabs.get(activeTabId)?.cwd) {
+      const tab = tabs.get(activeTabId);
+      if (tab) tab.cwd = cwd;
     }
   } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
-
-  try {
-    const ver = await copilot.chat.getVersions();
-    const el = document.getElementById('sbVersion');
-    if (el) {
-      el.textContent = `🏷️ v${ver.app}`;
-      el.setAttribute('data-tooltip', `App: v${ver.app}\nCLI: ${ver.cli}`);
-    }
-  } catch (e) { console.warn('[app] Version nicht geladen:', e.message); }
-
-  // Click handler for sbCwd — open folder picker to set per-tab CWD
-  document.getElementById('sbCwd')?.addEventListener('click', async () => {
-    const selected = await copilot.folders.browse();
-    if (!selected) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab) return;
-    tab.cwd = selected;
-    updateStatusbar('sbCwd', `📁 ${shortenPath(selected)}`);
-    if (tab.sessionId) saveSessionCwd(tab.sessionId, selected);
-    // Immediately refresh project skills/agents for the new CWD
-    loadProjectSkillsAndAgents(selected);
-  });
 }
 
 /**
