@@ -717,6 +717,34 @@ ipcMain.handle('agents:listProject', async (_event, cwd) => {
   return scanAgentsDirectory(projectAgentsDir, yaml.parse);
 });
 
+/**
+ * @ipc mcp:listProject — Reads .github/mcp.json (or .github/copilot-mcp.json) from a given CWD.
+ * @param {string} cwd - Absolute path to the project root
+ * @returns {Promise<Array<{name: string, type: string, configured: true}>>}
+ */
+ipcMain.handle('mcp:listProject', async (_event, cwd) => {
+  if (!cwd || typeof cwd !== 'string') return [];
+  const candidates = [
+    path.join(cwd, '.github', 'mcp.json'),
+    path.join(cwd, '.github', 'copilot-mcp.json'),
+  ];
+  for (const filePath of candidates) {
+    try {
+      const raw = await fs.promises.readFile(filePath, 'utf8');
+      const config = JSON.parse(raw);
+      const servers = config.mcpServers || {};
+      return Object.entries(servers).map(([name, cfg]) => ({
+        name,
+        type: cfg.type || (cfg.command ? 'stdio' : 'sse'),
+        configured: true,
+      }));
+    } catch {
+      // file not found or invalid JSON → try next
+    }
+  }
+  return [];
+});
+
 /** @ipc agents:list — Scans .agent.md files. @returns {Promise<Array<Object>>} */
 // Agents
 ipcMain.handle('agents:list', async () => {

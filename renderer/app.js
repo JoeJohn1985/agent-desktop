@@ -32,6 +32,10 @@ let skills = [];
 /** @type {Array<{id: string, name: string, icon: string, description: string, fileSlug?: string}>} Agent definitions loaded from main process. */
 let agents = [];
 
+// ── MCP Servers State ────────────────────────────────────────
+/** @type {Array<{name: string, status: string}>} MCP server list for the active tab. */
+let mcpServers = [];
+
 // ── Plugins State ────────────────────────────────────────────
 /** @type {Array<{success: boolean, marketplace: string, name: string, plugins: Array, error?: string}>} Marketplace browse results. */
 let marketplaces = [];
@@ -718,6 +722,10 @@ function switchTab(tabId) {
 
   // Refresh session tools list for this tab
   renderSessionTools();
+
+  // Update MCP servers for this tab
+  mcpServers = activeTab?.context?.mcpServers || [];
+  renderMcpServers();
 
   // Update autopilot button for this tab
   const autopilotBtn = document.getElementById('btnAutopilot');
@@ -1464,6 +1472,13 @@ function initCopilotIPC() {
         const connected = servers.filter(s => s.status === 'connected');
         updateStatusbar('sbMcp', `🔌 ${connected.length}/${servers.length} MCP`);
         tab.context.mcp = `${connected.length}/${servers.length}`;
+        tab.context.mcpServers = servers;
+        if (tabId === activeTabId) {
+          mcpServers = servers;
+          renderMcpServers();
+          // Re-merge project MCP entries from .github/mcp.json
+          if (tab.cwd) loadProjectSkillsAndAgents(tab.cwd);
+        }
         tab.statusEl.textContent = '● MCP Server geladen';
         break;
       }
@@ -2023,6 +2038,39 @@ function toggleSkill(skillId) {
 }
 
 /**
+ * Render the MCP servers list in the sidebar.
+ */
+function renderMcpServers() {
+  const container = document.getElementById('mcpList');
+  if (!container) return;
+  const countEl = document.getElementById('mcpCount');
+  if (mcpServers.length === 0) {
+    container.innerHTML = '<div class="mcp-card mcp-card--empty">Keine MCP-Server</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  if (countEl) countEl.textContent = `${mcpServers.filter(s => s.status === 'connected').length}/${mcpServers.length}`;
+  container.innerHTML = mcpServers.map(s => {
+    const isConnected = s.status === 'connected';
+    const isConfigured = s.status === 'configured';
+    const statusIcon = isConnected ? '🟢' : isConfigured ? '⚪' : '🔴';
+    const statusLabel = isConnected ? 'verbunden' : isConfigured ? 'konfiguriert' : 'getrennt';
+    const cardClass = isConnected ? 'mcp-card--connected' : 'mcp-card--disconnected';
+    const projectBadge = s.fromProject ? '<span class="skill-badge skill-badge--project" title="Konfiguriert in .github/mcp.json">Projekt</span>' : '';
+    return `
+      <div class="mcp-card ${cardClass}"
+           data-tooltip="${escapeAttr(s.name)}">
+        <span class="mcp-card__status">${statusIcon}</span>
+        <div class="mcp-card__info">
+          <div class="mcp-card__name">${escapeHtml(s.name)}${projectBadge}</div>
+        </div>
+        <span class="mcp-card__label">${statusLabel}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
  * Toggle a skill's CLI-disabled state and persist to ~/.copilot/settings.json.
  * @param {string} dirName
  */
@@ -2089,10 +2137,34 @@ async function loadProjectSkillsAndAgents(cwd) {
     }
   }
 
+  // Merge project MCP servers from .github/mcp.json
+  mcpServers = mcpServers.filter(s => !s.fromProject);
+
+  if (cwd) {
+    try {
+      const projectMcpList = await copilot.mcp.listProject(cwd) || [];
+      for (const pm of projectMcpList) {
+        const existing = mcpServers.find(s => s.name === pm.name);
+        if (existing) {
+          existing.fromProject = true;
+        } else {
+          mcpServers.push({ ...pm, status: 'configured', fromProject: true });
+        }
+      }
+    } catch (e) {
+      console.warn('[mcp] Projekt-MCP-Config konnte nicht geladen werden:', e.message);
+    }
+  }
+
   renderSkills();
   renderAgents();
   // Update sbSkills with the real total (includes project skills)
   updateStatusbar('sbSkills', `🛠️ ${skills.length} Skills`);
+
+  // Persist merged mcpServers back to tab context
+  const tab = tabs.find(t => t.id === activeTabId);
+  if (tab) tab.context.mcpServers = mcpServers;
+  renderMcpServers();
 }
 
 /**

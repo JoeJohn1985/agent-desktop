@@ -302,6 +302,18 @@ contextBridge.exposeInMainWorld('copilot', {
     delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },
 
+  // ── MCP ────────────────────────────────────────────────────
+
+  /**
+   * MCP server management — list project-configured MCP servers.
+   *
+   * @namespace copilot.mcp
+   */
+  mcp: {
+    /** @ipc mcp:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project MCP servers from .github/mcp.json */
+    listProject: (cwd) => ipcRenderer.invoke('mcp:listProject', cwd),
+  },
+
   // ── Tests ─────────────────────────────────────────────────
 
   /**
