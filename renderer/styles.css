@@ -512,8 +512,28 @@ body {
 .skill-card:hover { background: var(--bg-hover); }
 .skill-card__icon { font-size: 16px; width: 22px; text-align: center; }
 .skill-card__info { flex: 1; min-width: 0; }
-.skill-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 2px; }
 .skill-card__desc { font-size: 11px; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Project skill/agent badge */
+.skill-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.skill-badge--project {
+  background: var(--accent, #0078d4);
+  color: #fff;
+  opacity: 0.85;
+}
+.skill-card--project { border-left: 2px solid var(--accent, #0078d4); }
+.agent-card--project { border-left: 2px solid var(--accent, #0078d4); }
 .skill-card__toggle {
   width: 32px; height: 18px;
   background: var(--bg-active);
@@ -553,7 +573,7 @@ body {
 .agent-card:hover { background: var(--bg-hover); }
 .agent-card__icon { font-size: 16px; width: 22px; text-align: center; }
 .agent-card__info { flex: 1; min-width: 0; }
-.agent-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 2px; }
 .agent-card__toggle {
   width: 32px; height: 18px;
   background: var(--bg-active);

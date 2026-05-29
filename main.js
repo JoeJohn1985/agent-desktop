@@ -693,6 +693,30 @@ ipcMain.handle('skills:list', async () => {
   return scanSkills();
 });
 
+/**
+ * @ipc skills:listProject — Scans .github/skills/ in a given CWD for project-specific skills.
+ * @param {string} cwd - Absolute path to scan
+ * @returns {Promise<Array<Object>>} Project skills with source 'project'
+ */
+ipcMain.handle('skills:listProject', async (_event, cwd) => {
+  if (!cwd || typeof cwd !== 'string') return [];
+  const projectSkillsDir = path.join(cwd, '.github', 'skills');
+  if (!fs.existsSync(projectSkillsDir)) return [];
+  return scanSkillDirectory(projectSkillsDir, 'project', userSkillIcon);
+});
+
+/**
+ * @ipc agents:listProject — Scans .github/agents/ in a given CWD for project-specific agents.
+ * @param {string} cwd - Absolute path to scan
+ * @returns {Promise<Array<Object>>} Project agents with source 'project'
+ */
+ipcMain.handle('agents:listProject', async (_event, cwd) => {
+  if (!cwd || typeof cwd !== 'string') return [];
+  const projectAgentsDir = path.join(cwd, '.github', 'agents');
+  if (!fs.existsSync(projectAgentsDir)) return [];
+  return scanAgentsDirectory(projectAgentsDir, yaml.parse);
+});
+
 /** @ipc agents:list — Scans .agent.md files. @returns {Promise<Array<Object>>} */
 // Agents
 ipcMain.handle('agents:list', async () => {

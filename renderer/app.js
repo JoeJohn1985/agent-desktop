@@ -1467,31 +1467,14 @@ function initCopilotIPC() {
 
       case 'session.skills_loaded': {
         const skillsList = event.data.skills || [];
-        console.log('[skills_loaded] event.data:', JSON.stringify(event.data));
         updateStatusbar('sbSkills', `🛠️ ${skillsList.length} Skills`);
         tab.context.skills = skillsList.length;
         tab.context.skillsList = skillsList;
         tab.statusEl.textContent = '● Skills geladen';
         tab.statusEl.style.display = 'block';
-        // Update sidebar skills with project skills from event
-        if (skillsList.length > 0) {
-          const projectSkills = skillsList
-            .filter(s => s.source === 'project' || (s.path && s.path.includes('.github')))
-            .map(s => ({
-              id: s.id || s.name || s.slug,
-              name: s.name || s.slug || 'Unknown',
-              icon: s.icon || '📂',
-              description: (s.description || '') + ' [Projekt]',
-              source: 'project',
-              dirName: s.dirName || s.slug || null,
-            }));
-          // Merge project skills that aren't already in the global list
-          for (const ps of projectSkills) {
-            if (!skills.find(sk => sk.id === ps.id)) {
-              skills.push(ps);
-            }
-          }
-          renderSkills();
+        // Reload project skills from .github/skills/ using the tab's CWD
+        if (tabId === activeTabId) {
+          loadProjectSkillsAndAgents(tab.cwd);
         }
         break;
       }
@@ -1997,10 +1980,11 @@ function renderSkills() {
   container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
+    const isProject = s.source === 'project';
     const deleteBtn = s.source === 'user' && s.dirName
       ? `<button class="skill-card__delete" onclick="event.stopPropagation(); confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
       : '';
-    const cliToggleBtn = s.dirName
+    const cliToggleBtn = s.dirName && !isProject
       ? `<button class="skill-card__cli-toggle ${isCLIDisabled ? 'skill-card__cli-toggle--enable' : 'skill-card__cli-toggle--disable'}"
                onclick="event.stopPropagation(); toggleSkillDisabled('${escapeAttr(s.dirName)}')"
                data-tooltip="${isCLIDisabled ? 'Skill in Copilot CLI aktivieren' : 'Skill in Copilot CLI deaktivieren'}"
@@ -2008,12 +1992,13 @@ function renderSkills() {
          ${isCLIDisabled ? '✓' : '⊘'}
        </button>`
       : '';
+    const projectBadge = isProject ? `<span class="skill-badge skill-badge--project" title="Projekt-Skill aus .github/skills/">Projekt</span>` : '';
     return `
-      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''}"
+      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
            onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${s.icon}</span>
         <div class="skill-card__info">
-          <div class="skill-card__name">${escapeHtml(s.name)}</div>
+          <div class="skill-card__name">${escapeHtml(s.name)}${projectBadge}</div>
         </div>
         ${deleteBtn}
         ${cliToggleBtn}
@@ -2069,6 +2054,43 @@ async function reloadSkills() {
 
 // ── Agents ───────────────────────────────────────────────────
 /**
+ * Load project-specific skills and agents from .github/skills/ and .github/agents/
+ * in the given CWD, merge them into the global lists, and re-render the sidebar.
+ * Removes previously loaded project skills/agents before merging fresh ones.
+ * @param {string|null} cwd - Absolute path to scan, or null to clear project entries
+ * @returns {Promise<void>}
+ */
+async function loadProjectSkillsAndAgents(cwd) {
+  // Remove stale project skills
+  skills = skills.filter(s => s.source !== 'project');
+  agents = agents.filter(a => a.source !== 'project');
+
+  if (cwd) {
+    try {
+      const projectSkills = await copilot.skills.listProject(cwd) || [];
+      for (const ps of projectSkills) {
+        ps.source = 'project';
+        if (!skills.find(s => s.id === ps.id)) skills.push(ps);
+      }
+    } catch (e) {
+      console.warn('[skills] Projekt-Skills konnten nicht geladen werden:', e.message);
+    }
+    try {
+      const projectAgents = await copilot.agents.listProject(cwd) || [];
+      for (const pa of projectAgents) {
+        pa.source = 'project';
+        if (!agents.find(a => a.id === pa.id)) agents.push(pa);
+      }
+    } catch (e) {
+      console.warn('[agents] Projekt-Agents konnten nicht geladen werden:', e.message);
+    }
+  }
+
+  renderSkills();
+  renderAgents();
+}
+
+/**
  * Render the agents list in the sidebar. Each agent card shows an icon,
  * name, active toggle, and an optional delete button.
  */
@@ -2076,15 +2098,17 @@ function renderAgents() {
   const container = document.getElementById('agentList');
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
-    const deleteBtn = a.fileSlug
+    const isProject = a.source === 'project';
+    const deleteBtn = a.fileSlug && !isProject
       ? `<button class="agent-card__delete" onclick="event.stopPropagation(); confirmDeleteAgent('${escapeAttr(a.fileSlug)}', '${escapeAttr(a.name)}')" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
       : '';
+    const projectBadge = isProject ? `<span class="skill-badge skill-badge--project" title="Projekt-Agent aus .github/agents/">Projekt</span>` : '';
     return `
-      <div class="agent-card ${isActive ? 'agent-card--active' : ''}"
+      <div class="agent-card ${isActive ? 'agent-card--active' : ''} ${isProject ? 'agent-card--project' : ''}"
            onclick="toggleAgent('${escapeAttr(a.id)}')" data-tooltip="${escapeAttr(a.description)}">
         <span class="agent-card__icon">${a.icon}</span>
         <div class="agent-card__info">
-          <div class="agent-card__name">${escapeHtml(a.name)}</div>
+          <div class="agent-card__name">${escapeHtml(a.name)}${projectBadge}</div>
         </div>
         ${deleteBtn}
         <div class="agent-card__toggle"></div>
@@ -2794,6 +2818,8 @@ async function initStatusbar() {
     tab.cwd = selected;
     updateStatusbar('sbCwd', `📁 ${shortenPath(selected)}`);
     if (tab.sessionId) saveSessionCwd(tab.sessionId, selected);
+    // Immediately refresh project skills/agents for the new CWD
+    loadProjectSkillsAndAgents(selected);
   });
 }
 

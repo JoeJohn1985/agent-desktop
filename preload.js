@@ -276,6 +276,8 @@ contextBridge.exposeInMainWorld('copilot', {
   skills: {
     /** @ipc skills:list @returns {Promise<Array<Object>>} All discovered skills (builtin + user) */
     list: () => ipcRenderer.invoke('skills:list'),
+    /** @ipc skills:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project skills from cwd/.github/skills/ */
+    listProject: (cwd) => ipcRenderer.invoke('skills:listProject', cwd),
     /** @ipc skills:delete @param {string} dirName - Skill directory name @returns {Promise<{success: boolean, error?: string}>} */
     delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
     /** @ipc skills:getDisabled @returns {Promise<string[]>} */
@@ -294,6 +296,8 @@ contextBridge.exposeInMainWorld('copilot', {
   agents: {
     /** @ipc agents:list @returns {Promise<Array<Object>>} All discovered agents */
     list: () => ipcRenderer.invoke('agents:list'),
+    /** @ipc agents:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project agents from cwd/.github/agents/ */
+    listProject: (cwd) => ipcRenderer.invoke('agents:listProject', cwd),
     /** @ipc agents:delete @param {string} fileSlug - Agent file slug (without .agent.md) @returns {Promise<{success: boolean, error?: string}>} */
     delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },
