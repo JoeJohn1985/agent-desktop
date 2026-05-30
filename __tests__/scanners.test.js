@@ -218,6 +218,76 @@ describe('scanSkillDirectory', () => {
     expect(result).toEqual([]);
     expect(yamlParse).not.toHaveBeenCalled();
   });
+
+  // ── Projekt-Skills (source='project') ─────────────────────
+
+  test('setzt source="project" korrekt (Projekt-Skill aus .github/)', () => {
+    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
+    const skillMdPath = path.join(githubSkillsDir, 'my-skill', 'SKILL.md');
+    fs.existsSync.mockImplementation((p) => {
+      if (p === githubSkillsDir) return true;
+      if (p === skillMdPath) return true;
+      return false;
+    });
+    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
+    fs.readFileSync.mockReturnValue('---\nname: my-skill\ndescription: A project skill\n---\n');
+    yamlParse.mockReturnValue({ name: 'my-skill', description: 'A project skill' });
+
+    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('project');
+    expect(result[0].name).toBe('my-skill');
+  });
+
+  test('Projekt-Skill enthält alle Pflichtfelder', () => {
+    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
+    const skillMdPath = path.join(githubSkillsDir, 'code-review', 'SKILL.md');
+    fs.existsSync.mockImplementation((p) => {
+      if (p === githubSkillsDir) return true;
+      if (p === skillMdPath) return true;
+      return false;
+    });
+    fs.readdirSync.mockReturnValue([dirent('code-review')]);
+    fs.readFileSync.mockReturnValue('---\nname: code-review\ndescription: Reviews code\nicon: 🔍\n---\n');
+    yamlParse.mockReturnValue({ name: 'code-review', description: 'Reviews code', icon: '🔍' });
+
+    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
+    expect(result[0]).toEqual({
+      id: 'code-review',
+      dirName: 'code-review',
+      name: 'code-review',
+      description: 'Reviews code',
+      source: 'project',
+      icon: '🔍',
+    });
+  });
+
+  test('gibt [] zurück wenn .github/skills/ nicht existiert', () => {
+    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
+    fs.existsSync.mockReturnValue(false);
+
+    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
+    expect(result).toEqual([]);
+  });
+
+  test('mehrere Projekt-Skills haben alle source="project"', () => {
+    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
+    const s1Path = path.join(githubSkillsDir, 'skill-a', 'SKILL.md');
+    const s2Path = path.join(githubSkillsDir, 'skill-b', 'SKILL.md');
+    fs.existsSync.mockImplementation((p) => {
+      if (p === githubSkillsDir) return true;
+      if (p === s1Path || p === s2Path) return true;
+      return false;
+    });
+    fs.readdirSync.mockReturnValue([dirent('skill-a'), dirent('skill-b')]);
+    fs.readFileSync.mockReturnValue('---\nname: x\n---\n');
+    let count = 0;
+    yamlParse.mockImplementation(() => ({ name: `skill-${++count}` }));
+
+    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
+    expect(result).toHaveLength(2);
+    expect(result.every(s => s.source === 'project')).toBe(true);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
