@@ -4776,6 +4776,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const restored = await restoreOpenTabs();
   if (!restored) {
     await createTab('🤖 Copilot');
+  } else {
+    // Re-run after restore so project skills load with the now-set tab.cwd.
+    // (createTab triggers switchTab before tab.cwd is assigned, so the first
+    // loadProjectSkillsAndAgents call runs with null cwd and clears results.)
+    const restoredActiveTab = tabs.get(activeTabId);
+    if (restoredActiveTab?.cwd) {
+      loadProjectSkillsAndAgents(restoredActiveTab.cwd);
+    }
   }
 
   initChatInput();
