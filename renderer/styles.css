@@ -1540,6 +1540,14 @@ mark.chat-search-highlight--active {
   color: var(--text-muted);
   border-left: 2px solid var(--yellow);
   max-width: 80%;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.stream-tool-call__args {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 .stream-tool-result {
   margin: 8px 0;

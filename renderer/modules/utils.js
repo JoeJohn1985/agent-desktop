@@ -55,8 +55,8 @@ function formatToolArgs(name, args) {
   if (!args) return '';
   if (args.path) return truncatePath(args.path);
   if (args.pattern) return args.pattern;
-  if (args.command) return args.command.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.command.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
-  if (args.query) return args.query.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.query.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
-  if (args.prompt) return args.prompt.substring(0, TOOL_ARGS_MAX_LENGTH) + (args.prompt.length > TOOL_ARGS_MAX_LENGTH ? '…' : '');
+  if (args.command) return args.command;
+  if (args.query) return args.query;
+  if (args.prompt) return args.prompt;
   return '';
 }
