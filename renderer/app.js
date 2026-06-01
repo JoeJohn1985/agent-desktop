@@ -1434,10 +1434,10 @@ function initCopilotIPC() {
         toolEl.className = 'stream-tool-result';
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
-        const preview = (event.data.result.content || '').substring(0, TOOL_PREVIEW_MAX_LENGTH).replace(/\n/g, ' ');
+        const preview = (event.data.result.content || '').replace(/\n/g, ' ');
 
         const summary = document.createElement('summary');
-        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}${preview.length >= TOOL_PREVIEW_MAX_LENGTH ? '…' : ''}</span>`;
+        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
         toolEl.appendChild(summary);
 
         const content = document.createElement('pre');

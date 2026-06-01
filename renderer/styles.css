@@ -1558,6 +1558,10 @@ mark.chat-search-highlight--active {
 .stream-tool-result__preview {
   color: var(--text-muted);
   font-size: 14px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  display: inline;
 }
 .stream-tool-result__content {
   margin-top: 6px;
