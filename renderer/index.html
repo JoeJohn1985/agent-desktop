@@ -53,6 +53,7 @@
       <div class="sidebar__section" data-icon="🛠️">
         <div class="sidebar__header" onclick="toggleSection('skills')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
+          <button class="sidebar__gear-btn" onclick="event.stopPropagation(); openSkillManager()" data-tooltip="Skills verwalten" aria-label="Skills verwalten">⚙️</button>
           <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadSkills()" data-tooltip="Skills neu laden" aria-label="Skills neu laden">↻</button>
           <span class="sidebar__badge" id="skillsCount"></span>
         </div>
@@ -522,5 +523,18 @@
   <script src="modules/terminal.js"></script>
   <script src="modules/session-tools.js"></script>
   <script src="app.js"></script>
+
+  <!-- Skill Manager Overlay -->
+  <div class="overlay" id="skillManagerOverlay">
+    <div class="overlay__dialog overlay__dialog--skill-manager">
+      <div class="skill-manager__header">
+        <span class="skill-manager__title">Skills verwalten</span>
+        <button onclick="closeSkillManager()" class="skill-manager__close">✕</button>
+      </div>
+      <div class="skill-manager__body" id="skillManagerBody">
+        <!-- wird dynamisch befüllt -->
+      </div>
+    </div>
+  </div>
 </body>
 </html>

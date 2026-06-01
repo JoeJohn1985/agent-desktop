@@ -51,6 +51,10 @@ let activeSessionId = null;
 let activeSkills = new Set();
 /** @type {Set<string>} DirNames of skills disabled in ~/.copilot/settings.json */
 let disabledSkills = new Set();
+/** @type {Set<string>} DirNames of skills hidden globally in ~/.copilot/settings.json */
+let hiddenSkillsGlobal = new Set();
+/** @type {Set<string>} DirNames of skills hidden for the current session only */
+let hiddenSkillsSession = new Set();
 /** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
 let activeAgents = new Set();
 /** @type {string} User home directory path, loaded from main process at startup. */
@@ -2013,7 +2017,11 @@ function renderSkills() {
   const container = document.getElementById('skillList');
   const countEl = document.getElementById('skillsCount');
   if (countEl) countEl.textContent = skills.length > 0 ? skills.length : '';
-  container.innerHTML = skills.map(s => {
+  const visibleSkills = skills.filter(s => {
+    if (!s.dirName) return true;
+    return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName);
+  });
+  container.innerHTML = visibleSkills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
     const isProject = s.source === 'project';
@@ -2097,6 +2105,136 @@ async function toggleSkillDisabled(dirName) {
   else disabledSkills.add(dirName);
   await copilot.skills.setDisabled([...disabledSkills]);
   renderSkills();
+  renderSkillManager();
+}
+
+/**
+ * Toggle a skill's global hidden state and persist to ~/.copilot/settings.json.
+ * @param {string} dirName
+ */
+async function toggleHideGlobal(dirName) {
+  if (hiddenSkillsGlobal.has(dirName)) hiddenSkillsGlobal.delete(dirName);
+  else hiddenSkillsGlobal.add(dirName);
+  await copilot.skills.setHidden([...hiddenSkillsGlobal]);
+  renderSkills();
+  renderSkillManager();
+}
+
+/**
+ * Toggle a skill's session hidden state and persist to preferences.
+ * @param {string} dirName
+ */
+async function toggleHideSession(dirName) {
+  if (hiddenSkillsSession.has(dirName)) hiddenSkillsSession.delete(dirName);
+  else hiddenSkillsSession.add(dirName);
+  const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
+  if (sessionId) {
+    const all = getNamedSessions();
+    if (!all[sessionId]) all[sessionId] = { name: '', deniedTools: [], lastUsed: new Date().toISOString() };
+    all[sessionId].hiddenSkills = [...hiddenSkillsSession];
+    setPref('namedSessions', all);
+  }
+  renderSkills();
+  renderSkillManager();
+}
+
+/**
+ * Open the Skill Manager overlay.
+ */
+function openSkillManager() {
+  const overlay = document.getElementById('skillManagerOverlay');
+  if (overlay) {
+    overlay.classList.add('overlay--visible');
+    renderSkillManager();
+  }
+}
+
+/**
+ * Close the Skill Manager overlay.
+ */
+function closeSkillManager() {
+  const overlay = document.getElementById('skillManagerOverlay');
+  if (overlay) overlay.classList.remove('overlay--visible');
+}
+
+/**
+ * Render the Skill Manager overlay content with all skills and their actions.
+ */
+function renderSkillManager() {
+  const body = document.getElementById('skillManagerBody');
+  if (!body) return;
+
+  const globalSkills = skills.filter(s => s.source !== 'project');
+  const projectSkills = skills.filter(s => s.source === 'project');
+
+  let html = '';
+
+  // Global Skills section
+  html += '<div class="skill-manager__section">';
+  html += '<div class="skill-manager__section-title">Globale Skills</div>';
+  if (globalSkills.length === 0) {
+    html += '<div class="skill-manager__empty">Keine globalen Skills vorhanden</div>';
+  }
+  for (const s of globalSkills) {
+    const isHiddenGlobal = s.dirName && hiddenSkillsGlobal.has(s.dirName);
+    const isHiddenSession = s.dirName && hiddenSkillsSession.has(s.dirName);
+    const isHidden = isHiddenGlobal || isHiddenSession;
+    const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
+    const nameClass = isHidden ? 'skill-manager__name skill-manager__name--hidden' : 'skill-manager__name';
+
+    const hideBtn = s.dirName ? `
+      <div class="split-btn">
+        <button class="split-btn__item ${isHiddenSession ? 'split-btn__item--active' : ''}" onclick="toggleHideSession('${escapeAttr(s.dirName)}')" data-tooltip="Nur in dieser Session ausblenden">👁 Session</button>
+        <button class="split-btn__item ${isHiddenGlobal ? 'split-btn__item--active' : ''}" onclick="toggleHideGlobal('${escapeAttr(s.dirName)}')" data-tooltip="Global ausblenden">🌍 Global</button>
+      </div>` : '';
+
+    const disableBtn = s.dirName ? `
+      <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" onclick="toggleSkillDisabled('${escapeAttr(s.dirName)}')" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren'}">
+        ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'}
+      </button>` : '';
+
+    const deleteBtn = s.source === 'user' && s.dirName ? `
+      <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+
+    html += `<div class="skill-manager__row">
+      <span class="${nameClass}">${s.icon || '🎯'} ${escapeHtml(s.name)}</span>
+      ${hideBtn}${disableBtn}${deleteBtn}
+    </div>`;
+  }
+  html += '</div>';
+
+  // Project Skills section
+  if (projectSkills.length > 0) {
+    html += '<div class="skill-manager__section">';
+    html += '<div class="skill-manager__section-title">Projekt-Skills</div>';
+    for (const s of projectSkills) {
+      const isHiddenSession = s.dirName && hiddenSkillsSession.has(s.dirName);
+      const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
+      const nameClass = isHiddenSession ? 'skill-manager__name skill-manager__name--hidden' : 'skill-manager__name';
+
+      const hideBtn = s.dirName ? `
+        <button class="skill-manager__toggle-btn ${isHiddenSession ? 'skill-manager__toggle-btn--active' : ''}" onclick="toggleHideSession('${escapeAttr(s.dirName)}')" data-tooltip="In dieser Session ausblenden">
+          ${isHiddenSession ? '👁\u0336 Ausgeblendet' : '👁 Sichtbar'}
+        </button>` : '';
+
+      const disableBtn = s.dirName ? `
+        <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" onclick="toggleSkillDisabled('${escapeAttr(s.dirName)}')" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren — wirkt global für alle Projekte mit diesem Skill-Namen'}">
+          ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'} ${!isCLIDisabled ? '' : ''}
+        </button>
+        ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
+
+      const deleteBtn = s.dirName ? `
+        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+
+      html += `<div class="skill-manager__row">
+        <span class="${nameClass}">${s.icon || '🧪'} ${escapeHtml(s.name)}</span>
+        ${hideBtn}${disableBtn}${deleteBtn}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
 }
 
 /**
@@ -2113,6 +2251,12 @@ async function reloadSkills() {
     activeSkills = new Set(savedActiveSkills);
     const savedDisabledSkills = await copilot.skills.getDisabled() || [];
     disabledSkills = new Set(savedDisabledSkills);
+    const savedHidden = await copilot.skills.getHidden() || [];
+    hiddenSkillsGlobal = new Set(savedHidden);
+    // Session-hidden aus preferences laden
+    const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
+    const allSessions = getNamedSessions();
+    hiddenSkillsSession = new Set(allSessions[sessionId]?.hiddenSkills || []);
     renderSkills();
   } catch (e) {
     console.warn('[skills] Reload fehlgeschlagen:', e.message);
