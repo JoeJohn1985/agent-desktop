@@ -1840,10 +1840,10 @@ async function pickSessionCwd(sessionId) {
   if (!selected) return;
   saveSessionCwd(sessionId, selected);
 
-  for (const [, tab] of tabs) {
+  for (const [tabId, tab] of tabs) {
     if (tab.sessionId === sessionId) {
       tab.cwd = selected;
-      if (tab.id === activeTabId) {
+      if (tabId === activeTabId) {
         loadProjectSkillsAndAgents(selected);
       }
     }
@@ -2178,7 +2178,7 @@ async function loadProjectSkillsAndAgents(cwd) {
   renderAgents();
 
   // Persist merged mcpServers back to tab context
-  const tab = tabs.find(t => t.id === activeTabId);
+  const tab = tabs.get(activeTabId);
   if (tab) tab.context.mcpServers = mcpServers;
   renderMcpServers();
 }

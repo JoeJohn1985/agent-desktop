@@ -251,7 +251,8 @@ Sessions sind benannte Copilot CLI Sessions. Du kannst beliebig viele Sessions p
 | **Session fortsetzen** | In der Sidebar auf die Session-Karte klicken |
 | **Session umbenennen** | Doppelklick auf den Tab-Titel oder Rechtsklick in der Sidebar |
 | **Session löschen** | Hover über die Session-Karte → 🗑️ → Bestätigungsdialog |
-| **CWD wählen** | Klick auf 📂 in der Statusbar → Ordner-Auswahl-Dialog; CWD wird pro Session persistiert |
+| **CWD wählen (Statusbar)** | Klick auf 📂 in der Statusbar → Ordner-Auswahl-Dialog; CWD wird pro Session persistiert |
+| **CWD wählen (Sidebar)** | Klick auf 📁 in der Session-Karte → Ordner-Auswahl-Dialog; persistiert und gilt beim nächsten Resume dieser Session |
 
 ### Chat
 
@@ -291,8 +292,23 @@ Skills sind KI-Erweiterungen, die Copilot spezialisierte Fähigkeiten verleihen.
 - Über den **⊘-Button** kannst du Skills auch global in der Copilot CLI deaktivieren. Der Status wird in `~/.copilot/settings.json` unter `disabledSkills` gespeichert und gilt CLI-weit.
 - Aktive Skills werden als Prompt-Präfix in jede Nachricht injiziert.
 - **Skill-Tags** unter jeder Chat-Nachricht zeigen, welche Skills zum Zeitpunkt des Sendens aktiv waren.
+- **Projekt-Skills** (`Projekt`-Badge): Liegt im aktiven CWD unter `.github/skills/`, werden automatisch geladen und in der Sidebar mit einem „Projekt"-Badge markiert. Beim Tab-Wechsel oder CWD-Änderung werden sie neu eingelesen.
 
 > **Eigene Skills erstellen:** Lege eine neue `.md`-Datei in `~/.copilot/skills/` an. Die Datei sollte den Skill-Namen, eine Beschreibung und die Prompt-Anweisungen enthalten.
+
+### Agents
+
+Agents sind spezialisierte Copilot-Sub-Agenten.
+
+- **Sidebar-Badge** zeigt die Gesamtanzahl geladener Agents.
+- **Projekt-Agents** (`Projekt`-Badge): Liegt das Projekt unter `.github/agents/`, werden die Agents beim Setzen des CWD automatisch geladen.
+
+### MCP-Server (Sidebar)
+
+Der MCP-Bereich zeigt alle konfigurierten Model Context Protocol-Server.
+
+- **Badge** zeigt `verbunden/gesamt` (z. B. `2/3`).
+- **Projekt-MCP** (`Projekt`-Badge): MCP-Server aus `.github/mcp.json` oder `.github/copilot-mcp.json` im aktiven CWD werden automatisch erkannt und mit einem „Projekt"-Badge markiert.
 
 ### Todos
 

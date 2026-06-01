@@ -466,9 +466,12 @@ Die Kommunikation zwischen Main und Renderer Process erfolgt über IPC-Channels,
 | `folders:browse` | handle | Verzeichnis-Auswahl-Dialog |
 | `folders:browse-file` | handle | Datei-Auswahl-Dialog |
 | `skills:list` | handle | Skills aus `~/.copilot/skills/` scannen |
+| `skills:listProject` | handle | Projekt-Skills aus `<cwd>/.github/skills/` scannen |
 | `skills:getDisabled` | handle | Liest `disabledSkills` aus `~/.copilot/settings.json` |
 | `skills:setDisabled` | handle | Schreibt `disabledSkills` in `~/.copilot/settings.json` |
 | `agents:list` | handle | Sub-Agents aus `~/.copilot/agents/` scannen |
+| `agents:listProject` | handle | Projekt-Agents aus `<cwd>/.github/agents/` scannen |
+| `mcp:listProject` | handle | Projekt-MCP-Server aus `<cwd>/.github/mcp.json` lesen |
 | `files:processDropped` | handle | Drag&Drop-Dateien verarbeiten |
 | `tests:run` | handle | Jest-Suite spawnen |
 | `tests:coverage` | handle | Coverage-Run spawnen |
