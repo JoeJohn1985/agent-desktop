@@ -2028,7 +2028,7 @@ function renderSkills() {
          ${isCLIDisabled ? '✓' : '⊘'}
        </button>`
       : '';
-    const projectBadge = isProject ? `<span class="skill-badge skill-badge--project" title="Projekt-Skill aus .github/skills/">Projekt</span>` : '';
+    const projectBadge = '';
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
            onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
@@ -2074,7 +2074,7 @@ function renderMcpServers() {
     const statusIcon = isConnected ? '🟢' : isConfigured ? '⚪' : '🔴';
     const statusLabel = isConnected ? 'verbunden' : isConfigured ? 'konfiguriert' : 'getrennt';
     const cardClass = isConnected ? 'mcp-card--connected' : 'mcp-card--disconnected';
-    const projectBadge = s.fromProject ? '<span class="skill-badge skill-badge--project" title="Konfiguriert in .github/mcp.json">Projekt</span>' : '';
+    const projectBadge = '';
     return `
       <div class="mcp-card ${cardClass}"
            data-tooltip="${escapeAttr(s.name)}">
@@ -2197,7 +2197,7 @@ function renderAgents() {
     const deleteBtn = a.fileSlug && !isProject
       ? `<button class="agent-card__delete" onclick="event.stopPropagation(); confirmDeleteAgent('${escapeAttr(a.fileSlug)}', '${escapeAttr(a.name)}')" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
       : '';
-    const projectBadge = isProject ? `<span class="skill-badge skill-badge--project" title="Projekt-Agent aus .github/agents/">Projekt</span>` : '';
+    const projectBadge = '';
     return `
       <div class="agent-card ${isActive ? 'agent-card--active' : ''} ${isProject ? 'agent-card--project' : ''}"
            onclick="toggleAgent('${escapeAttr(a.id)}')" data-tooltip="${escapeAttr(a.description)}">
