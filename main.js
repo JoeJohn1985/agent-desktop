@@ -820,7 +820,7 @@ ipcMain.handle('skills:getHidden', async () => {
     const raw = fs.readFileSync(settingsPath, 'utf-8');
     const obj = JSON.parse(raw);
     return Array.isArray(obj.hiddenSkills) ? obj.hiddenSkills : [];
-  } catch (e) {
+  } catch (_e) {
     return [];
   }
 });
