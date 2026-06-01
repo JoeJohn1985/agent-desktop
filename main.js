@@ -810,6 +810,44 @@ ipcMain.handle('skills:setDisabled', async (_event, disabledSkills) => {
 });
 
 /**
+ * @ipc skills:getHidden — Liest hiddenSkills aus ~/.copilot/settings.json
+ * @returns {Promise<string[]>}
+ */
+ipcMain.handle('skills:getHidden', async () => {
+  const settingsPath = path.join(os.homedir(), '.copilot', 'settings.json');
+  try {
+    if (!fs.existsSync(settingsPath)) return [];
+    const raw = fs.readFileSync(settingsPath, 'utf-8');
+    const obj = JSON.parse(raw);
+    return Array.isArray(obj.hiddenSkills) ? obj.hiddenSkills : [];
+  } catch (e) {
+    return [];
+  }
+});
+
+/**
+ * @ipc skills:setHidden — Schreibt hiddenSkills in ~/.copilot/settings.json
+ * @param {string[]} hiddenSkills
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+ipcMain.handle('skills:setHidden', async (_event, hiddenSkills) => {
+  if (!Array.isArray(hiddenSkills)) return { success: false, error: 'Ungültige Eingabe' };
+  const settingsPath = path.join(os.homedir(), '.copilot', 'settings.json');
+  try {
+    let obj = {};
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf-8');
+      obj = JSON.parse(raw);
+    }
+    obj.hiddenSkills = hiddenSkills;
+    fs.writeFileSync(settingsPath, JSON.stringify(obj, null, 2), 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/**
  * @ipc agents:delete — Deletes an agent .agent.md file.
  * @param {string} fileSlug - Agent file slug (alphanumeric, dashes, underscores only)
  * @returns {Promise<{success: boolean, error?: string}>}

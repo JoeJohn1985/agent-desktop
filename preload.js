@@ -284,6 +284,10 @@ contextBridge.exposeInMainWorld('copilot', {
     getDisabled: () => ipcRenderer.invoke('skills:getDisabled'),
     /** @ipc skills:setDisabled @param {string[]} list @returns {Promise<{success: boolean, error?: string}>} */
     setDisabled: (list) => ipcRenderer.invoke('skills:setDisabled', list),
+    /** @ipc skills:getHidden @returns {Promise<string[]>} */
+    getHidden: () => ipcRenderer.invoke('skills:getHidden'),
+    /** @ipc skills:setHidden @param {string[]} list @returns {Promise<{success: boolean, error?: string}>} */
+    setHidden: (list) => ipcRenderer.invoke('skills:setHidden', list),
   },
 
   // ── Agents ────────────────────────────────────────────────
