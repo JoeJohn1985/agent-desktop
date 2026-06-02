@@ -1600,7 +1600,6 @@ const DEFAULT_MODELS = [
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
-  { id: 'gpt-4.1', label: 'GPT-4.1', short: 'GPT-4.1' },
 ];
 
 function getAvailableModels() {
@@ -1658,7 +1657,7 @@ function initTabModelSelector() {
       const isActive = currentModel === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
-      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span><span class="model-dropdown__id">${escapeHtml(m.id)}</span>`;
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>`;
       item.addEventListener('click', () => {
         dropdown.remove();
         if (activeCloseHandler) {

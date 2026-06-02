@@ -26,7 +26,6 @@ const DEFAULT_MODELS = [
   { id: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
   { id: 'gpt-5.3-codex',   label: 'GPT-5.3-Codex' },
-  { id: 'gpt-4.1',         label: 'GPT-4.1' },
 ];
 
 // ── ModelSelectionStateMachine (extrahiert aus renderer/app.js) ──
@@ -302,7 +301,7 @@ describe('ModelSelection — updateModelSelectBtn()', () => {
 
   test('Button-State wird korrekt aktualisiert nach Model-Deselect (null)', () => {
     // Erst Model setzen
-    sm.activeTab.selectedModel = 'gpt-4.1';
+    sm.activeTab.selectedModel = 'gpt-5.3-codex';
     sm.updateModelSelectBtn();
     expect(sm._btnActive).toBe(true);
 
@@ -348,7 +347,7 @@ describe('ModelSelection — initTabModelSelector (Dropdown-Item-Klick)', () => 
   });
 
   test('Model-Klick setzt Button-Klasse auf aktiv', () => {
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
     expect(sm._btnActive).toBe(true);
   });
 
@@ -428,12 +427,12 @@ describe('ModelSelection — Tab-Wechsel (switchTab)', () => {
 
   test('Tab-Wechsel ändert tab.selectedModel nicht', () => {
     sm.switchTab('tab1');
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
 
     sm.switchTab('tab2');
     sm.switchTab('tab1'); // zurück
 
-    expect(sm.activeTab.selectedModel).toBe('gpt-4.1'); // State erhalten
+    expect(sm.activeTab.selectedModel).toBe('gpt-5.3-codex'); // State erhalten
   });
 
   test('3 Tabs: jeder Tab hat eigenen selectedModel-State', () => {
@@ -443,12 +442,12 @@ describe('ModelSelection — Tab-Wechsel (switchTab)', () => {
     sm.selectModel('claude-sonnet-4.6');
 
     sm.switchTab('tab3');
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
 
     // tab2 bleibt null
     expect(sm.tabs.get('tab1').selectedModel).toBe('claude-sonnet-4.6');
     expect(sm.tabs.get('tab2').selectedModel).toBeNull();
-    expect(sm.tabs.get('tab3').selectedModel).toBe('gpt-4.1');
+    expect(sm.tabs.get('tab3').selectedModel).toBe('gpt-5.3-codex');
   });
 
   test('switchTab auf nicht-existenten Tab wirft Fehler', () => {
@@ -473,13 +472,13 @@ describe('ModelSelection — Tab-Wechsel (switchTab)', () => {
     sm.selectModel('claude-sonnet-4.6');
 
     sm.switchTab('tab2');
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
 
     sm.switchTab('tab1');
     expect(sm._btnText).toBe('🧠 Claude Sonnet 4.6');
 
     sm.switchTab('tab2');
-    expect(sm._btnText).toBe('🧠 GPT-4.1');
+    expect(sm._btnText).toBe('🧠 GPT-5.3-Codex');
   });
 });
 
@@ -505,7 +504,7 @@ describe('ModelSelection — sendMessage-Integration', () => {
   });
 
   test('model ist undefined nach Rücksetzen auf null', () => {
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
     sm.activeTab.selectedModel = null; // Rücksetzen
     const options = sm.sendMessage('Hallo');
     expect(options.model).toBeUndefined();
@@ -544,13 +543,13 @@ describe('ModelSelection — sendMessage-Integration', () => {
   });
 
   test('mehrere Nachrichten haben konsistenten model-State', () => {
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
     sm.sendMessage('Msg 1');
     sm.sendMessage('Msg 2');
     sm.sendMessage('Msg 3');
 
     expect(sm.sentMessages).toHaveLength(3);
-    expect(sm.sentMessages.every(m => m.options.model === 'gpt-4.1')).toBe(true);
+    expect(sm.sentMessages.every(m => m.options.model === 'gpt-5.3-codex')).toBe(true);
   });
 
   test('Options-Objekt enthält weitere Felder (keine Regression)', () => {
@@ -617,7 +616,7 @@ describe('ModelSelection — main.js CLI-Argument (spawnCopilot)', () => {
   });
 
   test('--model ist genau einmal in args vorhanden', () => {
-    const args = buildCopilotArgs('Teste', { model: 'gpt-4.1' });
+    const args = buildCopilotArgs('Teste', { model: 'gpt-5.3-codex' });
     const count = args.filter(a => a === '--model').length;
     expect(count).toBe(1);
   });
@@ -642,20 +641,20 @@ describe('ModelSelection — main.js CLI-Argument (spawnCopilot)', () => {
 
   test('--model koexistiert korrekt mit --resume', () => {
     const args = buildCopilotArgs('Teste', {
-      model: 'gpt-4.1',
+      model: 'gpt-5.3-codex',
       sessionId: 'abc-123',
     });
     expect(args).toContain('--model');
-    expect(args).toContain('gpt-4.1');
+    expect(args).toContain('gpt-5.3-codex');
     expect(args).toContain('--resume=abc-123');
   });
 
   test('ohne --model werden keine unerwarteten Argumente hinzugefügt', () => {
     const argsWithout = buildCopilotArgs('Test', {});
-    const argsWith    = buildCopilotArgs('Test', { model: 'gpt-4.1' });
-    // Der einzige Unterschied muss ['--model', 'gpt-4.1'] sein
+    const argsWith    = buildCopilotArgs('Test', { model: 'gpt-5.3-codex' });
+    // Der einzige Unterschied muss ['--model', 'gpt-5.3-codex'] sein
     expect(argsWith.length - argsWithout.length).toBe(2);
-    expect(argsWith.filter(a => !argsWithout.includes(a))).toEqual(['--model', 'gpt-4.1']);
+    expect(argsWith.filter(a => !argsWithout.includes(a))).toEqual(['--model', 'gpt-5.3-codex']);
   });
 
   test('Basis-Argumente sind immer vorhanden (Regressions-Check)', () => {
@@ -683,7 +682,7 @@ describe('ModelSelection — main.js CLI-Argument (spawnCopilot)', () => {
 
   test('--model und --allow-all-paths koexistieren', () => {
     const args = buildCopilotArgs('Test', {
-      model: 'gpt-4.1',
+      model: 'gpt-5.3-codex',
       allowAllPaths: true,
     });
     expect(args).toContain('--model');
@@ -730,9 +729,9 @@ describe('ModelSelection — End-to-End-Szenarien', () => {
     expect(sm._btnText).toBe('🧠 Claude Sonnet 4.6');
 
     // Model wechseln
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
     opts = sm.sendMessage('Dritte Nachricht');
-    expect(opts.model).toBe('gpt-4.1');
+    expect(opts.model).toBe('gpt-5.3-codex');
   });
 
   test('Szenario: Zwei Tabs mit unterschiedlichen Models', () => {
@@ -745,9 +744,9 @@ describe('ModelSelection — End-to-End-Szenarien', () => {
     expect(opt1.model).toBe('claude-opus-4.7');
 
     sm.switchTab('tab2');
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
     const opt2 = sm.sendMessage('Von Tab 2');
-    expect(opt2.model).toBe('gpt-4.1');
+    expect(opt2.model).toBe('gpt-5.3-codex');
 
     // Zurück zu tab1: State wiederhergestellt
     sm.switchTab('tab1');
@@ -803,12 +802,12 @@ describe('ModelSelection — End-to-End-Szenarien', () => {
     // tab2: kein Model
 
     sm.switchTab('tab3');
-    sm.selectModel('gpt-4.1');
+    sm.selectModel('gpt-5.3-codex');
 
     // Assertions
     expect(sm.tabs.get('tab1').selectedModel).toBe('claude-sonnet-4.6');
     expect(sm.tabs.get('tab2').selectedModel).toBeNull();
-    expect(sm.tabs.get('tab3').selectedModel).toBe('gpt-4.1');
+    expect(sm.tabs.get('tab3').selectedModel).toBe('gpt-5.3-codex');
 
     // sendMessage-Aufrufe pro Tab
     sm.switchTab('tab1');
@@ -818,6 +817,6 @@ describe('ModelSelection — End-to-End-Szenarien', () => {
     expect(sm.sendMessage('T2').model).toBeUndefined();
 
     sm.switchTab('tab3');
-    expect(sm.sendMessage('T3').model).toBe('gpt-4.1');
+    expect(sm.sendMessage('T3').model).toBe('gpt-5.3-codex');
   });
 });
