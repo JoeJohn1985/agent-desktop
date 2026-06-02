@@ -2208,7 +2208,6 @@ function renderSkillManager() {
 
   // Project Skills section
   if (projectSkills.length > 0) {
-    const projectCwd = tabs.get(activeTabId)?.cwd || null;
     html += '<div class="skill-manager__section">';
     html += '<div class="skill-manager__section-title">Projekt-Skills</div>';
     for (const s of projectSkills) {
@@ -2227,8 +2226,8 @@ function renderSkillManager() {
         </button>
         ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
 
-      const deleteBtn = s.dirName && projectCwd ? `
-        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttr(projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+      const deleteBtn = s.dirName && s.projectCwd ? `
+        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttr(s.projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
 
       html += `<div class="skill-manager__row">
         <span class="${nameClass}">${s.icon || '🧪'} ${escapeHtml(s.name)}</span>
@@ -2286,6 +2285,7 @@ async function loadProjectSkillsAndAgents(cwd) {
       const projectSkills = await copilot.skills.listProject(cwd) || [];
       for (const ps of projectSkills) {
         ps.source = 'project';
+        ps.projectCwd = cwd;  // Speichere das Projekt-CWD für späteres Löschen
         if (!skills.find(s => s.id === ps.id)) skills.push(ps);
       }
     } catch (e) {

@@ -785,17 +785,28 @@ ipcMain.handle('skills:deleteProject', async (_event, cwd, dirName) => {
   const skillDir = path.join(cwd, '.github', 'skills', dirName);
   const expectedParent = path.join(cwd, '.github', 'skills');
   
+  console.log(`[deleteProject] Versuche zu löschen: ${skillDir}`);
+  console.log(`[deleteProject] CWD: ${cwd}`);
+  console.log(`[deleteProject] dirName: ${dirName}`);
+  console.log(`[deleteProject] Existiert: ${fs.existsSync(skillDir)}`);
+  
   // Security: Ensure skillDir is within expectedParent (prevent path traversal)
   const resolvedSkillDir = path.resolve(skillDir);
   const resolvedParent = path.resolve(expectedParent);
+  console.log(`[deleteProject] Resolved: ${resolvedSkillDir}`);
+  console.log(`[deleteProject] Parent: ${resolvedParent}`);
+  
   if (!resolvedSkillDir.startsWith(resolvedParent)) {
+    console.error(`[deleteProject] Path traversal check failed!`);
     return { success: false, error: 'Ungültiger Skill-Pfad' };
   }
   
   try {
     await fs.promises.rm(skillDir, { recursive: true, force: true });
+    console.log(`[deleteProject] Erfolgreich gelöscht: ${skillDir}`);
     return { success: true };
   } catch (e) {
+    console.error(`[deleteProject] Fehler beim Löschen: ${e.message}`);
     return { success: false, error: e.message };
   }
 });
