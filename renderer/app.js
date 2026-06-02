@@ -2422,18 +2422,27 @@ function confirmDeleteSkill(dirName, skillName, cwd = null) {
 
   document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
     overlay.remove();
-    const result = cwd
-      ? await copilot.skills.deleteProject(cwd, dirName)
-      : await copilot.skills.delete(dirName);
-    if (result.success) {
-      if (cwd) {
-        await loadProjectSkillsAndAgents(cwd);
-        renderSkillManager();
+    try {
+      const result = cwd
+        ? await copilot.skills.deleteProject(cwd, dirName)
+        : await copilot.skills.delete(dirName);
+      
+      if (result.success) {
+        console.log(`[skills] Gelöscht: ${dirName} (cwd: ${cwd ? 'project' : 'user'})`);
+        if (cwd) {
+          await loadProjectSkillsAndAgents(cwd);
+          renderSkills();
+          renderSkillManager();
+        } else {
+          await reloadSkills();
+        }
       } else {
-        await reloadSkills();
+        console.error('[skills] Löschen fehlgeschlagen:', result.error);
+        alert(`Fehler beim Löschen: ${result.error}`);
       }
-    } else {
-      console.error('[skills] Löschen fehlgeschlagen:', result.error);
+    } catch (e) {
+      console.error('[skills] Löschen Exception:', e);
+      alert(`Fehler: ${e.message}`);
     }
   });
   document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());

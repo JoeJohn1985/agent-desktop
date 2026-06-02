@@ -781,7 +781,17 @@ ipcMain.handle('skills:deleteProject', async (_event, cwd, dirName) => {
   if (!cwd || typeof cwd !== 'string') return { success: false, error: 'Ungültige CWD' };
   if (!dirName || typeof dirName !== 'string') return { success: false, error: 'Ungültige ID' };
   if (!/^[a-zA-Z0-9_-]+$/.test(dirName)) return { success: false, error: 'Ungültige ID' };
+  
   const skillDir = path.join(cwd, '.github', 'skills', dirName);
+  const expectedParent = path.join(cwd, '.github', 'skills');
+  
+  // Security: Ensure skillDir is within expectedParent (prevent path traversal)
+  const resolvedSkillDir = path.resolve(skillDir);
+  const resolvedParent = path.resolve(expectedParent);
+  if (!resolvedSkillDir.startsWith(resolvedParent)) {
+    return { success: false, error: 'Ungültiger Skill-Pfad' };
+  }
+  
   try {
     await fs.promises.rm(skillDir, { recursive: true, force: true });
     return { success: true };
