@@ -2015,11 +2015,20 @@ function cancelDeleteSession() {
 function renderSkills() {
   const container = document.getElementById('skillList');
   const countEl = document.getElementById('skillsCount');
-  if (countEl) countEl.textContent = skills.length > 0 ? skills.length : '';
+  const section = container.closest('.sidebar__section');
   const visibleSkills = skills.filter(s => {
     if (!s.dirName) return true;
     return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName) && !disabledSkills.has(s.dirName);
   });
+  
+  if (visibleSkills.length === 0) {
+    if (section) section.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  
+  if (section) section.style.display = 'block';
+  if (countEl) countEl.textContent = visibleSkills.length > 0 ? visibleSkills.length : '';
   container.innerHTML = visibleSkills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
@@ -2060,11 +2069,15 @@ function renderMcpServers() {
   const container = document.getElementById('mcpList');
   if (!container) return;
   const countEl = document.getElementById('mcpCount');
+  const section = container.closest('.sidebar__section');
+  
   if (mcpServers.length === 0) {
-    container.innerHTML = '<div class="mcp-card mcp-card--empty">Keine MCP-Server</div>';
+    if (section) section.style.display = 'none';
     if (countEl) countEl.textContent = '';
     return;
   }
+  
+  if (section) section.style.display = 'block';
   if (countEl) countEl.textContent = `${mcpServers.filter(s => s.status === 'connected').length}/${mcpServers.length}`;
   container.innerHTML = mcpServers.map(s => {
     const isConnected = s.status === 'connected';
@@ -2324,6 +2337,15 @@ async function loadProjectSkillsAndAgents(cwd) {
 function renderAgents() {
   const container = document.getElementById('agentList');
   const countEl = document.getElementById('agentsCount');
+  const section = container.closest('.sidebar__section');
+  
+  if (agents.length === 0) {
+    if (section) section.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  
+  if (section) section.style.display = 'block';
   if (countEl) countEl.textContent = agents.length > 0 ? agents.length : '';
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
