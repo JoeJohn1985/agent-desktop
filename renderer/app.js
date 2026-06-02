@@ -2227,7 +2227,7 @@ function renderSkillManager() {
         ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
 
       const deleteBtn = s.dirName && s.projectCwd ? `
-        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttr(s.projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttrJs(s.projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
 
       html += `<div class="skill-manager__row">
         <span class="${nameClass}">${s.icon || '🧪'} ${escapeHtml(s.name)}</span>

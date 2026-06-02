@@ -72,6 +72,14 @@ function escapeAttr(s) {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Escape a string for safe use inside a JavaScript string literal in an HTML attribute (onclick etc).
+ * Doubles backslashes so they survive JS parsing, then applies HTML attribute escaping.
+ */
+function escapeAttrJs(s) {
+  return escapeAttr(String(s).replace(/\\/g, '\\\\'));
+}
+
 // ── Context & Color ──────────────────────────────────────────
 
 /**
@@ -155,6 +163,7 @@ module.exports = {
   formatDate,
   escapeHtml,
   escapeAttr,
+  escapeAttrJs,
   contextColor,
   categoryColor,
   toolIcon,

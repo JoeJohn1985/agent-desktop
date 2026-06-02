@@ -32,6 +32,10 @@ function escapeAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function escapeAttrJs(s) {
+  return escapeAttr(String(s).replace(/\\/g, '\\\\'));
+}
+
 function toolIcon(name) {
   const icons = {
     view: '📄', edit: '✏️', create: '📝', grep: '🔍', glob: '📂',
