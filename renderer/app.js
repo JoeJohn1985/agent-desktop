@@ -1594,7 +1594,7 @@ window.confirmDeleteAgent = confirmDeleteAgent;
 // ── Model Switcher ────────────────────────────────────────────
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
 // the background terminal. We use a preferences-stored model list instead.
-const DEFAULT_MODEL_ID = 'claude-sonnet-4.6';
+const DEFAULT_MODEL_ID = 'claude-haiku-4.5';
 const DEFAULT_MODELS = [
   { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
