@@ -2018,7 +2018,7 @@ function renderSkills() {
   if (countEl) countEl.textContent = skills.length > 0 ? skills.length : '';
   const visibleSkills = skills.filter(s => {
     if (!s.dirName) return true;
-    return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName);
+    return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName) && !disabledSkills.has(s.dirName);
   });
   container.innerHTML = visibleSkills.map(s => {
     const isActive = activeSkills.has(s.id);
@@ -2248,8 +2248,7 @@ async function reloadSkills() {
     const allSessions = getNamedSessions();
     hiddenSkillsSession = new Set(allSessions[sessionId]?.hiddenSkills || []);
     renderSkills();
-  } catch (e) {
-    console.warn('[skills] Reload fehlgeschlagen:', e.message);
+    renderSkillManager();
   } finally {
     if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
   }
