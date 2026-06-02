@@ -2195,6 +2195,7 @@ function renderSkillManager() {
 
   // Project Skills section
   if (projectSkills.length > 0) {
+    const projectCwd = tabs.get(activeTabId)?.cwd || null;
     html += '<div class="skill-manager__section">';
     html += '<div class="skill-manager__section-title">Projekt-Skills</div>';
     for (const s of projectSkills) {
@@ -2213,8 +2214,8 @@ function renderSkillManager() {
         </button>
         ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
 
-      const deleteBtn = s.dirName ? `
-        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+      const deleteBtn = s.dirName && projectCwd ? `
+        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttr(projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
 
       html += `<div class="skill-manager__row">
         <span class="${nameClass}">${s.icon || '🧪'} ${escapeHtml(s.name)}</span>
@@ -2377,11 +2378,12 @@ async function reloadAgents() {
 
 // ── Skill/Agent Delete Confirmation ──────────────────────────
 /**
- * Show an inline confirmation dialog to delete a user-created skill.
+ * Show an inline confirmation dialog to delete a skill.
  * @param {string} dirName - Skill directory name on disk.
  * @param {string} skillName - Human-readable skill name for display.
+ * @param {string|null} [cwd] - CWD for project skills; null for user skills.
  */
-function confirmDeleteSkill(dirName, skillName) {
+function confirmDeleteSkill(dirName, skillName, cwd = null) {
   document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
 
   const overlay = document.createElement('div');
@@ -2398,9 +2400,16 @@ function confirmDeleteSkill(dirName, skillName) {
 
   document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
     overlay.remove();
-    const result = await copilot.skills.delete(dirName);
+    const result = cwd
+      ? await copilot.skills.deleteProject(cwd, dirName)
+      : await copilot.skills.delete(dirName);
     if (result.success) {
-      await reloadSkills();
+      if (cwd) {
+        await loadProjectSkillsAndAgents(cwd);
+        renderSkillManager();
+      } else {
+        await reloadSkills();
+      }
     } else {
       console.error('[skills] Löschen fehlgeschlagen:', result.error);
     }

@@ -772,6 +772,25 @@ ipcMain.handle('skills:delete', async (_event, dirName) => {
 });
 
 /**
+ * @ipc skills:deleteProject — Deletes a project skill directory from <cwd>/.github/skills/<dirName>.
+ * @param {string} cwd - Absolute project directory path
+ * @param {string} dirName - Skill directory name (alphanumeric, dashes, underscores only)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+ipcMain.handle('skills:deleteProject', async (_event, cwd, dirName) => {
+  if (!cwd || typeof cwd !== 'string') return { success: false, error: 'Ungültige CWD' };
+  if (!dirName || typeof dirName !== 'string') return { success: false, error: 'Ungültige ID' };
+  if (!/^[a-zA-Z0-9_-]+$/.test(dirName)) return { success: false, error: 'Ungültige ID' };
+  const skillDir = path.join(cwd, '.github', 'skills', dirName);
+  try {
+    await fs.promises.rm(skillDir, { recursive: true, force: true });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/**
  * @ipc skills:getDisabled — Liest disabledSkills aus ~/.copilot/settings.json
  * @returns {Promise<string[]>}
  */
