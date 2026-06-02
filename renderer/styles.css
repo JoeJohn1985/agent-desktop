@@ -4162,14 +4162,9 @@ mark.chat-search-highlight--active {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  pointer-events: none;
-  margin-left: auto;
-}
-
-.sidebar__header:hover .sidebar__gear-btn {
   opacity: 1;
   pointer-events: auto;
+  margin-left: 2px;
 }
 
 .sidebar__gear-btn:hover {
