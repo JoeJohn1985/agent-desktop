@@ -2028,14 +2028,6 @@ function renderSkills() {
     const deleteBtn = s.source === 'user' && s.dirName
       ? `<button class="skill-card__delete" onclick="event.stopPropagation(); confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
       : '';
-    const cliToggleBtn = s.dirName && !isProject
-      ? `<button class="skill-card__cli-toggle ${isCLIDisabled ? 'skill-card__cli-toggle--enable' : 'skill-card__cli-toggle--disable'}"
-               onclick="event.stopPropagation(); toggleSkillDisabled('${escapeAttr(s.dirName)}')"
-               data-tooltip="${isCLIDisabled ? 'Skill in Copilot CLI aktivieren' : 'Skill in Copilot CLI deaktivieren'}"
-               aria-label="${isCLIDisabled ? 'In CLI aktivieren' : 'In CLI deaktivieren'}">
-         ${isCLIDisabled ? '✓' : '⊘'}
-       </button>`
-      : '';
     const projectBadge = '';
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
@@ -2045,7 +2037,6 @@ function renderSkills() {
           <div class="skill-card__name">${escapeHtml(s.name)}${projectBadge}</div>
         </div>
         ${deleteBtn}
-        ${cliToggleBtn}
         <div class="skill-card__toggle"></div>
       </div>
     `;
