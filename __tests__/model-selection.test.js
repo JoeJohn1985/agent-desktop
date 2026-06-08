@@ -23,7 +23,7 @@ const ACTIVE_CLASS = 'session-actions__btn--active';
 const DEFAULT_MODELS = [
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
   { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { id: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
+  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
   { id: 'gpt-5.3-codex',   label: 'GPT-5.3-Codex' },
 ];
@@ -342,8 +342,8 @@ describe('ModelSelection — initTabModelSelector (Dropdown-Item-Klick)', () => 
   });
 
   test('Model-Klick aktualisiert den Button-Text sofort', () => {
-    sm.selectModel('claude-opus-4.7');
-    expect(sm._btnText).toBe('🧠 Claude Opus 4.7');
+    sm.selectModel('claude-opus-4.8');
+    expect(sm._btnText).toBe('🧠 Claude Opus 4.8');
   });
 
   test('Model-Klick setzt Button-Klasse auf aktiv', () => {

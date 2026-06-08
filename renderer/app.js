@@ -1599,6 +1599,7 @@ const DEFAULT_MODELS = [
   { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
   { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
+  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
 ];
 
