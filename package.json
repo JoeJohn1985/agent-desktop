@@ -1,6 +1,6 @@
 {
   "name": "copilot-desktop",
-  "version": "0.28.12",
+  "version": "0.29.0",
   "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
   "main": "main.js",
   "scripts": {
@@ -13,50 +13,7 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "check": "eslint . && jest",
-    "pack:portable": "electron-builder --win dir",
-    "dist:portable": "pwsh -NoProfile -ExecutionPolicy Bypass -File build/portable/build-portable.ps1"
-  },
-  "build": {
-    "appId": "de.gebit.copilot-desktop",
-    "productName": "copilot-desktop",
-    "asar": true,
-    "npmRebuild": false,
-    "icon": "assets/icon.png",
-    "files": [
-      "main.js",
-      "preload.js",
-      "package.json",
-      "renderer/**",
-      "src/**",
-      "assets/**",
-      "images/**",
-      "docs/**",
-      "node_modules/**/*",
-      "!**/{__tests__,test,tests,spec}/**",
-      "!**/*.{md,markdown}",
-      "!**/.bin/**"
-    ],
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        {
-          "target": "dir",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "mac": {
-      "icon": "assets/icon.png"
-    },
-    "linux": {
-      "icon": "assets/icon.png"
-    }
+    "check": "eslint . && jest"
   },
   "author": "MSchneider",
   "license": "MIT",
@@ -65,7 +22,6 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
     "electron": "^35.7.5",
-    "electron-builder": "^25.1.8",
     "eslint": "^10.2.1",
     "globals": "^17.5.0",
     "jest": "^30.3.0"

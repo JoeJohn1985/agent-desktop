@@ -1,120 +1,74 @@
-# Copilot Desktop — Setup Script
-# No administrator rights required.
+# Copilot Desktop — Setup
+# Installiert Dependencies und erstellt Desktop-Verknüpfung.
+# Keine Admin-Rechte erforderlich.
 
 $ErrorActionPreference = "Stop"
+$appRoot = $PSScriptRoot
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 function Write-Fail($msg) { Write-Host "  [ERROR] $msg" -ForegroundColor Red }
 
 Write-Host "`n===========================================" -ForegroundColor Magenta
 Write-Host "  Copilot Desktop — Setup" -ForegroundColor Magenta
 Write-Host "===========================================`n" -ForegroundColor Magenta
 
-# ── 1. Node.js ───────────────────────────────────────────────
-Write-Step "Checking Node.js..."
+# ── 1. Node.js prüfen ────────────────────────────────────────
+Write-Step "Node.js prüfen..."
 $nodeVersion = node --version 2>$null
 if ($nodeVersion) {
     $major = [int]($nodeVersion -replace 'v(\d+).*','$1')
     if ($major -ge 18) {
-        Write-OK "Node.js $nodeVersion already installed."
+        Write-OK "Node.js $nodeVersion"
     } else {
-        Write-Warn "Node.js $nodeVersion is too old (need 18+). Installing latest (user scope)..."
-        winget install OpenJS.NodeJS.LTS --scope user --silent --accept-package-agreements --accept-source-agreements
-        Write-OK "Node.js installed. Please restart this script."
-        exit 0
+        Write-Fail "Node.js $nodeVersion ist zu alt (mind. 18 benötigt)."
+        Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
+        exit 1
     }
 } else {
-    Write-Warn "Node.js not found. Installing (user scope)..."
-    winget install OpenJS.NodeJS.LTS --scope user --silent --accept-package-agreements --accept-source-agreements
-    Write-OK "Node.js installed. Please restart this script."
-    exit 0
-}
-
-# ── 2. GitHub CLI ────────────────────────────────────────────
-Write-Step "Checking GitHub CLI..."
-$ghVersion = gh --version 2>$null
-if ($ghVersion) {
-    Write-OK "GitHub CLI already installed: $($ghVersion | Select-Object -First 1)"
-} else {
-    Write-Warn "GitHub CLI not found. Installing (user scope)..."
-    winget install GitHub.cli --scope user --silent --accept-package-agreements --accept-source-agreements
-    Write-OK "GitHub CLI installed."
-}
-
-# ── 3. Copilot CLI extension ─────────────────────────────────
-Write-Step "Checking GitHub Copilot CLI extension..."
-$copilotCheck = gh extension list 2>$null | Select-String "copilot"
-if ($copilotCheck) {
-    Write-OK "Copilot CLI extension already installed."
-} else {
-    Write-Warn "Copilot CLI extension not found. Installing..."
-    gh extension install github/gh-copilot
-    Write-OK "Copilot CLI extension installed."
-}
-
-# ── 4. Python (required for native module compilation) ───────
-Write-Step "Checking Python..."
-$pythonVersion = python --version 2>$null
-if (-not $pythonVersion) {
-    $pythonVersion = python3 --version 2>$null
-}
-if ($pythonVersion) {
-    Write-OK "Python already installed: $pythonVersion"
-} else {
-    Write-Warn "Python not found. Installing (user scope)..."
-    winget install Python.Python.3.12 --scope user --silent --accept-package-agreements --accept-source-agreements
-    Write-OK "Python installed. Please restart this script."
-    exit 0
-}
-
-# ── 5. npm install ───────────────────────────────────────────
-Write-Step "Installing Node.js dependencies..."
-Write-Host "  (Native modules will be compiled using Python)" -ForegroundColor DarkGray
-$npmResult = npm install 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "npm install encountered issues. If native module compilation failed,"
-    Write-Warn "Windows Build Tools may be required (needs administrator rights)."
-    Write-Host "`n  See: https://visualstudio.microsoft.com/visual-cpp-build-tools/" -ForegroundColor White
-    Write-Host "  Then run: npm run rebuild`n" -ForegroundColor White
+    Write-Fail "Node.js nicht gefunden."
+    Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
     exit 1
 }
-Write-OK "Dependencies installed successfully."
 
-# ── 6. Ensure required Copilot user directories exist ───────
-# The Copilot CLI errors with "Directory does not exist or cannot be
-# accessed" if any of these is missing on first launch. Create them
-# idempotently here so the very first prompt succeeds.
-Write-Step "Ensuring Copilot user directories exist..."
-$copilotDirs = @(
-    (Join-Path $HOME ".copilot\skills"),
-    (Join-Path $HOME ".copilot\agents")
-)
-foreach ($dir in $copilotDirs) {
-    if (Test-Path $dir) {
-        Write-OK "Directory already present: $dir"
-    } else {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        Write-OK "Created directory: $dir"
-    }
+# ── 2. npm install ───────────────────────────────────────────
+Write-Step "Dependencies installieren (npm install)..."
+Set-Location $appRoot
+npm install 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "npm install fehlgeschlagen."
+    Write-Host "  Versuche manuell: npm install" -ForegroundColor White
+    exit 1
+}
+Write-OK "Dependencies installiert."
+
+# ── 3. Desktop-Verknüpfung erstellen ─────────────────────────
+Write-Step "Desktop-Verknüpfung erstellen..."
+
+$electronExe = Join-Path $appRoot "node_modules\electron\dist\electron.exe"
+if (-not (Test-Path $electronExe)) {
+    Write-Fail "electron.exe nicht gefunden unter: $electronExe"
+    exit 1
 }
 
-# ── 7. Auth check ────────────────────────────────────────────
-Write-Step "Checking GitHub authentication..."
-$authStatus = gh auth status 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-OK "GitHub CLI is authenticated."
-} else {
-    Write-Warn "Not authenticated yet. Please run:"
-    Write-Host "`n    gh auth login`n" -ForegroundColor White
-    Write-Host "  Then start the app with: npm start" -ForegroundColor White
-    exit 0
-}
+$iconPath = Join-Path $appRoot "assets\icon.ico"
+$desktopPath = [Environment]::GetFolderPath("Desktop")
+$shortcutPath = Join-Path $desktopPath "Copilot Desktop.lnk"
 
-# ── Done ─────────────────────────────────────────────────────
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $electronExe
+$shortcut.Arguments = "."
+$shortcut.WorkingDirectory = $appRoot
+$shortcut.IconLocation = "$iconPath, 0"
+$shortcut.Description = "Copilot Desktop App"
+$shortcut.Save()
+
+Write-OK "Verknüpfung erstellt: $shortcutPath"
+
+# ── Fertig ───────────────────────────────────────────────────
 Write-Host "`n===========================================" -ForegroundColor Green
-Write-Host "  Setup complete! Starting Copilot Desktop..." -ForegroundColor Green
-Write-Host "===========================================`n" -ForegroundColor Green
-
-npm start
+Write-Host "  Setup abgeschlossen!" -ForegroundColor Green
+Write-Host "===========================================" -ForegroundColor Green
+Write-Host "`n  Starte die App über die Desktop-Verknüpfung" -ForegroundColor White
+Write-Host "  oder mit: npm start`n" -ForegroundColor White
