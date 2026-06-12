@@ -31,6 +31,10 @@ Dieses Projekt folgt [Semantic Versioning](https://semver.org/):
 - **Native Module**: `@homebridge/node-pty-prebuilt-multiarch` — benötigt Python für Kompilierung
 - **Markdown**: `marked` + `highlight.js`
 
+## Architektur-Referenz
+
+Für eine vollständige Architektur-Dokumentation (Prozess-Architektur, Datenfluss, State Management, JSONL-Event-Format) siehe [`ARCHITECTURE.md`](../ARCHITECTURE.md) im Projekt-Root.
+
 ## Projektstruktur
 
 ```
@@ -41,8 +45,10 @@ copilot-desktop/
 │   ├── index.html           # App Shell
 │   ├── app.js               # Frontend Logic
 │   └── styles.css           # Styles & Themes
+├── src/                     # Ausgelagerte Module (Helpers, IPC, Scanner)
 ├── .github/
 │   ├── copilot-instructions.md  # Diese Datei
 │   └── CONTRIBUTING.md          # Workflow & Versioning Regeln
+├── ARCHITECTURE.md          # Architektur-Dokumentation
 └── package.json
 ```
