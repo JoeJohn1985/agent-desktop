@@ -14,6 +14,7 @@ const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } =
 const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
+const { AcpClient } = require('./src/acp-client');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 
@@ -89,8 +90,10 @@ const folderConfig = readFolderConfig();
 // ── Globals ──────────────────────────────────────────────────
 /** @type {BrowserWindow|null} Main application window */
 let mainWindow = null;
-/** @type {Map<number, import('child_process').ChildProcess>} tabId → Copilot CLI child process */
+/** @type {Map<number, import('child_process').ChildProcess>} tabId → Copilot CLI child process (legacy, kept for terminal) */
 const copilotProcesses = new Map();
+/** @type {Map<number, import('./src/acp-client').AcpClient>} tabId → AcpClient instance */
+const acpClients = new Map();
 /** @type {Map<number, Object>} tabId → PTY process instance */
 const terminalProcesses = new Map();
 /** @type {Map<number, string[]>} tabId → buffered terminal output chunks */
@@ -249,6 +252,9 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    // Cleanup ACP clients
+    acpClients.forEach(client => client.destroy().catch(() => {}));
+    acpClients.clear();
     copilotProcesses.forEach(p => p.kill());
     copilotProcesses.clear();
     terminalProcesses.forEach(p => p.kill());
@@ -256,123 +262,65 @@ function createWindow() {
   });
 }
 
-// ── Copilot Process (JSONL) ──────────────────────────────────
+// ── Copilot Process (ACP Backend) ────────────────────────────
 /**
- * Spawns a Copilot CLI child process for a given tab and streams JSONL events
- * to the renderer. Kills any existing process for the same tab first.
+ * Gets or creates an AcpClient for the given tab. Sends the prompt via ACP protocol.
  *
  * @param {number} tabId - Target tab identifier
- * @param {string} prompt - User prompt to send to the CLI
- * @param {Object} [options={}] - Additional CLI options
+ * @param {string} prompt - User prompt to send
+ * @param {Object} [options={}] - Additional options
  * @param {string[]} [options.deniedTools] - Tools to deny via --deny-tool
  * @param {boolean} [options.allowAllPaths] - If true, adds --allow-all-paths
  * @param {string[]} [options.addDirs] - Additional directories to grant access to
- * @param {string} [options.sessionId] - Session ID for --resume
+ * @param {string} [options.sessionId] - Session ID to resume
  * @param {string} [options.model] - Model override
- * @param {string} [options.effort] - Reasoning effort level
+ * @param {string} [options.effort] - Reasoning effort level (unused in ACP currently)
  * @param {string} [options.cwd] - Working directory override
- * @returns {number} The tab ID
+ * @returns {Promise<number>} The tab ID
  */
-function spawnCopilot(tabId, prompt, options = {}) {
-  // Kill existing process for this tab
-  if (copilotProcesses.has(tabId)) {
-    copilotProcesses.get(tabId).kill();
-    copilotProcesses.delete(tabId);
+async function sendCopilotPrompt(tabId, prompt, options = {}) {
+  let client = acpClients.get(tabId);
+
+  const cwd = options.cwd || COPILOT_CWD;
+  const clientOptions = {
+    cwd,
+    copilotBin: COPILOT_BIN,
+    model: options.model,
+    deniedTools: options.deniedTools,
+    addDirs: options.addDirs || [],
+    allowAllPaths: options.allowAllPaths,
+  };
+
+  // Always include global CWD as additional path when using a different CWD
+  if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
+    clientOptions.addDirs.push(COPILOT_CWD);
   }
 
-  const args = [
-    '-p', prompt,
-    '--output-format', 'json',
-    '--stream', 'on',
-    '-s',
-  ];
+  if (!client) {
+    client = new AcpClient(tabId, sendToRenderer, clientOptions);
+    acpClients.set(tabId, client);
+  } else {
+    // Update options if they changed (e.g., model switch)
+    client.updateOptions(clientOptions);
+  }
 
-  // Tool approval — always allow all, use deny-list for restrictions
-  args.push('--allow-all-tools');
+  // Ensure process is running
+  if (client.state === 'dead') {
+    await client.start();
+  }
 
-  // Denied tools
-  if (options.deniedTools && options.deniedTools.length > 0) {
-    for (const tool of options.deniedTools) {
-      args.push('--deny-tool=' + tool);
+  // Session management: load existing or create new
+  if (!client.sessionId) {
+    if (options.sessionId) {
+      await client.loadSession(options.sessionId, cwd);
+    } else {
+      await client.newSession(cwd);
     }
   }
 
-  // Path permissions
-  if (options.allowAllPaths) {
-    args.push('--allow-all-paths');
-  }
-  if (options.addDirs && options.addDirs.length > 0) {
-    for (const dir of options.addDirs) {
-      args.push('--add-dir', dir);
-    }
-  }
-  // Always include the global default CWD as an additional allowed path
-  // so skills/files there remain accessible even when a session overrides CWD.
-  if (options.cwd && options.cwd !== COPILOT_CWD) {
-    args.push('--add-dir', COPILOT_CWD);
-  }
-
-  if (options.sessionId) {
-    args.push('--resume=' + options.sessionId);
-  }
-  if (options.model) {
-    args.push('--model', options.model);
-  }
-  if (options.effort) {
-    args.push('--reasoning-effort', options.effort);
-  }
-  if (options.autopilot) {
-    args.push('--autopilot');
-  }
-
-  const proc = spawn(COPILOT_BIN, args, {
-    cwd: options.cwd || COPILOT_CWD,
-    env: buildEnv({ NO_COLOR: '1' }),
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  copilotProcesses.set(tabId, proc);
-
-  // Buffer for incomplete JSONL lines
-  let buffer = '';
-
-  proc.stdout.on('data', (chunk) => {
-    buffer += chunk.toString('utf-8');
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete last line in buffer
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        sendToRenderer('copilot:event', tabId, event);
-      } catch (e) {
-        console.warn('[copilot:jsonl] Fehler:', e.message || e);
-      }
-    }
-  });
-
-  proc.stderr.on('data', (chunk) => {
-    const text = chunk.toString('utf-8');
-    sendToRenderer('copilot:event', tabId, {
-      type: 'error',
-      data: { message: text },
-    });
-  });
-
-  proc.on('close', (code) => {
-    // Flush remaining buffer
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer);
-        sendToRenderer('copilot:event', tabId, event);
-      } catch (e) {
-        console.warn('[copilot:flush] Fehler:', e.message || e);
-      }
-    }
-    copilotProcesses.delete(tabId);
-    sendToRenderer('copilot:done', tabId, code);
+  // Send prompt (async — events stream to renderer via AcpClient)
+  client.prompt(prompt).catch((err) => {
+    console.error(`[acp:tab${tabId}] prompt error:`, err.message);
   });
 
   return tabId;
@@ -381,20 +329,25 @@ function spawnCopilot(tabId, prompt, options = {}) {
 // ── IPC Handlers ─────────────────────────────────────────────
 
 /**
- * @ipc copilot:send — Sends a prompt to Copilot CLI and starts streaming.
+ * @ipc copilot:send — Sends a prompt to Copilot CLI via ACP protocol.
  * @param {Electron.IpcMainInvokeEvent} _event
  * @param {number} tabId - Tab identifier
  * @param {string} prompt - User prompt
  * @param {Object} [options] - Spawn options
- * @returns {number|{success: false, error: string}} Tab ID or error
+ * @returns {Promise<number|{success: false, error: string}>} Tab ID or error
  */
 // Copilot Chat
-ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
+ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
   if (typeof tabId !== 'number' || typeof prompt !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  spawnCopilot(tabId, prompt, options || {});
-  return tabId;
+  try {
+    await sendCopilotPrompt(tabId, prompt, options || {});
+    return tabId;
+  } catch (err) {
+    console.error('[copilot:send] Error:', err.message);
+    return { success: false, error: err.message };
+  }
 });
 
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
@@ -465,8 +418,15 @@ ipcMain.handle('copilot:getInstructions', () => {
   return found;
 });
 
-/** @ipc copilot:stop — Kills the Copilot CLI process for a tab (fire-and-forget). */
+/** @ipc copilot:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('copilot:stop', (_event, tabId) => {
+  const client = acpClients.get(tabId);
+  if (client) {
+    client.cancel().catch(err => {
+      console.warn(`[copilot:stop] cancel error for tab ${tabId}:`, err.message);
+    });
+  }
+  // Legacy fallback
   const p = copilotProcesses.get(tabId);
   if (p) p.kill();
   copilotProcesses.delete(tabId);
@@ -1698,6 +1658,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  acpClients.forEach(client => client.destroy().catch(() => {}));
+  acpClients.clear();
   copilotProcesses.forEach(p => p.kill());
   copilotProcesses.clear();
   terminalProcesses.forEach(p => p.kill());
