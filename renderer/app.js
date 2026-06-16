@@ -976,9 +976,9 @@ function setTabStatus(tabId, status) {
 }
 
 // ── Inactivity Timeout & Force Unlock ────────────────────────
-const INACTIVITY_TIMEOUT_MS = 180_000;
+// No automatic kill — only show unlock button for manual intervention
 const INACTIVITY_CHECK_INTERVAL_MS = 10_000;
-const UNLOCK_BTN_DELAY_MS = 30_000;
+const UNLOCK_BTN_DELAY_MS = 60_000;
 
 /**
  * Start monitoring a tab for inactivity while it is processing.
@@ -995,9 +995,8 @@ function startInactivityMonitor(tabId) {
   tab._inactivityTimer = setInterval(() => {
     if (!tab.isProcessing) { stopInactivityMonitor(tabId); return; }
     const elapsed = Date.now() - (tab.lastActivityAt || 0);
-    if (elapsed >= INACTIVITY_TIMEOUT_MS) {
-      forceUnlockTab(tabId, true);
-    } else if (elapsed >= UNLOCK_BTN_DELAY_MS && !tab._unlockBtnEl) {
+    // No automatic kill — user can manually unlock via button
+    if (elapsed >= UNLOCK_BTN_DELAY_MS && !tab._unlockBtnEl) {
       showUnlockButton(tabId);
     } else if (elapsed < UNLOCK_BTN_DELAY_MS && tab._unlockBtnEl) {
       hideUnlockButton(tabId);
