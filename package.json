@@ -7,6 +7,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "rebuild": "electron-rebuild",
+    "build": "npx electron-builder --dir",
     "test": "jest",
     "test:verbose": "jest --verbose",
     "test:coverage": "jest --coverage",
