@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } = require('ele
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const yaml = require('yaml');
 
 // Force WM_CLASS on Linux (must be set before app 'ready')
@@ -11,9 +11,10 @@ if (process.platform === 'linux') {
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
-const { createSendToRenderer: _createSendToRenderer, waitForReady, collectPtyOutput: _collectPtyOutput, cleanupPty: _cleanupPty, buildEnv } = require('./src/main-helpers');
+const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
+const { AcpClient } = require('./src/acp-client');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 
@@ -49,19 +50,6 @@ console.log = (...args) => { _originalConsoleLog(...args); writeLog('info', args
 console.warn = (...args) => { _originalConsoleWarn(...args); writeLog('warn', args); _sendDevLog('warn', args); };
 console.error = (...args) => { _originalConsoleError(...args); writeLog('error', args); _sendDevLog('error', args); };
 
-// ── PTY (optional, for interactive terminal) ─────────────────
-/** @type {import('@homebridge/node-pty-prebuilt-multiarch')|import('node-pty')|undefined} node-pty module, undefined if unavailable */
-let pty;
-try {
-  pty = require('@homebridge/node-pty-prebuilt-multiarch');
-} catch (_e) {
-  try {
-    pty = require('node-pty');
-  } catch (_e2) {
-    console.warn('node-pty not available – terminal features disabled.');
-  }
-}
-
 // ── Folder Configuration ─────────────────────────────────────
 /** @type {string} Path to the persistent folder configuration JSON */
 const FOLDERS_CONFIG_PATH = path.join(os.homedir(), '.copilot-desktop', 'folders.json');
@@ -89,14 +77,8 @@ const folderConfig = readFolderConfig();
 // ── Globals ──────────────────────────────────────────────────
 /** @type {BrowserWindow|null} Main application window */
 let mainWindow = null;
-/** @type {Map<number, import('child_process').ChildProcess>} tabId → Copilot CLI child process */
-const copilotProcesses = new Map();
-/** @type {Map<number, Object>} tabId → PTY process instance */
-const terminalProcesses = new Map();
-/** @type {Map<number, string[]>} tabId → buffered terminal output chunks */
-const terminalBuffers = new Map();
-/** @type {Map<number, boolean>} tabId → true when Copilot TUI is ready for commands */
-const terminalReady = new Map();
+/** @type {Map<number, import('./src/acp-client').AcpClient>} tabId → AcpClient instance */
+const acpClients = new Map();
 /** @type {number} Auto-incrementing tab identifier */
 let nextTabId = 1;
 /** @type {string} Directory for Copilot session state files */
@@ -107,40 +89,10 @@ const COPILOT_BIN = 'copilot';
 let COPILOT_CWD = folderConfig.cwd || process.cwd();
 /** @type {string} Directory for project images */
 let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
-/** @type {Map<number, boolean>} tabId → true when a slash command is in progress */
-const terminalBusy = new Map();
 
-// Bundled PowerShell — fallback to system shell
-/** @type {string} Path to the bundled PowerShell executable */
-const BUNDLED_PWSH = path.join(__dirname, 'vendor', 'pwsh', 'pwsh.exe');
-
-/**
- * Returns the path to the preferred shell for the current platform.
- * On Windows: bundled PowerShell if available, otherwise cmd.exe.
- * On Unix: $SHELL or /bin/bash.
- *
- * @returns {string} Shell executable path
- */
-function getShell() {
-  if (process.platform === 'win32') {
-    if (fs.existsSync(BUNDLED_PWSH)) return BUNDLED_PWSH;
-    return 'cmd.exe';
-  }
-  return process.env.SHELL || '/bin/bash';
-}
-
-// ── Constants (PTY & CLI timeouts) ─────────────────────────────
-/** @type {number} Max wait time for PTY ready signal (ms) */
-const PTY_READY_TIMEOUT_MS = 20000;
-const PTY_READY_CHECK_INTERVAL_MS = 200;
-const PTY_QUIET_MS = 3000;
-const PTY_OUTPUT_TIMEOUT_MS = 15000;
-const PTY_BUFFER_MAX_CHUNKS = 5000;
-const PTY_SLASH_QUIET_THRESHOLD_MS = 5000;
-const PTY_SLASH_CHECK_INTERVAL_MS = 500;
-const PTY_SLASH_FALLBACK_TIMEOUT_MS = 30000;
-const PTY_WRITE_DELAY_MS = 100;
+// ── Constants ──────────────────────────────────────────────────
 const CLI_VERSION_TIMEOUT_MS = 5000;
+const MCP_PROBE_TIMEOUT_MS = 5000;
 const TEST_RUN_TIMEOUT_MS = 30000;
 const TEST_COVERAGE_TIMEOUT_MS = 60000;
 
@@ -165,45 +117,6 @@ function safeSessionPath(sessionId) {
  * @type {(channel: string, ...args: any[]) => void}
  */
 const sendToRenderer = _createSendToRenderer(() => mainWindow);
-
-/**
- * Waits until the Copilot TUI in the given PTY signals readiness.
- *
- * @param {number} tabId - Tab identifier
- * @param {number} [timeoutMs=PTY_READY_TIMEOUT_MS] - Maximum wait time in ms
- * @returns {Promise<void>} Resolves when ready, rejects on timeout
- */
-function waitForTerminalReady(tabId, timeoutMs = PTY_READY_TIMEOUT_MS) {
-  return waitForReady(terminalReady, tabId, { timeoutMs, checkIntervalMs: PTY_READY_CHECK_INTERVAL_MS });
-}
-
-/**
- * Collects PTY output until quiet (no new data) or timeout.
- *
- * @param {Object} ptyProc - The PTY process instance
- * @param {Object} [options]
- * @param {number} [options.quietMs=PTY_QUIET_MS] - Quiet period before resolving (ms)
- * @param {number} [options.timeoutMs=PTY_OUTPUT_TIMEOUT_MS] - Hard timeout (ms)
- * @returns {Promise<string>} Collected output with ANSI stripped
- */
-function collectPtyOutput(ptyProc, { quietMs = PTY_QUIET_MS, timeoutMs = PTY_OUTPUT_TIMEOUT_MS } = {}) {
-  return _collectPtyOutput(ptyProc, stripAnsi, { quietMs, timeoutMs });
-}
-
-/**
- * Cleans up all PTY-related state for a tab and notifies the renderer.
- *
- * @param {number} tabId - Tab identifier
- * @param {number|null} exitCode - PTY exit code
- * @param {Function} [extraCleanup] - Optional additional cleanup callback
- */
-function cleanupPty(tabId, exitCode, extraCleanup) {
-  _cleanupPty(
-    [terminalProcesses, terminalBuffers, terminalReady, terminalBusy],
-    tabId, exitCode,
-    { extraCleanup, sendFn: sendToRenderer }
-  );
-}
 
 // ── Window ───────────────────────────────────────────────────
 /**
@@ -249,130 +162,76 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    copilotProcesses.forEach(p => p.kill());
-    copilotProcesses.clear();
-    terminalProcesses.forEach(p => p.kill());
-    terminalProcesses.clear();
+    acpClients.forEach(client => client.destroy().catch(() => {}));
+    acpClients.clear();
   });
 }
 
-// ── Copilot Process (JSONL) ──────────────────────────────────
+// ── Copilot Process (ACP Backend) ────────────────────────────
 /**
- * Spawns a Copilot CLI child process for a given tab and streams JSONL events
- * to the renderer. Kills any existing process for the same tab first.
+ * Gets or creates an AcpClient for the given tab. Sends the prompt via ACP protocol.
  *
  * @param {number} tabId - Target tab identifier
- * @param {string} prompt - User prompt to send to the CLI
- * @param {Object} [options={}] - Additional CLI options
+ * @param {string} prompt - User prompt to send
+ * @param {Object} [options={}] - Additional options
  * @param {string[]} [options.deniedTools] - Tools to deny via --deny-tool
  * @param {boolean} [options.allowAllPaths] - If true, adds --allow-all-paths
  * @param {string[]} [options.addDirs] - Additional directories to grant access to
- * @param {string} [options.sessionId] - Session ID for --resume
+ * @param {string} [options.sessionId] - Session ID to resume
  * @param {string} [options.model] - Model override
- * @param {string} [options.effort] - Reasoning effort level
+ * @param {string} [options.effort] - Reasoning effort level (unused in ACP currently)
  * @param {string} [options.cwd] - Working directory override
- * @returns {number} The tab ID
+ * @returns {Promise<number>} The tab ID
  */
-function spawnCopilot(tabId, prompt, options = {}) {
-  // Kill existing process for this tab
-  if (copilotProcesses.has(tabId)) {
-    copilotProcesses.get(tabId).kill();
-    copilotProcesses.delete(tabId);
+async function sendCopilotPrompt(tabId, prompt, options = {}) {
+  let client = acpClients.get(tabId);
+
+  const cwd = options.cwd || COPILOT_CWD;
+  const clientOptions = {
+    cwd,
+    copilotBin: COPILOT_BIN,
+    model: options.model,
+    mode: options.mode,
+    deniedTools: options.deniedTools,
+    addDirs: options.addDirs || [],
+    allowAllPaths: options.allowAllPaths,
+    mcpServers: getAcpMcpServers(cwd),
+  };
+
+  // Always include global CWD as additional path when using a different CWD
+  if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
+    clientOptions.addDirs.push(COPILOT_CWD);
   }
 
-  const args = [
-    '-p', prompt,
-    '--output-format', 'json',
-    '--stream', 'on',
-    '-s',
-  ];
+  if (!client) {
+    client = new AcpClient(tabId, sendToRenderer, clientOptions);
+    acpClients.set(tabId, client);
+  } else {
+    // Update options if they changed (e.g., model switch)
+    client.updateOptions(clientOptions);
+  }
 
-  // Tool approval — always allow all, use deny-list for restrictions
-  args.push('--allow-all-tools');
+  // Ensure process is running
+  if (client.state === 'dead') {
+    await client.start();
+  }
 
-  // Denied tools
-  if (options.deniedTools && options.deniedTools.length > 0) {
-    for (const tool of options.deniedTools) {
-      args.push('--deny-tool=' + tool);
+  // Session management: load existing or create new
+  if (!client.sessionId) {
+    const mcpNames = (clientOptions.mcpServers || []).map(s => s.name);
+    console.log(`[acp:tab${tabId}] ${options.sessionId ? 'load' : 'new'} session with MCP servers: [${mcpNames.join(', ') || 'none'}]`);
+    if (options.sessionId) {
+      await client.loadSession(options.sessionId, cwd);
+    } else {
+      await client.newSession(cwd);
     }
   }
 
-  // Path permissions
-  if (options.allowAllPaths) {
-    args.push('--allow-all-paths');
-  }
-  if (options.addDirs && options.addDirs.length > 0) {
-    for (const dir of options.addDirs) {
-      args.push('--add-dir', dir);
-    }
-  }
-  // Always include the global default CWD as an additional allowed path
-  // so skills/files there remain accessible even when a session overrides CWD.
-  if (options.cwd && options.cwd !== COPILOT_CWD) {
-    args.push('--add-dir', COPILOT_CWD);
-  }
-
-  if (options.sessionId) {
-    args.push('--resume=' + options.sessionId);
-  }
-  if (options.model) {
-    args.push('--model', options.model);
-  }
-  if (options.effort) {
-    args.push('--reasoning-effort', options.effort);
-  }
-  if (options.autopilot) {
-    args.push('--autopilot');
-  }
-
-  const proc = spawn(COPILOT_BIN, args, {
-    cwd: options.cwd || COPILOT_CWD,
-    env: buildEnv({ NO_COLOR: '1' }),
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  copilotProcesses.set(tabId, proc);
-
-  // Buffer for incomplete JSONL lines
-  let buffer = '';
-
-  proc.stdout.on('data', (chunk) => {
-    buffer += chunk.toString('utf-8');
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete last line in buffer
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        sendToRenderer('copilot:event', tabId, event);
-      } catch (e) {
-        console.warn('[copilot:jsonl] Fehler:', e.message || e);
-      }
-    }
-  });
-
-  proc.stderr.on('data', (chunk) => {
-    const text = chunk.toString('utf-8');
-    sendToRenderer('copilot:event', tabId, {
-      type: 'error',
-      data: { message: text },
-    });
-  });
-
-  proc.on('close', (code) => {
-    // Flush remaining buffer
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer);
-        sendToRenderer('copilot:event', tabId, event);
-      } catch (e) {
-        console.warn('[copilot:flush] Fehler:', e.message || e);
-      }
-    }
-    copilotProcesses.delete(tabId);
-    sendToRenderer('copilot:done', tabId, code);
+  // Send prompt (async — events stream to renderer via AcpClient)
+  client.prompt(prompt).catch((err) => {
+    // Cancellation is a normal user action, not an error.
+    if (err.message === 'Cancelled') return;
+    console.error(`[acp:tab${tabId}] prompt error:`, err.message);
   });
 
   return tabId;
@@ -381,20 +240,38 @@ function spawnCopilot(tabId, prompt, options = {}) {
 // ── IPC Handlers ─────────────────────────────────────────────
 
 /**
- * @ipc copilot:send — Sends a prompt to Copilot CLI and starts streaming.
+ * @ipc copilot:send — Sends a prompt to Copilot CLI via ACP protocol.
  * @param {Electron.IpcMainInvokeEvent} _event
  * @param {number} tabId - Tab identifier
  * @param {string} prompt - User prompt
  * @param {Object} [options] - Spawn options
- * @returns {number|{success: false, error: string}} Tab ID or error
+ * @returns {Promise<number|{success: false, error: string}>} Tab ID or error
  */
 // Copilot Chat
-ipcMain.handle('copilot:send', (_event, tabId, prompt, options) => {
+ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
   if (typeof tabId !== 'number' || typeof prompt !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  spawnCopilot(tabId, prompt, options || {});
-  return tabId;
+  try {
+    await sendCopilotPrompt(tabId, prompt, options || {});
+    return tabId;
+  } catch (err) {
+    console.error('[copilot:send] Error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/** @ipc copilot:silentCommand — Runs a slash command silently and returns the text response. */
+ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
+  const client = acpClients.get(tabId);
+  if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
+  try {
+    const text = await client.silentCommand(command);
+    return { success: true, text };
+  } catch (err) {
+    console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
+    return { success: false, error: err?.message || String(err) };
+  }
 });
 
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
@@ -465,11 +342,33 @@ ipcMain.handle('copilot:getInstructions', () => {
   return found;
 });
 
-/** @ipc copilot:stop — Kills the Copilot CLI process for a tab (fire-and-forget). */
+/** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
+ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
+  const client = acpClients.get(tabId);
+  if (!client) return { success: false, error: 'Kein aktiver Client' };
+  const sessionId = client.sessionId;
+  if (!sessionId) return { success: false, error: 'Keine aktive Session' };
+  try {
+    await client.stop();
+    client.updateOptions({ deniedTools });
+    await client.start();
+    await client.loadSession(sessionId);
+    console.log(`[copilot:restartWithDeniedTools] tab ${tabId} restarted with ${deniedTools.length} denied tools`);
+    return { success: true };
+  } catch (err) {
+    console.error('[copilot:restartWithDeniedTools]', err?.message || String(err));
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/** @ipc copilot:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('copilot:stop', (_event, tabId) => {
-  const p = copilotProcesses.get(tabId);
-  if (p) p.kill();
-  copilotProcesses.delete(tabId);
+  const client = acpClients.get(tabId);
+  if (client) {
+    client.cancel().catch(err => {
+      console.warn(`[copilot:stop] cancel error for tab ${tabId}:`, err.message);
+    });
+  }
 });
 
 // Process dropped files — read content or copy into Dateien folder
@@ -743,6 +642,109 @@ ipcMain.handle('mcp:listProject', async (_event, cwd) => {
     }
   }
   return [];
+});
+
+/**
+ * Reads the merged MCP server configuration from the CLI for a given CWD.
+ * @param {string} [cwd] - Project directory (includes workspace .mcp.json/.github/mcp.json)
+ * @returns {Object} The raw `mcpServers` map from `copilot mcp list --json`
+ */
+function readMcpConfig(cwd) {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync('copilot mcp list --json', {
+      timeout: CLI_VERSION_TIMEOUT_MS,
+      env: buildEnv(),
+      cwd: cwd || COPILOT_CWD,
+    }).toString();
+    return JSON.parse(out).mcpServers || {};
+  } catch (e) {
+    console.warn('[mcp] readMcpConfig Fehler:', e.message || e);
+    return {};
+  }
+}
+
+/** Converts an object map {k: v} to the ACP [{name, value}] array format. */
+function toAcpKeyValueArray(obj) {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.entries(obj).map(([name, value]) => ({ name, value: String(value) }));
+}
+
+/**
+ * Builds the MCP server list in the format ACP `session/new` expects, so the
+ * agent actually gets the user's/workspace's configured MCP tools.
+ * @param {string} [cwd] - Project directory
+ * @returns {Array<Object>} ACP-formatted MCP servers
+ */
+function getAcpMcpServers(cwd) {
+  const servers = readMcpConfig(cwd);
+  return Object.entries(servers).map(([name, cfg]) => {
+    const type = cfg.type || (cfg.command ? 'stdio' : 'http');
+    if (type === 'stdio') {
+      return { name, type: 'stdio', command: cfg.command, args: cfg.args || [], env: toAcpKeyValueArray(cfg.env) };
+    }
+    return { name, type, url: cfg.url, headers: toAcpKeyValueArray(cfg.headers) };
+  });
+}
+
+/**
+ * @ipc mcp:list — Lists all configured MCP servers via `copilot mcp list --json`.
+ * Returns the user/workspace/plugin servers the CLI knows about. Since the ACP
+ * process does not report live connection status, servers are marked 'configured'.
+ * @returns {Promise<Array<{name: string, type: string, status: string}>>}
+ */
+ipcMain.handle('mcp:list', async () => {
+  const servers = readMcpConfig();
+  return Object.entries(servers).map(([name, cfg]) => ({
+    name,
+    type: cfg.type || (cfg.command ? 'stdio' : 'sse'),
+    source: cfg.source || 'user',
+    status: 'configured',
+  }));
+});
+
+/**
+ * Probes a single HTTP/SSE MCP endpoint for reachability.
+ * Any HTTP response (even an error status) counts as reachable; a connection
+ * or DNS failure / timeout counts as offline.
+ * @param {string} url
+ * @returns {Promise<boolean>} true if the endpoint responded
+ */
+function probeHttpReachable(url) {
+  return new Promise((resolve) => {
+    let mod, parsed;
+    try {
+      parsed = new URL(url);
+      mod = parsed.protocol === 'http:' ? require('http') : require('https');
+    } catch {
+      return resolve(false);
+    }
+    const req = mod.request(url, { method: 'GET', timeout: MCP_PROBE_TIMEOUT_MS }, (res) => {
+      res.destroy();
+      resolve(true); // responded → reachable
+    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
+/**
+ * @ipc mcp:probe — Probes configured MCP servers for connectivity.
+ * HTTP/SSE servers are checked for reachability; stdio servers stay 'configured'
+ * (cannot be verified without spawning them). Returns per-server status.
+ * @returns {Promise<Array<{name: string, type: string, status: string}>>}
+ */
+ipcMain.handle('mcp:probe', async () => {
+  const servers = readMcpConfig();
+  return Promise.all(Object.entries(servers).map(async ([name, cfg]) => {
+    const type = cfg.type || (cfg.command ? 'stdio' : 'sse');
+    let status = 'configured';
+    if ((type === 'http' || type === 'sse') && cfg.url) {
+      status = (await probeHttpReachable(cfg.url)) ? 'connected' : 'disconnected';
+    }
+    return { name, type, source: cfg.source || 'user', status };
+  }));
 });
 
 /** @ipc agents:list — Scans .agent.md files. @returns {Promise<Array<Object>>} */
@@ -1269,22 +1271,6 @@ ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
 // ── Setup (Personalized Role → Skills & Agents) ───────────────
 
 /**
- * Converts a display text into a URL/filename-safe kebab-case slug.
- * Handles German umlauts (ä→ae, ö→oe, ü→ue, ß→ss).
- *
- * @param {string} text - Input text to slugify
- * @returns {string} Kebab-case slug
- */
-function slugify(text) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[äöüß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' }[c]))
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-/**
  * Builds a Copilot CLI prompt that instructs it to generate 3 role-specific
  * SKILL.md files in the given directory.
  *
@@ -1321,69 +1307,6 @@ Anforderungen:
 }
 
 /**
- * Spawns a Copilot CLI process to generate role-specific skills.
- * Resolves with a list of created SKILL.md files after the process completes.
- * Times out after 120 seconds.
- *
- * @param {string} role - User's role description
- * @param {string} skillsDir - Target directory for generated skills
- * @returns {Promise<{created: string[], errors: string[]}>}
- */
-function runCopilotForSkills(role, skillsDir) {
-  return new Promise((resolve, reject) => {
-    const prompt = buildSkillGenerationPrompt(role, skillsDir);
-
-    const proc = spawn('copilot', [
-      '-p', prompt,
-      '--allow-all-tools',
-      '--allow-all-paths',
-      '--no-color',
-      '-s',
-    ], {
-      cwd: COPILOT_CWD,
-      env: buildEnv({ NO_COLOR: '1' }),
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', d => { stdout += d.toString(); });
-    proc.stderr.on('data', d => { stderr += d.toString(); });
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-      reject(new Error('Timeout: Copilot hat zu lange gebraucht (120s)'));
-    }, 120000);
-
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        const created = [];
-        try {
-          if (fs.existsSync(skillsDir)) {
-            const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-            for (const entry of entries) {
-              if (entry.isDirectory()) {
-                const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
-                if (fs.existsSync(skillFile)) {
-                  created.push(entry.name + '/SKILL.md');
-                }
-              }
-            }
-          }
-        } catch (_) {}
-        resolve({ created, errors: [] });
-      } else {
-        reject(new Error(`Copilot exit code ${code}: ${stderr.slice(0, 200)}`));
-      }
-    });
-
-    proc.on('error', reject);
-  });
-}
-
-/**
  * Builds a Copilot CLI prompt to generate .agent.md files for missing team roles.
  *
  * @param {string[]} missingRoles - List of missing team position names
@@ -1394,105 +1317,6 @@ function buildAgentGenerationPrompt(missingRoles, agentsDir) {
   const roleList = missingRoles.map(r => `- ${r}`).join('\n');
   return `In meinem Team fehlen folgende Positionen:\n${roleList}\n\nErstelle für jede dieser Positionen einen passenden Agent als .agent.md-Datei in diesem Verzeichnis:\n${agentsDir}\n\nDas .agent.md-Format ist exakt wie folgt aufgebaut:\n\`\`\`\n---\nname: <kebab-case-name>\ndescription: <1-2 Sätze: Was tut dieser Agent, wann wird er genutzt?>\n---\n\n<Hauptinstruktionen: Ausführliche Beschreibung wie der Agent arbeitet, seine Stärken, typische Aufgaben und wie er kommuniziert. Mindestens 200 Wörter.>\n\`\`\`\n\nAnforderungen:\n- Erstelle genau ${missingRoles.length} Agent-Datei(en), eine pro fehlende Position\n- Der Dateiname ist <kebab-case-name>.agent.md\n- Jeder Agent hat eine klare Persönlichkeit und konkrete Arbeitsweise\n- Die Instruktionen beschreiben detailliert wie der Agent denkt, kommuniziert und arbeitet\n- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen\n- Antworte auf Deutsch`;
 }
-
-/**
- * Spawns a Copilot CLI process to generate agent files for missing team positions.
- * Resolves with a list of created .agent.md files after the process completes.
- * Times out after 120 seconds.
- *
- * @param {string[]} missingRoles - Missing team role names
- * @param {string} agentsDir - Target directory for generated agents
- * @returns {Promise<{created: string[], errors: string[]}>}
- */
-function runCopilotForAgents(missingRoles, agentsDir) {
-  return new Promise((resolve, reject) => {
-    const prompt = buildAgentGenerationPrompt(missingRoles, agentsDir);
-
-    const proc = spawn('copilot', [
-      '-p', prompt,
-      '--allow-all-tools',
-      '--allow-all-paths',
-      '--no-color',
-      '-s',
-    ], {
-      cwd: COPILOT_CWD,
-      env: buildEnv({ NO_COLOR: '1' }),
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stderr = '';
-    proc.stdout.on('data', () => {});
-    proc.stderr.on('data', d => { stderr += d.toString(); });
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-      reject(new Error('Timeout: Copilot hat zu lange gebraucht (120s)'));
-    }, 120000);
-
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        const created = [];
-        try {
-          if (fs.existsSync(agentsDir)) {
-            const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
-            for (const entry of entries) {
-              if (entry.isFile() && entry.name.endsWith('.agent.md')) {
-                created.push(entry.name);
-              }
-            }
-          }
-        } catch (_) {}
-        resolve({ created, errors: [] });
-      } else {
-        reject(new Error(`Copilot exit code ${code}: ${stderr.slice(0, 200)}`));
-      }
-    });
-
-    proc.on('error', reject);
-  });
-}
-
-/**
- * @ipc setup:generatePersonalized — Generates personalized skills and agents
- * by spawning Copilot CLI processes. Blocking; may take up to 2×120s.
- * @param {Object} data
- * @param {string} data.role - User's role
- * @param {string[]} [data.missingRoles] - Missing team positions
- * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
- */
-ipcMain.handle('setup:generatePersonalized', async (_event, { role, missingRoles }) => {
-  const config = readFolderConfig();
-  const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
-  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-
-  const errors = [];
-  const created = [];
-
-  // 1. Copilot startet und erstellt Skills
-  try {
-    const skillResult = await runCopilotForSkills(role, skillsDir);
-    created.push(...skillResult.created);
-    errors.push(...skillResult.errors);
-  } catch (e) {
-    errors.push('Skills: ' + e.message);
-  }
-
-  // 2. Copilot generiert Agents für fehlende Team-Positionen
-  if (missingRoles && missingRoles.length > 0) {
-    try {
-      if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
-      const agentResult = await runCopilotForAgents(missingRoles, agentsDir);
-      created.push(...agentResult.created);
-      errors.push(...agentResult.errors);
-    } catch (e) {
-      errors.push('Agents: ' + e.message);
-    }
-  }
-
-  return { success: errors.length === 0, created, errors };
-});
 
 /**
  * @ipc setup:startPersonalizedSessions — Non-blocking variant: returns the prompts
@@ -1683,10 +1507,6 @@ function scanAgents() {
   return scanAgentsDirectory(agentsDir, yaml.parse);
 }
 
-// Terminal → src/ipc/terminal-ipc.js
-const { registerTerminalIPC } = require('./src/ipc/terminal-ipc');
-registerTerminalIPC({ pty, getShell, terminalProcesses, terminalBuffers, terminalReady, terminalBusy, sendToRenderer, waitForTerminalReady, collectPtyOutput, cleanupPty, COPILOT_CWD, PTY_BUFFER_MAX_CHUNKS, PTY_READY_TIMEOUT_MS, PTY_WRITE_DELAY_MS, PTY_SLASH_QUIET_THRESHOLD_MS, PTY_SLASH_CHECK_INTERVAL_MS, PTY_SLASH_FALLBACK_TIMEOUT_MS });
-
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
   console.log(`[app] Copilot Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
@@ -1698,10 +1518,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  copilotProcesses.forEach(p => p.kill());
-  copilotProcesses.clear();
-  terminalProcesses.forEach(p => p.kill());
-  terminalProcesses.clear();
+  acpClients.forEach(client => client.destroy().catch(() => {}));
+  acpClients.clear();
   stopImageWatcher();
   closeLogger();
   app.quit();

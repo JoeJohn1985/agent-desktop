@@ -2,6 +2,12 @@
 
 // Pure business logic extracted from renderer/app.js for testability.
 // No DOM, no Electron, no side-effects — just data transformations.
+//
+// UMD wrapper: exposes `module.exports` under Node/Jest and
+// `window.RendererLogic` in the renderer (which has no `require`).
+// Wrapped in an IIFE so the function/const declarations below do NOT
+// leak into the renderer's global scope (would collide with utils.js).
+(function (global) {
 
 // ── Constants ────────────────────────────────────────────────
 const TOOL_ARGS_MAX_LENGTH = 60;
@@ -156,8 +162,99 @@ function filterSessions(sessions, query) {
   );
 }
 
+// ── Usage / Cost Parsing ─────────────────────────────────────
+
+// Preise in AI Credits pro 1M Tokens. Bei neuen Modellen hier ergänzen.
+const MODEL_PRICING = {
+  'claude-haiku-4.5':  { input: 100, cache: 10, output: 500  },
+  'claude-sonnet-4.6': { input: 300, cache: 30, output: 1500 },
+  'claude-opus-4.6':   { input: 500, cache: 50, output: 2500 },
+  'claude-opus-4.8':   { input: 500, cache: 50, output: 2500 },
+};
+
+function parseTokenK(str) {
+  if (!str) return null;
+  const m = str.match(/([\d.]+)(k?)/i);
+  if (!m) return null;
+  return m[2].toLowerCase() === 'k' ? parseFloat(m[1]) * 1000 : parseFloat(m[1]);
+}
+
+function parseUsageTokens(text) {
+  const m = text.match(/Tokens:\s*input\s*([\d.]+k?),\s*output\s*([\d.]+k?),\s*cached\s*([\d.]+k?)/i);
+  if (!m) return null;
+  return {
+    input:  parseTokenK(m[1]),
+    output: parseTokenK(m[2]),
+    cache:  parseTokenK(m[3]),
+  };
+}
+
+function parseUsageRequests(text) {
+  const m = text.match(/Requests:\s*([\d.]+)\s*(AI Credits?|AI Units?|premium requests?)/i);
+  if (!m) return null;
+  return { value: parseFloat(m[1]), unit: m[2] };
+}
+
+function estimateCredits(tokens, modelId) {
+  const pricing = MODEL_PRICING[modelId];
+  if (!pricing || !tokens) return null;
+  const c = ((tokens.input || 0) * pricing.input + (tokens.cache || 0) * pricing.cache + (tokens.output || 0) * pricing.output) / 1_000_000;
+  return Math.round(c * 10) / 10;
+}
+
+/**
+ * Credits for the *new* tokens consumed since the last reading, priced at
+ * the model active right now. `/usage` reports cumulative session tokens,
+ * so we bill only the positive per-field delta — this avoids retroactively
+ * re-pricing earlier tokens when the model is switched mid-session.
+ * Negative deltas (e.g. after /clear or /compact) are clamped to 0.
+ * @param {{input?:number,output?:number,cache?:number}|null} currentTokens cumulative now
+ * @param {{input?:number,output?:number,cache?:number}|null} previousTokens cumulative at last reading
+ * @param {string} modelId
+ * @returns {number|null} delta credits, or null if model has no pricing / no data
+ */
+function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
+  if (!MODEL_PRICING[modelId] || !currentTokens) return null;
+  const prev = previousTokens || {};
+  const deltaTokens = {
+    input:  Math.max(0, (currentTokens.input  || 0) - (prev.input  || 0)),
+    output: Math.max(0, (currentTokens.output || 0) - (prev.output || 0)),
+    cache:  Math.max(0, (currentTokens.cache  || 0) - (prev.cache  || 0)),
+  };
+  return estimateCredits(deltaTokens, modelId);
+}
+
+// ── Cost Log Helpers ─────────────────────────────────────────
+
+function buildCostBuckets(entries, startMs, bucketMs, bucketCount) {
+  const buckets = Array.from({ length: bucketCount }, () => new Map());
+  for (const e of entries) {
+    const idx = Math.floor((e.ts - startMs) / bucketMs);
+    if (idx < 0 || idx >= bucketCount) continue;
+    const key = e.sessionId || '__unnamed';
+    buckets[idx].set(key, (buckets[idx].get(key) || 0) + e.credits);
+  }
+  return buckets;
+}
+
+function aggregateCostBySession(entries) {
+  const totals = new Map();
+  let grand = 0;
+  for (const e of entries) {
+    const key = e.sessionId || '__unnamed';
+    totals.set(key, (totals.get(key) || 0) + e.credits);
+    grand += e.credits;
+  }
+  return { totals, grand };
+}
+
+function trimCostLog(log, maxEntries) {
+  if (log.length > maxEntries) log.splice(0, log.length - maxEntries);
+  return log;
+}
+
 // ── Exports ──────────────────────────────────────────────────
-module.exports = {
+const _api = {
   shortenPath,
   truncatePath,
   formatDate,
@@ -173,4 +270,21 @@ module.exports = {
   TOOL_ICONS,
   TOOL_DISPLAY_NAMES,
   TOOL_ARGS_MAX_LENGTH,
+  MODEL_PRICING,
+  parseTokenK,
+  parseUsageTokens,
+  parseUsageRequests,
+  estimateCredits,
+  estimateCreditsDelta,
+  buildCostBuckets,
+  aggregateCostBySession,
+  trimCostLog,
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = _api;        // Node / Jest
+} else {
+  global.RendererLogic = _api;  // Renderer (browser)
+}
+
+})(typeof globalThis !== 'undefined' ? globalThis : this);

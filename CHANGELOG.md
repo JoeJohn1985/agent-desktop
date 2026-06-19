@@ -1,183 +1,153 @@
 # Changelog
 
+## [0.31.0] - 2026-06-19
+
+### Added
+- **Credit-Schätzung aus Token-Verbrauch**: `/usage` liefert Input/Output/Cache-Tokens, die App berechnet daraus geschätzte AI Credits (`~12.5C`) per Modellpreistabelle (Sonnet 4.6: 300/30/1500C, Opus 4.8: 500/50/2500C pro 1M Tokens)
+- **Kosten-Verlauf in Einstellungen**: Neuer Settings-Tab „Kosten" mit gestapeltem Balkendiagramm (Tages-/Wochenansicht), Aufschlüsselung nach Session, Gesamtsumme und Verlauf-Löschen-Button
+- **Cost-Log**: Delta-Kosten werden pro Prompt in `preferences.json` (Key `costLog`) persistiert; max. 5.000 Einträge
+- `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog` als testbare Pure-Funktionen in `src/renderer-logic.js`
+- **Haiku 4.5 Preise** in der Modellpreistabelle (Input 100C, Cache 10C, Output 500C pro 1M Tokens)
+
+### Changed
+- **Kosten als eigene Page statt Settings-Tab**: Die Kostenauflistung öffnet sich jetzt wie der Plugin-Marketplace als eigene Vollbild-Page (mehr Platz für wachsende Daten) — erreichbar über ein 📈-Icon in der Session-Leiste. Der „Kosten"-Tab in den Einstellungen entfällt
+- **AIC-Anzeige immer sichtbar**: Die Credit-Anzeige zeigt vor dem ersten Prompt `~0C` statt leer zu sein
+- Session-Leiste zeigt jetzt `~X.XC` statt AIU (Fallback auf AIU/AIC wenn Modell-Preistabelle nicht greift)
+- `parseUsageTokens`, `parseUsageRequests`, `estimateCredits`, `MODEL_PRICING` aus `renderer/app.js` nach `src/renderer-logic.js` ausgelagert (testbar)
+- **Kosten-Panel nach `renderer/modules/costs.js` ausgelagert** — `renderer/app.js` verschlankt, Kosten-Log und Diagramm-Logik in eigenem Modul
+- **Cost-Tracking auch für Hintergrund-Tabs**: `refreshUsageDisplay` läuft jetzt nach jedem abgeschlossenen Prompt, nicht nur für den aktiven Tab
+
+### Fixed
+- **Kostenberechnung bei Modellwechsel**: Pro Prompt wird jetzt nur der **Token-Zuwachs** seit der letzten Messung mit dem aktuellen Modellpreis verrechnet (`estimateCreditsDelta`). Vorher wurde die kumulierte Token-Summe komplett mit dem aktuellen Preis bewertet, wodurch ein Modellwechsel die unter dem alten Modell verbrauchten Tokens rückwirkend umpreiste (zu hohe/niedrige Deltas, bei Wechsel auf günstigeres Modell teils 0). Negative Deltas (nach `/clear`/`/compact`) werden auf 0 geklemmt
+- **`require is not defined` im Renderer (kritisch)**: `renderer/app.js` nutzte `require('../src/renderer-logic')`, was im Renderer (nodeIntegration: false, kein Bundler) eine `ReferenceError` warf und die gesamte app.js-Ausführung abbrach (u.a. `toggleSection is not defined`). `renderer-logic.js` ist jetzt UMD-gewrappt (IIFE) und stellt `window.RendererLogic` bereit; app.js liest daraus statt via `require`
+- **Kosten-Panel zeigte keine Daten**: 3 falsch benannte CSS-Variablen (`--bg-secondary`/`--bg-primary`/`--border-color` → `--bg-hover`/`--bg-surface`/`--border`) — Canvas-Hintergrund und Trennlinien waren unsichtbar
+- **Y-Achsen-Gitterlinien im Light-Theme kaum sichtbar**: `drawCostsChart` las die nicht existente CSS-Variable `--border-color` statt `--border`
+- **Stille Fehler in `refreshUsageDisplay`**: `catch (_) {}` ersetzt durch Logging
+- `niceStep(0)` mit Guard abgesichert (vermied potenzielles `NaN` bei leerem Diagramm)
+
+## [0.29.1] - 2026-06-18
+
+### Fixed
+- **Modell-IDs in Pricing-Map**: Punkte statt Bindestriche (`claude-sonnet-4.6` nicht `claude-sonnet-4-6`) — Credits wurden nicht berechnet, stattdessen AIU angezeigt
+
+## [0.29.0] - 2026-06-18
+
+### Added
+- **Kontext-Button als Dropdown**: Der `📊 Kontext`-Button zeigt jetzt die aktuelle Auslastung in % direkt im Button (`📊 18%`) und öffnet per Klick ein Dropdown mit drei Aktionen:
+  - **Kontext anzeigen**: Detail-Panel mit Token-Auslastung (Kategorien, Prozent, farbcodiert)
+  - **Compact**: Fasst die Konversation zusammen und aktualisiert die %-Anzeige
+  - **Clear**: Löscht den Kontext, fragt danach erneut `/context` ab
+- **Tools-Button**: `🔧 Tools`-Button neben dem Kontext-Button — öffnet Popup für Session-spezifische Denied-Tools
+- **AIU-/Credit-Anzeige in der Leiste**: Rechts in der Session-Aktionsleiste wird der Verbrauch der aktuellen Session als Text angezeigt
+- **Session-spezifische Tool-Denial mit Prozess-Neustart**: Änderungen an der Session-Deny-Liste (Hinzufügen, Toggle, Löschen) starten den ACP-Prozess automatisch neu und laden die Session via `session/load` wieder
+- IPC-Handler `copilot:restartWithDeniedTools` in `main.js`
+- Preload-Bridge `copilot.chat.restartWithDeniedTools`
+
+### Changed
+- Session-Aktionsleiste umstrukturiert: Model → Agent → Kontext (Dropdown) → Tools | Verbrauch
+- Pin-Funktion für Session-Tools entfernt
+
+### Fixed
+- **Mode-Dropdown öffnete sich nach oben**: Falscher CSS-Klassenname (`mode-dropdown--below` statt `model-dropdown--below`) — Dropdown öffnet jetzt korrekt nach unten
+
+## [0.28.0] - 2026-06-xx
+
+### Added
+- **ACP-Backend-Migration**: Die gesamte Kommunikation mit der Copilot CLI läuft jetzt über `copilot --acp` (Agent Communication Protocol, JSON-RPC über NDJSON stdio)
+- `AcpClient` (`src/acp-client.js`): kapselt Session-Management, Prompt-Streaming, Event-Mapping und `silentCommand()`
+- **`silentCommand(command)`**: Slash-Commands (`/context`, `/usage`, `/compact`, `/clear`) werden als stille ACP-Requests ausgeführt — Ergebnis geht nicht in den Chat
+- IPC-Handler `copilot:silentCommand` in `main.js`
+- Preload-Bridge `copilot.chat.silentCommand`
+- `acpClients` Map in `main.js` (tabId → AcpClient)
+
+### Removed
+- **PTY-Terminal komplett entfernt**: Kein `node-pty`, kein `xterm.js`, kein Terminal-Panel mehr
+- `renderer/modules/terminal.js` gelöscht
+- `src/ipc/terminal-ipc.js` gelöscht
+- `src/main-helpers.js`: `collectPtyOutput`, `waitForReady`, `isCopilotTuiReady`, `detectCopilotPrompt`, `cleanupPty` entfernt
+
+### Changed
+- Slash-Commands laufen nicht mehr über PTY-Bracketed-Paste, sondern über `silentCommand()`
+- Prozess-Management: ein langlebiger ACP-Prozess pro Tab (statt Spawn-per-Message)
+
 ## [0.25.0] - 2026-05-21
 
 ### Added
-- **CWD pro Session**: Arbeitsverzeichnis (CWD) kann per Klick auf 📂 in der Statusbar pro Tab/Session gewählt werden
+- **CWD pro Session**: Arbeitsverzeichnis kann per Klick auf 📂 in der Statusbar pro Tab/Session gewählt werden
 - CWD wird für benannte Sessions persistiert und beim Restore wiederhergestellt
-- `saveSessionCwd` / `getSessionCwd` in `src/named-sessions.js` für testbare Persistenz-Logik
-- `sendMessage()` übergibt `cwd` an `copilot.chat.send()` — CLI startet im gewählten Verzeichnis
-- Tab-Wechsel aktualisiert die Statusbar-CWD-Anzeige korrekt
+- `saveSessionCwd` / `getSessionCwd` in `src/named-sessions.js`
 
 ## [0.24.6] - 2026-05-28
 
 ### Added
-- **Application Icon**: `assets/icon.png` (512×512 RGBA) used across window, titlebar, tab bar, and dock
-- **Linux Desktop Integration**: `assets/copilot-desktop.desktop` with `StartupWMClass=copilot-desktop` for correct taskbar grouping
-- **WM_CLASS fix**: Forces `--class copilot-desktop` via Chromium switch on Linux so all panels recognise the app
-- **electron-builder icon config**: Icon configured for Win/macOS/Linux builds
+- **Application Icon**: `assets/icon.png` (512×512 RGBA) für Fenster, Titlebar, Tab-Bar und Dock
+- **Linux Desktop Integration**: `assets/copilot-desktop.desktop` mit `StartupWMClass=copilot-desktop`
+- **WM_CLASS fix**: `--class copilot-desktop` via Chromium switch auf Linux
 
 ## [0.24.0] - 2026-05-21
 
 ### Added
-- **Skills in CLI deaktivieren**: Neuer Toggle-Button pro Skill in der Sidebar — Skills können direkt über die Desktop App in `~/.copilot/settings.json` deaktiviert werden (CLI lädt diese dann nicht mehr)
-- IPC-Handler `skills:getDisabled` und `skills:setDisabled` für Lesen/Schreiben der `disabledSkills` in settings.json
-- Visuelles Feedback: Deaktivierte Skills erscheinen mit reduzierter Opacity und farblich markiertem Button
-- **Sidebar-Collapse-State persistieren**: Eingeklappte Sidebar-Bereiche werden in Preferences gespeichert und beim App-Start wiederhergestellt
-- **Content-Sync Plain↔Rich**: Beim Umschalten des Chat-Input-Modus wird der Inhalt jetzt übertragen (Plain→Rich als Text, Rich→Plain als Markdown)
+- **Skills in CLI deaktivieren**: Toggle-Button pro Skill — Skills können in `~/.copilot/settings.json` deaktiviert werden
+- IPC-Handler `skills:getDisabled` und `skills:setDisabled`
+- **Sidebar-Collapse-State persistieren**: Eingeklappte Bereiche werden gespeichert
+- **Content-Sync Plain↔Rich**: Inhalt wird beim Modus-Wechsel übertragen
 
 ### Fixed
-- **Rich-Text Listen-Darstellung**: `ul`/`ol` im Rich-Text-Editor werden mit korrekter Einrückung und Listenpunkten/-nummern gerendert
-- **Button-Reihenfolge Skill-Card**: Löschen-Button erscheint jetzt vor dem CLI-Deaktivieren-Button
-- **Content-Sync bei leerem Inhalt**: Sync findet jetzt auch statt wenn das Feld geleert wurde
+- Rich-Text Listen-Darstellung, Button-Reihenfolge Skill-Card, Content-Sync bei leerem Inhalt
 
 ### Removed
-- **Durchgestrichen-Button** aus Rich-Text-Toolbar entfernt
+- Durchgestrichen-Button aus Rich-Text-Toolbar
 
 ## [0.23.0] - 2026-05-29
 
 ### Added
-- **Rich-Text-Editor Toggle**: Neuer ✏️/📝-Button im Chat-Input — umschalten zwischen Plaintext und Rich-Text-Modus. Toolbar mit Bold, Italic, UL, OL. Enter = Zeilenumbruch, Strg+Enter = Senden. HTML wird beim Senden zu Markdown konvertiert.
-- **Model-Dropdown Redesign**: Aktives Model wird mit Accent-Balken links + Hintergrund hervorgehoben (kein Häkchen mehr)
-- **Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7 → GPT-5.3 → GPT-4.1
-- **Button-Reihenfolge**: Model → Autopilot → Context → Compact → Clear
+- **Rich-Text-Editor Toggle**: ✏️/📝-Button — Plaintext oder Rich-Text-Modus. Toolbar mit Bold, Italic, UL, OL. HTML→Markdown beim Senden.
+- **Model-Dropdown Redesign**: Accent-Balken links + Hintergrund statt Häkchen
+- **Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7
 
 ### Fixed
-- **Model-Persistenz nach App-Restart**: `updateModelSelectBtn()` wird jetzt korrekt nach `tab.selectedModel = sessionModel` aufgerufen in beiden Restore-Pfaden
-- **Model-Persistenz für neue Sessions**: `saveSessionModel` nutzt jetzt eigenen `sessionModels`-Pref-Key (unabhängig von `namedSessions`) — neue Sessions verlieren ihr gewähltes Model nicht mehr nach Restart
-- **Dead Code** in `updateModelSelectBtn` entfernt
-- **Integrity-Test** bereinigt (`btnShortcutsHelp` entfernt)
-
-### Changed
-- Dokumentation aktualisiert: USER-GUIDE.md, ARCHITECTURE.md, README.md
+- Model-Persistenz nach App-Restart, Model-Persistenz für neue Sessions
 
 ## [0.21.0] - 2026-05-14
 
 ### Added
-- JSDoc-Kommentare vollständig für alle Hauptdateien ergänzt:
-  - `main.js`: 15+ Modul-Variablen/Konstanten, 14 Funktionen, ~30 IPC-Handler mit `@ipc`, `@param`, `@returns`
-  - `preload.js`: Alle 22 `copilot.*`-Namespaces, jede IPC-Methode und Event-Subscriber mit Callback-Typen
-  - `renderer/app.js`: 114 JSDoc-Blöcke (65 Funktionen, 49 Variablen) — Tab-Management, Chat-Flow, Skills/Agents, Sessions, Plugins, Onboarding, Tutorial, Helpers
-  - `renderer/modules/todos.js`: 6 Funktionen + `@type` für `currentTodos`
-  - `src/scanners.js`: 3 fehlende Funktionen nachgetragen
-
-### Fixed
-- Merge-Konflikt in `renderer/app.js` behoben: `initShortcutsSettings()` und Onboarding-Toggle (Dev Tools) koexistieren korrekt in `initSettings()`
-- Merge-Konflikt in `renderer/index.html` behoben: Shortcuts-Tab und Devtools-Tab werden beide vollständig gerendert
-
-### Changed
-- `docs/USER-GUIDE.md`: Onboarding-Wizard (4 Schritte), Tutorial-Popups, Session Resume dokumentiert; Version auf v0.20.5 aktualisiert
-- `docs/ARCHITECTURE.md`: Onboarding-Wizard-Architektur (Sec 5.6), Tutorial-Flags-System (Sec 5.7), neue IPC-Namespaces `onboarding:*` / `tutorial:*` / `dev:*`, 3 neue ADRs (#9–#11), `tab:renamed` CustomEvent, Persistenz-Tabelle erweitert
-- `docs/known-issues.md`: Bekannte Einschränkungen v0.20.5 ergänzt
-- `README.md`: Feature-Liste in Gruppen gegliedert (Core, Skills/Agents, Onboarding, Productivity, Customisation), Onboarding-Wizard und weitere Features dokumentiert, Testanzahl auf 939+ aktualisiert
+- JSDoc-Kommentare vollständig für alle Hauptdateien (main.js, preload.js, renderer/app.js, todos.js, scanners.js)
 
 ## [0.20.5] - 2026-05-14
 
 ### Added
-- Tutorial-Flags (`tutorialSkillsShown`, `tutorialRenameShown`) nach `folders.json` migriert
-- IPC-Handler `tutorial:getFlags` / `tutorial:setFlag` mit Key-Whitelist
-- Tutorial-Popups schließen automatisch bei Nutzeraktion (Reload-Button / Tab-Umbenennung)
-- Auto-close nach 30 Sekunden (Event-Listener Leak-Fix via closed-Guard)
-- `tab:renamed` CustomEvent bei erfolgreicher Tab-Umbenennung
-- `dev:setOnboardingComplete` löscht jetzt auch Tutorial-Flags
-- 2 neue Testdateien (`tutorial-flags.test.js`, erweitertes `onboarding-auth.test.js`)
-
-### Fixed
-- Event-Listener Leak in Tutorial-Popup Auto-close behoben (closed-Guard verhindert doppelte Registrierung)
-
-### Changed
-- Todo-Löschicon vereinheitlicht (🗑️ Mülleimer-Emoji durchgehend)
-- Session-Context zeigt nur noch Nachrichten — kein Plan mehr
-
-## [0.19.0] - 2026-05-12
-
-### Changed
-- Versionserhöhung auf 0.19.0 nach Onboarding-Wizard-Release
+- Tutorial-Flags in `folders.json` (Key-Whitelist: `tutorialSkillsShown`, `tutorialRenameShown`)
+- IPC-Handler `tutorial:getFlags` / `tutorial:setFlag`
+- Tutorial-Popups schließen automatisch nach 30 s (closed-Guard)
+- `tab:renamed` CustomEvent bei Tab-Umbenennung
 
 ## [0.18.2] - 2026-05-12
 
 ### Added
-- First-Run Onboarding Wizard (Schritte 1–4):
-  - Schritt 1: GitHub Login-Check via `gh auth status` / `gh auth login`
-  - Schritt 2: Ordner-Einrichtung (`~/.copilot-desktop/*`)
-  - Schritt 3: Starter Agents & Skills (6 Kategorien, togglebar)
-  - Schritt 4: Kurzeinführung mit 3-Slide-Carousel
-- Tab-Unlock Fallback: Auto-Unlock nach 180s Inaktivität mit Info-Nachricht
-- +165 neue Tests (onboarding-auth, -folders, -categories, -intro)
-
-### Fixed
-- CSS-Variablen-Fix: `--bg-secondary` / `--color-success` korrigiert
+- First-Run Onboarding Wizard (4 Schritte: Auth, Ordner, Agents/Skills, Feature-Intro)
+- Tab-Unlock Fallback nach 180 s Inaktivität
 
 ## [0.16.1] - 2025-06-17
 
 ### Added
-- Tab-Unlock Fallback bei hängenden Sub-Agents:
-  - Nach 30s Inaktivität: Manueller „⏱ Hängt? Entsperren"-Button erscheint
-  - Nach 180s Inaktivität: Tab wird automatisch entsperrt mit Info-Nachricht
-  - Activity-Tracking bei allen Stream-Events (`lastActivityAt`)
-- 51 neue Tests (`inactivity-monitor.test.js` + 2 QA-Fixes), 667 Tests total
-
-### Fixed
-- Backend-Stop bei Force-Unlock: `copilot.chat.stop()` wird jetzt auch bei manuellem/automatischem Unlock aufgerufen (verhindert weiterlaufende Backend-Prozesse)
-- Markdown-Timer Leak: `_mdTimer` wird in `forceUnlockTab` korrekt aufgeräumt
+- Tab-Unlock Fallback bei hängenden Sub-Agents (30 s manuell, 180 s automatisch)
+- Activity-Tracking (`lastActivityAt`)
 
 ## [0.16.0] - 2025-06-16
 
 ### Added
-- Plugin-Manager: Marketplace hinzufügen/entfernen mit Spinner-Feedback
-- Marketplace-Reihenfolge: Neueste Marketplaces erscheinen oben (unshift statt push)
-- Plugin-Button Toggle: Plugin-Panel schließt bei erneutem Klick auf Plugin-Button
-- Session-Wiederaufnahme: Plan + letzte Nachrichten werden als normale Chat-Nachrichten angezeigt (Checkpoints entfernt)
-- Startup-Optimierung: `loadPlugins()` läuft non-blocking im Hintergrund — App startet sofort
-- Neue Tests: `get-instructions.test.js`, `plugin-view-toggle.test.js`, erweiterte `plugin-ui.test.js` (+37 Tests)
-
-### Fixed
-- `getInstructions` Bug: Nutzt jetzt den konfigurierten Pfad aus `readFolderConfig()` — sbInstructions-Anzeige im Footer funktioniert wieder
-- CSS Selector Injection: `CSS.escape()` in `installPlugin`, `uninstallPlugin`, `updatePlugin`, `removeMarketplace`
-
-### Changed
-- sbInstructions-Anzeige aus der Statusbar entfernt (war immer 1, keine relevante Information)
-- AGENTS.md: Git-Workflow-Regel ergänzt (pull → commit → push → pull)
-- Tote CSS-Klassen entfernt (QA-Fix)
-
-## [0.15.1] - 2025-06-15
-
-### Added
-- Agents directory configurable in folder settings (agents-folder picker)
-- `agentsDir` included in `folders:read` response with default fallback
-- `getEffectiveExtraDirs()` includes `agentsDir` automatically per session
-- 20 new tests for agents settings (`agents-settings.test.js`)
-
-### Changed
-- `loadFolderSettings()` and `btnFoldersSave` updated to handle `agentsDir`
+- Plugin-Manager, Session-Wiederaufnahme (Plan + letzte Nachrichten als Chat-Nachrichten)
 
 ## [0.15.0] - 2025-06-15
 
 ### Added
-- Agents panel in sidebar — scans `~/.copilot/agents/*.agent.md` files
-- `src/agents.js`: `scanAgentsDirectory()` with YAML frontmatter parsing
-- `agents:list` IPC handler in main process
-- `copilot.agents.list()` preload bridge
-- `renderAgents()` and `toggleAgent()` in renderer
-- Active agents injected as `/agent <name>` prefix per message
-- `.agent-card` CSS styling (analogous to skills)
-- 16 new tests for `scanAgentsDirectory()` (`agents.test.js`)
-
-### Security
-- XSS fix: `escapeAttr()` for onclick/data-tooltip in agents & skills rendering
+- Agents-Panel in Sidebar — scannt `~/.copilot/agents/*.agent.md`
+- `src/agents.js`: `scanAgentsDirectory()`
 
 ## [0.14.4] - 2025-06-15
 
 ### Security
-- XSS fix in `openInstructionsEditor` — user input now escaped
+- XSS-Fix in `openInstructionsEditor`
 
 ### Fixed
-- Model rollback: restore previous model on switch failure
-- Event listener leak: proper cleanup on window close
-
-## [0.14.3] - 2025-06-14
-
-### Added
-- Model switcher UI
-- Pinned tools fix
-- `AGENTS.md` project documentation
+- Model rollback bei Switch-Fehler, Event-Listener-Leak bei Window-Close

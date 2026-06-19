@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Copilot Desktop</title>
   <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="../node_modules/xterm/css/xterm.css" />
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" />
 </head>
@@ -167,17 +166,42 @@
           </div>
         </div>
       </div>
+      <!-- Costs View (eigene Page wie der Plugin Manager) -->
+      <div class="plugins-view" id="costsView" style="display:none;">
+        <div class="plugins-view__header">
+          <div class="plugins-view__header-left">
+            <h2 class="plugins-view__title">💰 Kosten</h2>
+          </div>
+          <div class="plugins-view__header-center">
+            <div class="costs-view__toggle">
+              <button class="costs-view__toggle-btn costs-view__toggle-btn--active" data-range="week">Woche</button>
+              <button class="costs-view__toggle-btn" data-range="day">Tag</button>
+            </div>
+          </div>
+          <div class="plugins-view__actions">
+            <button class="plugin-actions__btn" id="btnClearCostLog" data-tooltip="Kostenverlauf löschen">🗑️</button>
+            <button class="plugin-actions__btn plugins-view__close" onclick="switchToChatView()" data-tooltip="Kosten schließen">✕</button>
+          </div>
+        </div>
+        <div class="costs-view__page-body">
+          <canvas id="costsChart" height="240" style="width:100%;display:block;"></canvas>
+          <div class="costs-view__breakdown-section">
+            <div class="costs-view__breakdown-title">Aufschlüsselung</div>
+            <div id="costsBreakdown"></div>
+          </div>
+        </div>
+      </div>
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
         <div class="model-select-wrapper">
           <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model für diesen Tab auswählen">🧠 Model</button>
         </div>
-        <button class="session-actions__btn" id="btnAutopilot" data-tooltip="Autopilot">🤖 Autopilot</button>
-        <button class="session-actions__btn" id="btnSlashContext" data-tooltip="Token-Kontext anzeigen (/context)">📊 Context</button>
-        <button class="session-actions__btn" id="btnSlashCompact" data-tooltip="Kontext komprimieren (/compact)">🗜️ Compact</button>
-        <button class="session-actions__btn" id="btnSlashClear" data-tooltip="Chat-Kontext leeren (/clear)">🧹 Clear</button>
-        <div class="session-actions__spacer"></div>
-        <div class="pinned-tools" id="pinnedTools"></div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnModeSelect" data-tooltip="Modus für diesen Tab auswählen">🤖 Agent</button>
+        </div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnContextInfo" data-tooltip="Kontext-Auslastung anzeigen">📊 Kontext</button>
+        </div>
         <div class="tools-popup-wrapper">
           <button class="session-actions__btn" id="btnSessionTools" data-tooltip="Session Shell Tools verwalten">🔧 Tools</button>
           <!-- Session Tools Popup -->
@@ -190,18 +214,9 @@
             <div class="session-tools-popup__list" id="sessionToolsList"></div>
           </div>
         </div>
-        <!-- Context Popup -->
-        <div id="contextPopup" class="context-popup" style="display:none;">
-          <div class="context-popup__body" id="contextPopupBody">
-            <div class="context-popup__loading">⏳ Lade Kontext…</div>
-          </div>
-        </div>
-        <!-- Compact Popup -->
-        <div id="compactPopup" class="context-popup" style="display:none;">
-          <div class="context-popup__body" id="compactPopupBody">
-            <div class="context-popup__loading">⏳ Komprimiere…</div>
-          </div>
-        </div>
+        <div class="session-actions__spacer"></div>
+        <button class="session-actions__cost-btn" id="btnOpenCosts" data-tooltip="Kostenauflistung öffnen">📈</button>
+        <span class="session-actions__usage" id="sessionUsage">~0C</span>
       </div>
       <div class="stream-area" id="streamArea">
         <!-- Search Bar -->
@@ -217,17 +232,6 @@
         <div class="drop-overlay" id="dropOverlay">
           <div class="drop-overlay__content">📂 Dateien hier ablegen</div>
         </div>
-      </div>
-      <!-- Terminal Panel (for slash commands) -->
-      <div class="terminal-panel" id="terminalPanel">
-        <div class="terminal-panel__resize" id="terminalResize"></div>
-        <div class="terminal-panel__header">
-          <span class="terminal-panel__title">⚡ Terminal</span>
-          <div class="terminal-panel__actions">
-            <button class="terminal-panel__btn" id="btnTerminalMinimize" data-tooltip="Terminal einklappen">▾</button>
-          </div>
-        </div>
-        <div class="terminal-panel__body" id="terminalBody"></div>
       </div>
       <!-- Test Runner Popup -->
       <div id="testRunnerPopup" class="test-runner-popup" style="display:none;">
@@ -254,6 +258,7 @@
             <button class="dev-console__filter" data-level="error">Error</button>
           </div>
           <div class="dev-console__actions">
+            <button class="dev-console__btn" id="devConsoleCopy" title="Komplette Konsole in die Zwischenablage kopieren">📋</button>
             <button class="dev-console__btn" id="devConsoleClear" title="Clear">🗑️</button>
             <button class="dev-console__btn" id="devConsoleClose" title="Close">✕</button>
           </div>
@@ -261,7 +266,6 @@
         <div class="dev-console__body" id="devConsoleBody"></div>
       </div>
       <div class="chat-input-bar">
-        <button class="chat-terminal-btn" id="btnOpenTerminal" data-tooltip="Terminal öffnen (⚡)">⚡</button>
         <button class="chat-terminal-btn" id="btnExportChat" data-tooltip="Chat als Markdown exportieren">📥</button>
         <div class="chat-input-wrapper">
           <div class="rich-text-toolbar" id="richTextToolbar">
@@ -351,6 +355,12 @@
         </div>
         <!-- Tab: Copilot Konfiguration -->
         <div class="settings__panel" data-panel="copilot">
+          <div class="settings__group">
+            <label class="settings__label">Standard-Modell</label>
+            <div class="settings__hint">Modell, mit dem neue Tabs starten. Pro Tab über das 🧠-Menü überschreibbar.</div>
+            <select class="settings__select" id="settDefaultModel"></select>
+          </div>
+          <div class="settings__separator"></div>
           <div class="settings__group">
             <label class="settings__label">Verbotene Shell Tools (global)</label>
             <div class="settings__hint">Diese Shell-Befehle werden in allen Sessions blockiert (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
@@ -451,7 +461,6 @@
             <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
           </div>
         </div>
-        <!-- Tab: Tastenkürzel -->
         <div class="settings__panel" data-panel="shortcuts">
           <div class="settings__group">
             <div class="settings__hint">Konfiguriere Tastenkürzel. Klicke auf „Ändern" und drücke dann die neue Kombination. Esc bricht ab.</div>
@@ -489,8 +498,6 @@
   </div>
 
   <script src="../node_modules/dompurify/dist/purify.min.js"></script>
-  <script src="../node_modules/xterm/lib/xterm.js"></script>
-  <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <!-- Extracted modules (loaded before app.js, share global scope) -->
   <!-- Onboarding Wizard Overlay -->
   <div id="onboarding-overlay" class="onboarding-overlay" style="display:none">
@@ -515,13 +522,14 @@
     </div>
   </div>
 
+  <script src="../src/renderer-logic.js"></script>
   <script src="modules/utils.js"></script>
   <script src="modules/dev-console.js"></script>
   <script src="modules/todos.js"></script>
   <script src="modules/images.js"></script>
   <script src="modules/test-runner.js"></script>
-  <script src="modules/terminal.js"></script>
   <script src="modules/session-tools.js"></script>
+  <script src="modules/costs.js"></script>
   <script src="app.js"></script>
 
   <!-- Skill Manager Overlay -->

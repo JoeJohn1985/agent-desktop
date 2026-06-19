@@ -13,6 +13,15 @@ const {
   formatToolArgs,
   filterSessions,
   TOOL_ARGS_MAX_LENGTH,
+  MODEL_PRICING,
+  parseTokenK,
+  parseUsageTokens,
+  parseUsageRequests,
+  estimateCredits,
+  estimateCreditsDelta,
+  buildCostBuckets,
+  aggregateCostBySession,
+  trimCostLog,
 } = require('../src/renderer-logic');
 
 // ── shortenPath ──────────────────────────────────────────────
@@ -287,5 +296,256 @@ describe('filterSessions', () => {
     const result2 = filterSessions(mockSessions, 'ghi-789');
     expect(result2).toHaveLength(1);
     expect(result2[0].id).toBe('ghi-789');
+  });
+});
+
+// ── parseTokenK ──────────────────────────────────────────────
+describe('parseTokenK', () => {
+  it('parst Ganzzahl ohne k', () => {
+    expect(parseTokenK('13')).toBe(13);
+  });
+
+  it('parst Dezimalzahl mit k-Suffix', () => {
+    expect(parseTokenK('17.5k')).toBe(17500);
+  });
+
+  it('parst ganzzahl mit k-Suffix', () => {
+    expect(parseTokenK('2k')).toBe(2000);
+  });
+
+  it('parst 0', () => {
+    expect(parseTokenK('0')).toBe(0);
+  });
+
+  it('gibt null für leeren String zurück', () => {
+    expect(parseTokenK('')).toBeNull();
+    expect(parseTokenK(null)).toBeNull();
+  });
+});
+
+// ── parseUsageTokens ─────────────────────────────────────────
+describe('parseUsageTokens', () => {
+  const SAMPLE = 'Session Usage\n\nChanges: +0 -0\nRequests: 1 AI Units (7s)\nTokens: input 17.5k, output 13, cached 0';
+
+  it('parst input, output und cached korrekt', () => {
+    const result = parseUsageTokens(SAMPLE);
+    expect(result).toEqual({ input: 17500, output: 13, cache: 0 });
+  });
+
+  it('gibt null zurück wenn kein Token-Block vorhanden', () => {
+    expect(parseUsageTokens('Requests: 1 AI Units')).toBeNull();
+  });
+
+  it('parst alle drei Werte mit k-Suffix', () => {
+    const result = parseUsageTokens('Tokens: input 19.0k, output 15, cached 9.6k');
+    expect(result).toEqual({ input: 19000, output: 15, cache: 9600 });
+  });
+
+  it('ist case-insensitiv', () => {
+    const result = parseUsageTokens('tokens: INPUT 1k, OUTPUT 2, CACHED 3k');
+    expect(result).toEqual({ input: 1000, output: 2, cache: 3000 });
+  });
+});
+
+// ── parseUsageRequests ───────────────────────────────────────
+describe('parseUsageRequests', () => {
+  it('parst AI Units', () => {
+    const result = parseUsageRequests('Requests: 3 AI Units (7s)');
+    expect(result).toEqual({ value: 3, unit: 'AI Units' });
+  });
+
+  it('parst AI Credits', () => {
+    const result = parseUsageRequests('Requests: 1.5 AI Credits');
+    expect(result).toEqual({ value: 1.5, unit: 'AI Credits' });
+  });
+
+  it('gibt null zurück wenn kein Match', () => {
+    expect(parseUsageRequests('keine Daten')).toBeNull();
+  });
+});
+
+// ── estimateCredits ──────────────────────────────────────────
+describe('estimateCredits', () => {
+  it('berechnet Credits für Sonnet 4.6 korrekt', () => {
+    // 1M input @ 300C = 300C, 0 cache, 1000 output @ 1500C/1M = 1.5C → total 301.5C
+    const result = estimateCredits({ input: 1_000_000, output: 1000, cache: 0 }, 'claude-sonnet-4.6');
+    expect(result).toBe(301.5);
+  });
+
+  it('berücksichtigt Cache-Tokens günstiger', () => {
+    // 100k input @ 300C/1M = 30C, 100k cache @ 30C/1M = 3C, 0 output → 33C
+    const result = estimateCredits({ input: 100_000, output: 0, cache: 100_000 }, 'claude-sonnet-4.6');
+    expect(result).toBe(33);
+  });
+
+  it('gibt null für unbekanntes Modell zurück', () => {
+    expect(estimateCredits({ input: 1000, output: 100, cache: 0 }, 'claude-unknown-9.9')).toBeNull();
+  });
+
+  it('berechnet Credits für Haiku 4.5 korrekt', () => {
+    // 1M input @ 100C = 100C, 1M cache @ 10C = 10C, 1M output @ 500C = 500C → 610C
+    const result = estimateCredits({ input: 1_000_000, output: 1_000_000, cache: 1_000_000 }, 'claude-haiku-4.5');
+    expect(result).toBe(610);
+  });
+
+  it('gibt null ohne Token-Daten zurück', () => {
+    expect(estimateCredits(null, 'claude-sonnet-4.6')).toBeNull();
+  });
+
+  it('rundet auf eine Nachkommastelle', () => {
+    // 1234 input tokens @ 300/1M = 0.3702C → gerundet 0.4C
+    const result = estimateCredits({ input: 1234, output: 0, cache: 0 }, 'claude-sonnet-4.6');
+    expect(result).toBe(0.4);
+  });
+
+  it('Opus 4.8 ist teurer als Sonnet 4.6', () => {
+    const tokens = { input: 100_000, output: 1000, cache: 0 };
+    const sonnet = estimateCredits(tokens, 'claude-sonnet-4.6');
+    const opus = estimateCredits(tokens, 'claude-opus-4.8');
+    expect(opus).toBeGreaterThan(sonnet);
+  });
+});
+
+// ── estimateCreditsDelta ─────────────────────────────────────
+describe('estimateCreditsDelta', () => {
+  it('bewertet beim ersten Lesen (kein Vorwert) die vollen Tokens', () => {
+    // prev null → delta = volle 1M input @ 300 = 300C
+    const result = estimateCreditsDelta({ input: 1_000_000, output: 0, cache: 0 }, null, 'claude-sonnet-4.6');
+    expect(result).toBe(300);
+  });
+
+  it('bewertet nur den Zuwachs seit der letzten Messung', () => {
+    // von 1M auf 1.5M input → Delta 0.5M @ 300 = 150C
+    const result = estimateCreditsDelta(
+      { input: 1_500_000, output: 0, cache: 0 },
+      { input: 1_000_000, output: 0, cache: 0 },
+      'claude-sonnet-4.6',
+    );
+    expect(result).toBe(150);
+  });
+
+  it('preist neue Tokens nach Modellwechsel NICHT die alten um', () => {
+    // 1M unter Sonnet verbraucht, dann Wechsel auf Opus, 1M neu dazu.
+    // Korrekt: nur die 1M neuen Tokens @ Opus 500 = 500C —
+    // NICHT 500×2M − 300×1M = 700C (alter, fehlerhafter Ansatz).
+    const result = estimateCreditsDelta(
+      { input: 2_000_000, output: 0, cache: 0 }, // kumuliert nach Prompt 2
+      { input: 1_000_000, output: 0, cache: 0 }, // kumuliert nach Prompt 1
+      'claude-opus-4.8',
+    );
+    expect(result).toBe(500);
+  });
+
+  it('klemmt negative Deltas auf 0 (z.B. nach /clear oder /compact)', () => {
+    // Kontext geschrumpft: kumuliert fällt von 50k auf 5k → kein negativer Eintrag
+    const result = estimateCreditsDelta(
+      { input: 5_000, output: 0, cache: 0 },
+      { input: 50_000, output: 0, cache: 0 },
+      'claude-sonnet-4.6',
+    );
+    expect(result).toBe(0);
+  });
+
+  it('verrechnet input, cache und output getrennt', () => {
+    // Delta: input 1M@300, cache 1M@30, output 1M@1500 (Sonnet) = 1830C
+    const result = estimateCreditsDelta(
+      { input: 1_000_000, output: 1_000_000, cache: 1_000_000 },
+      { input: 0, output: 0, cache: 0 },
+      'claude-sonnet-4.6',
+    );
+    expect(result).toBe(1830);
+  });
+
+  it('gibt null für unbekanntes Modell zurück', () => {
+    expect(estimateCreditsDelta({ input: 1000 }, null, 'claude-unknown-9.9')).toBeNull();
+  });
+
+  it('gibt null ohne aktuelle Token-Daten zurück', () => {
+    expect(estimateCreditsDelta(null, { input: 1000 }, 'claude-sonnet-4.6')).toBeNull();
+  });
+});
+
+// ── buildCostBuckets ─────────────────────────────────────────
+describe('buildCostBuckets', () => {
+  const startMs = 1_000_000_000_000;
+  const bucketMs = 3_600_000; // 1h
+  const bucketCount = 24;
+
+  it('ordnet Einträge dem richtigen Bucket zu', () => {
+    const entries = [
+      { ts: startMs + 0, sessionId: 's1', credits: 1.0 },
+      { ts: startMs + bucketMs, sessionId: 's1', credits: 2.0 },
+    ];
+    const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
+    expect(buckets[0].get('s1')).toBe(1.0);
+    expect(buckets[1].get('s1')).toBe(2.0);
+  });
+
+  it('summiert mehrere Einträge im selben Bucket', () => {
+    const entries = [
+      { ts: startMs + 100, sessionId: 's1', credits: 1.5 },
+      { ts: startMs + 200, sessionId: 's1', credits: 0.5 },
+    ];
+    const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
+    expect(buckets[0].get('s1')).toBeCloseTo(2.0);
+  });
+
+  it('ignoriert Einträge außerhalb des Zeitfensters', () => {
+    const entries = [
+      { ts: startMs - 1, sessionId: 's1', credits: 99 },
+      { ts: startMs + bucketMs * bucketCount, sessionId: 's1', credits: 99 },
+    ];
+    const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
+    const total = buckets.reduce((s, b) => s + (b.get('s1') || 0), 0);
+    expect(total).toBe(0);
+  });
+
+  it('behandelt null-sessionId als __unnamed', () => {
+    const entries = [{ ts: startMs, sessionId: null, credits: 5 }];
+    const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
+    expect(buckets[0].get('__unnamed')).toBe(5);
+  });
+});
+
+// ── aggregateCostBySession ───────────────────────────────────
+describe('aggregateCostBySession', () => {
+  it('summiert Credits pro Session', () => {
+    const entries = [
+      { sessionId: 'a', credits: 1.0 },
+      { sessionId: 'a', credits: 2.0 },
+      { sessionId: 'b', credits: 3.0 },
+    ];
+    const { totals, grand } = aggregateCostBySession(entries);
+    expect(totals.get('a')).toBeCloseTo(3.0);
+    expect(totals.get('b')).toBeCloseTo(3.0);
+    expect(grand).toBeCloseTo(6.0);
+  });
+
+  it('behandelt null-sessionId als __unnamed', () => {
+    const entries = [{ sessionId: null, credits: 2.5 }];
+    const { totals } = aggregateCostBySession(entries);
+    expect(totals.get('__unnamed')).toBe(2.5);
+  });
+
+  it('gibt leere Map und 0 für leere Liste zurück', () => {
+    const { totals, grand } = aggregateCostBySession([]);
+    expect(totals.size).toBe(0);
+    expect(grand).toBe(0);
+  });
+});
+
+// ── trimCostLog ──────────────────────────────────────────────
+describe('trimCostLog', () => {
+  it('kürzt Log auf maxEntries', () => {
+    const log = Array.from({ length: 10 }, (_, i) => ({ ts: i, credits: 1 }));
+    trimCostLog(log, 5);
+    expect(log).toHaveLength(5);
+    expect(log[0].ts).toBe(5); // älteste entfernt
+  });
+
+  it('ändert nichts wenn Log kürzer als maxEntries', () => {
+    const log = [{ ts: 1, credits: 1 }, { ts: 2, credits: 2 }];
+    trimCostLog(log, 100);
+    expect(log).toHaveLength(2);
   });
 });
