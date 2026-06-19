@@ -35,6 +35,16 @@ function renderDevConsole() {
   filtered.forEach(entry => appendDevConsoleRow(body, entry));
 }
 
+function formatDevConsoleForClipboard() {
+  const entries = devConsoleFilter === 'all'
+    ? devConsoleLogs
+    : devConsoleLogs.filter(e => e.level === devConsoleFilter);
+  return entries.map(entry => {
+    const time = new Date(entry.timestamp).toLocaleTimeString('de-DE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    return `${time} [${entry.level.toUpperCase()}] ${entry.message}`;
+  }).join('\n');
+}
+
 function toggleDevConsole() {
   const panel = document.getElementById('devConsolePanel');
   if (!panel) return;

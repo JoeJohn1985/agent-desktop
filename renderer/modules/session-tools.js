@@ -2,6 +2,23 @@
 // Extracted from app.js — Session tools popup and pinned tools UI
 'use strict';
 
+/**
+ * Restarts the ACP process for the active tab with the current merged
+ * denied-tools list (admin + global + session). Required because ACP
+ * only accepts --deny-tool flags at process spawn time.
+ */
+function restartWithUpdatedDeniedTools() {
+  const tab = tabs.get(activeTabId);
+  if (!tab || !tab.sessionId || tab.isProcessing) return;
+  const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
+  const merged = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
+  window.copilot.chat.restartWithDeniedTools(activeTabId, merged).then(result => {
+    if (!result.success) console.warn('[session-tools] restart failed:', result.error);
+  }).catch(err => {
+    console.warn('[session-tools] restart error:', err.message);
+  });
+}
+
 function initSessionTools() {
   const btn = document.getElementById('btnSessionTools');
   const popup = document.getElementById('sessionToolsPopup');
@@ -37,6 +54,7 @@ function initSessionTools() {
     }
     input.value = '';
     renderSessionTools();
+    restartWithUpdatedDeniedTools();
   }
 
   addBtn.addEventListener('click', addTool);
@@ -52,14 +70,11 @@ function renderSessionTools() {
   const tools = tab.sessionDeniedTools || [];
   if (tools.length === 0) {
     list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">Keine Session-Tools konfiguriert</div>';
-    renderPinnedTools();
     return;
   }
-  const pinnedCount = tools.filter(t => t.pinned).length;
   list.innerHTML = tools.map((t, i) => `
     <div class="session-tools-popup__item">
       <span class="session-tools-popup__item-name" title="${escapeAttr(stripShellWrapper(t.name))}">${escapeHtml(stripShellWrapper(t.name))}</span>
-      <button class="session-tools-popup__pin ${t.pinned ? 'pinned' : ''}" data-idx="${i}" title="${t.pinned ? 'Unpin' : (pinnedCount >= 5 ? 'Max. 5 Pins' : 'Pin')}">📌</button>
       <div class="session-tools-popup__toggle ${t.enabled ? 'active' : ''}" data-idx="${i}" title="${t.enabled ? 'Tool ist blockiert (klicken zum Erlauben)' : 'Tool ist erlaubt (klicken zum Blockieren)'}"></div>
       <button class="session-tools-popup__delete" data-idx="${i}" title="Remove">🗑️</button>
     </div>
@@ -72,22 +87,7 @@ function renderSessionTools() {
       tab.sessionDeniedTools[idx].enabled = !tab.sessionDeniedTools[idx].enabled;
       saveOpenTabs();
       renderSessionTools();
-    });
-  });
-
-  // Pin handlers
-  list.querySelectorAll('.session-tools-popup__pin').forEach(el => {
-    el.addEventListener('click', () => {
-      const idx = parseInt(el.dataset.idx);
-      const tool = tab.sessionDeniedTools[idx];
-      if (tool.pinned) {
-        tool.pinned = false;
-      } else {
-        if (pinnedCount >= 5) return;
-        tool.pinned = true;
-      }
-      saveOpenTabs();
-      renderSessionTools();
+      restartWithUpdatedDeniedTools();
     });
   });
 
@@ -98,32 +98,7 @@ function renderSessionTools() {
       tab.sessionDeniedTools.splice(idx, 1);
       saveOpenTabs();
       renderSessionTools();
-    });
-  });
-
-  renderPinnedTools();
-}
-
-function renderPinnedTools() {
-  const container = document.getElementById('pinnedTools');
-  const tab = tabs.get(activeTabId);
-  if (!container || !tab) return;
-  const tools = (tab.sessionDeniedTools || []).filter(t => t.pinned);
-  if (tools.length === 0) {
-    container.innerHTML = '';
-    return;
-  }
-  container.innerHTML = tools.map(t => {
-    const idx = tab.sessionDeniedTools.indexOf(t);
-    return `<div class="pinned-tool ${t.enabled ? 'active' : ''}" data-idx="${idx}" title="${escapeAttr(stripShellWrapper(t.name))}">${escapeHtml(stripShellWrapper(t.name))}</div>`;
-  }).join('');
-
-  container.querySelectorAll('.pinned-tool').forEach(el => {
-    el.addEventListener('click', () => {
-      const idx = parseInt(el.dataset.idx);
-      tab.sessionDeniedTools[idx].enabled = !tab.sessionDeniedTools[idx].enabled;
-      saveOpenTabs();
-      renderSessionTools();
+      restartWithUpdatedDeniedTools();
     });
   });
 }

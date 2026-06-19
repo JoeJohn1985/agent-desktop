@@ -80,6 +80,10 @@ contextBridge.exposeInMainWorld('copilot', {
      * @param {number} tabId
      */
     stop: (tabId) => ipcRenderer.send('copilot:stop', tabId),
+    /** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with new denied tools, reloads session. */
+    restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('copilot:restartWithDeniedTools', tabId, deniedTools),
+    /** @ipc copilot:silentCommand — Runs a slash command silently, returns {success, text}. */
+    silentCommand: (tabId, command) => ipcRenderer.invoke('copilot:silentCommand', tabId, command),
     /** @ipc copilot:getCwd @returns {Promise<string>} Current working directory */
     getCwd: () => ipcRenderer.invoke('copilot:getCwd'),
     /** @ipc copilot:openCwd — Opens the CWD in the system file explorer. @returns {Promise<void>} */
@@ -316,6 +320,10 @@ contextBridge.exposeInMainWorld('copilot', {
    * @namespace copilot.mcp
    */
   mcp: {
+    /** @ipc mcp:list @returns {Promise<Array<Object>>} All configured MCP servers (copilot mcp list --json) */
+    list: () => ipcRenderer.invoke('mcp:list'),
+    /** @ipc mcp:probe @returns {Promise<Array<Object>>} Configured servers with connectivity status (http/sse reachability) */
+    probe: () => ipcRenderer.invoke('mcp:probe'),
     /** @ipc mcp:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project MCP servers from .github/mcp.json */
     listProject: (cwd) => ipcRenderer.invoke('mcp:listProject', cwd),
   },
@@ -399,97 +407,6 @@ contextBridge.exposeInMainWorld('copilot', {
     write: (level, message) => ipcRenderer.send('log:write', level, message),
   },
 
-  // ── Terminal (interactive PTY) ────────────────────────────
-
-  /**
-   * Interactive PTY terminal — spawns shell sessions, sends slash commands,
-   * handles input/output streaming and resize events.
-   *
-   * @namespace copilot.terminal
-   */
-  terminal: {
-    /** @ipc terminal:available — Checks if node-pty is available. @returns {Promise<boolean>} */
-    available: () => ipcRenderer.invoke('terminal:available'),
-    /**
-     * Spawns a new interactive terminal with an optional slash command.
-     * @ipc terminal:spawn
-     * @param {number} tabId
-     * @param {string} sessionId
-     * @param {string} [slashCommand] - Initial slash command to execute
-     * @returns {Promise<Object>} Spawn result
-     */
-    spawn: (tabId, sessionId, slashCommand) => ipcRenderer.invoke('terminal:spawn', tabId, sessionId, slashCommand),
-    /**
-     * Spawns a background terminal (no UI, for automated commands).
-     * @ipc terminal:spawn-background
-     * @param {number} tabId
-     * @param {string} sessionId
-     * @returns {Promise<Object>}
-     */
-    spawnBackground: (tabId, sessionId) => ipcRenderer.invoke('terminal:spawn-background', tabId, sessionId),
-    /** @ipc terminal:get-buffer @param {number} tabId @returns {Promise<string[]>} Buffered output lines */
-    getBuffer: (tabId) => ipcRenderer.invoke('terminal:get-buffer', tabId),
-    /**
-     * Sends a raw command string to the terminal.
-     * @ipc terminal:send-command
-     * @param {number} tabId
-     * @param {string} command
-     * @returns {Promise<Object>}
-     */
-    sendCommand: (tabId, command) => ipcRenderer.invoke('terminal:send-command', tabId, command),
-    /** @ipc terminal:fetch-context @param {number} tabId @returns {Promise<Object>} Current terminal context */
-    fetchContext: (tabId) => ipcRenderer.invoke('terminal:fetch-context', tabId),
-    /**
-     * Sends a slash command to the Copilot TUI running in the terminal.
-     * @ipc terminal:send-slash
-     * @param {number} tabId
-     * @param {string} command - Slash command (e.g. '/help')
-     * @returns {Promise<Object>}
-     */
-    sendSlash: (tabId, command) => ipcRenderer.invoke('terminal:send-slash', tabId, command),
-    /**
-     * Sends raw input data to the PTY (fire-and-forget).
-     * @ipc terminal:input
-     * @param {number} tabId
-     * @param {string} data - Raw terminal input
-     */
-    input: (tabId, data) => ipcRenderer.send('terminal:input', tabId, data),
-    /**
-     * Resizes the PTY to the given dimensions.
-     * @ipc terminal:resize
-     * @param {number} tabId
-     * @param {number} cols
-     * @param {number} rows
-     */
-    resize: (tabId, cols, rows) => ipcRenderer.send('terminal:resize', tabId, cols, rows),
-    /**
-     * Closes the PTY for a tab (fire-and-forget).
-     * @ipc terminal:close
-     * @param {number} tabId
-     */
-    close: (tabId) => ipcRenderer.send('terminal:close', tabId),
-    /**
-     * Subscribes to PTY output data.
-     * @param {(tabId: number, data: string) => void} cb
-     * @returns {() => void} Unsubscribe function
-     */
-    onData: (cb) => {
-      const handler = (_e, tabId, data) => cb(tabId, data);
-      ipcRenderer.on('terminal:data', handler);
-      return () => ipcRenderer.removeListener('terminal:data', handler);
-    },
-    /**
-     * Subscribes to PTY exit events.
-     * @param {(tabId: number, code: number|null) => void} cb
-     * @returns {() => void} Unsubscribe function
-     */
-    onExit: (cb) => {
-      const handler = (_e, tabId, code) => cb(tabId, code);
-      ipcRenderer.on('terminal:exit', handler);
-      return () => ipcRenderer.removeListener('terminal:exit', handler);
-    },
-  },
-
   // ── Setup ─────────────────────────────────────────────────
 
   /**
@@ -511,15 +428,6 @@ contextBridge.exposeInMainWorld('copilot', {
      * @returns {Promise<{success: boolean, created: string[], skipped: string[], errors: string[]}>}
      */
     createStarterFiles: (categories) => ipcRenderer.invoke('setup:createStarterFiles', categories),
-    /**
-     * Generates personalized skills and agents via Copilot CLI based on user role.
-     * @ipc setup:generatePersonalized
-     * @param {Object} data
-     * @param {string} data.role - User's role description
-     * @param {string[]} [data.missingRoles] - Missing team roles to generate agents for
-     * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
-     */
-    generatePersonalized: (data) => ipcRenderer.invoke('setup:generatePersonalized', data),
     /**
      * Returns prompts for personalized skill/agent generation (non-blocking variant).
      * @ipc setup:startPersonalizedSessions

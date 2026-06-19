@@ -35,6 +35,16 @@ class AcpClient extends EventEmitter {
 
   // ── Session ──────────────────────────────────────────────────
   #sessionId = null;
+  #sessionLoadedInProcess = false; // true once the *current* live process has the session loaded
+  #appliedModel = null; // the model currently applied to the live session via session/set_model
+  #appliedMode = null; // the mode (full ACP id) currently applied via session/set_mode
+  #availableModes = []; // modes.availableModes from the last session/new|load result
+
+  // ── Prompt State ─────────────────────────────────────────────
+  #promptDone = false; // true once copilot:done has been sent for the current prompt
+  #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
+  #cancelRequested = false; // true while a session/cancel is pending for the current prompt
+  #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
 
   // ── Recovery ─────────────────────────────────────────────────
   #restartTimestamps = [];
@@ -73,6 +83,10 @@ class AcpClient extends EventEmitter {
     if (this.#state !== 'dead') return;
     this.#stopping = false;
     this.#state = 'starting';
+    // A fresh process has no session loaded yet, even if we remember a sessionId.
+    this.#sessionLoadedInProcess = false;
+    this.#appliedModel = null;
+    this.#appliedMode = null;
 
     const args = ['--acp', '--allow-all'];
     if (this.#options.model) args.push('--model', this.#options.model);
@@ -105,8 +119,10 @@ class AcpClient extends EventEmitter {
       }
     });
 
-    // Exit handler
+    // Exit handler — ignore stale events from a process we've already
+    // replaced or intentionally killed (prevents restart cascades on cancel).
     proc.on('close', (code, signal) => {
+      if (proc !== this.#process) return;
       this.#handleExit(code, signal);
     });
 
@@ -162,23 +178,26 @@ class AcpClient extends EventEmitter {
   /**
    * Creates a new session.
    * @param {string} [cwd] - Override working directory
-   * @param {Array} [mcpServers=[]] - MCP server configurations
+   * @param {Array} [mcpServers] - MCP server configurations (defaults to configured ones)
    * @returns {Promise<Object>} Session result (sessionId, models, etc.)
    */
-  async newSession(cwd, mcpServers = []) {
+  async newSession(cwd, mcpServers) {
     await this.#ensureReady();
     const result = await this.#sendRequest('session/new', {
       cwd: cwd || this.#cwd,
-      mcpServers,
+      mcpServers: mcpServers ?? this.#options.mcpServers ?? [],
     });
-    if (result && result.sessionId) {
-      this.#sessionId = result.sessionId;
-      // Emit session ID as result event for renderer compatibility
-      this.#emitToRenderer({
-        type: 'result',
-        sessionId: result.sessionId,
-      });
+    // sessionId may live at result.sessionId or result.session.id depending on ACP version
+    const sessionId = result?.sessionId ?? result?.session?.id ?? result?.id;
+    if (sessionId) {
+      this.#sessionId = sessionId;
+      this.#sessionLoadedInProcess = true;
+      this.#emitToRenderer({ type: 'result', sessionId });
+    } else {
+      console.error(`[acp:tab${this.#tabId}] session/new: no sessionId in result`, JSON.stringify(result));
     }
+    this.#captureModes(result);
+    this.#emitCurrentModel(result);
     return result;
   }
 
@@ -186,28 +205,88 @@ class AcpClient extends EventEmitter {
    * Loads an existing session. Falls back to newSession on failure.
    * @param {string} sessionId
    * @param {string} [cwd]
-   * @param {Array} [mcpServers=[]]
+   * @param {Array} [mcpServers] - MCP server configurations (defaults to configured ones)
    * @returns {Promise<Object>}
    */
-  async loadSession(sessionId, cwd, mcpServers = []) {
+  async loadSession(sessionId, cwd, mcpServers) {
     await this.#ensureReady();
+    // session/load replays the conversation history as session/update events.
+    // Suppress them so the renderer doesn't duplicate the existing chat.
+    this.#suppressReplay = true;
     try {
       const result = await this.#sendRequest('session/load', {
         sessionId,
         cwd: cwd || this.#cwd,
-        mcpServers,
+        mcpServers: mcpServers ?? this.#options.mcpServers ?? [],
       });
-      if (result && result.sessionId) {
-        this.#sessionId = result.sessionId;
-        this.#emitToRenderer({
-          type: 'result',
-          sessionId: result.sessionId,
-        });
-      }
+      // session/load does not echo back the sessionId — it returns models/modes/config.
+      // The session is now active under the ID we passed in.
+      this.#sessionId = sessionId;
+      this.#sessionLoadedInProcess = true;
+      this.#emitToRenderer({ type: 'result', sessionId });
+      this.#captureModes(result);
+      this.#emitCurrentModel(result);
       return result;
     } catch (err) {
       console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
+      // Tell the renderer the previous conversation could not be restored,
+      // so it can inform the user before a fresh session is created.
+      this.#emitToRenderer({ type: 'session.restore_failed', data: { sessionId } });
       return this.newSession(cwd, mcpServers);
+    } finally {
+      this.#suppressReplay = false;
+    }
+  }
+
+  /**
+   * Applies the configured model to the active session via `session/set_model`,
+   * unless it is already applied. No-op if no model is configured or no session.
+   */
+  async #applyModel() {
+    const model = this.#options.model;
+    if (!model || !this.#sessionId || model === this.#appliedModel) return;
+    try {
+      await this.#sendRequest('session/set_model', { sessionId: this.#sessionId, modelId: model });
+      this.#appliedModel = model;
+    } catch (err) {
+      console.warn(`[acp:tab${this.#tabId}] session/set_model(${model}) failed:`, err.message);
+    }
+  }
+
+  /** Captures the available session modes from a session/new|load result. */
+  #captureModes(result) {
+    const modes = result?.modes?.availableModes;
+    if (Array.isArray(modes) && modes.length) this.#availableModes = modes;
+  }
+
+  /**
+   * Resolves a short mode id ('agent'|'plan'|'autopilot') to the full ACP mode id
+   * (e.g. ".../session-modes#autopilot") using the session's available modes.
+   * @param {string} shortId
+   * @returns {string|null}
+   */
+  #resolveModeId(shortId) {
+    if (!shortId) return null;
+    const match = this.#availableModes.find(
+      (m) => m.id === shortId || m.id?.endsWith('#' + shortId) || m.name?.toLowerCase() === shortId,
+    );
+    return match?.id || null;
+  }
+
+  /**
+   * Applies the configured session mode via `session/set_mode`, unless already
+   * applied. No-op if no mode is configured, no session, or mode is unknown.
+   */
+  async #applyMode() {
+    const shortId = this.#options.mode;
+    if (!shortId || !this.#sessionId) return;
+    const modeId = this.#resolveModeId(shortId);
+    if (!modeId || modeId === this.#appliedMode) return;
+    try {
+      await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
+      this.#appliedMode = modeId;
+    } catch (err) {
+      console.warn(`[acp:tab${this.#tabId}] session/set_mode(${shortId}) failed:`, err.message);
     }
   }
 
@@ -232,46 +311,98 @@ class AcpClient extends EventEmitter {
     if (!this.#sessionId) {
       throw new Error('No active session. Call newSession() or loadSession() first.');
     }
+    // After a process restart the live process has no session loaded yet,
+    // even though we remember the sessionId. Reload it before prompting.
+    if (!this.#sessionLoadedInProcess) {
+      await this.loadSession(this.#sessionId);
+    }
+
+    // Ensure the session uses the selected model. session/load restores the
+    // session's originally-stored model and ignores the --model spawn flag,
+    // so we must explicitly set it here (also covers runtime model switches).
+    await this.#applyModel();
+    // Apply the selected session mode (agent/plan/autopilot) the same way.
+    await this.#applyMode();
 
     this.#state = 'busy';
+    this.#promptDone = false;
+    this.#cancelRequested = false;
     try {
       const result = await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text }],
       });
       this.#state = 'ready';
-      // Signal done to renderer
-      this.#sendToRenderer('copilot:done', this.#tabId, 0);
+      // A cancelled turn returns stopReason "cancelled" → report code -1 to the UI.
+      const cancelled = this.#cancelRequested || result?.stopReason === 'cancelled';
+      this.#cancelRequested = false;
+      // If agent_turn_end already arrived, copilot:done was already sent.
+      // Otherwise send it now (session/prompt response = end of turn).
+      if (!this.#promptDone) {
+        this.#promptDone = true;
+        this.#sendToRenderer('copilot:done', this.#tabId, cancelled ? -1 : 0);
+      }
       return result;
     } catch (err) {
       this.#state = this.#process ? 'ready' : 'dead';
-      // Signal error-done to renderer
-      this.#sendToRenderer('copilot:done', this.#tabId, 1);
+      // If cancel() already sent copilot:done(-1), don't also send an error-done.
+      if (!this.#promptDone) {
+        this.#promptDone = true;
+        this.#sendToRenderer('copilot:done', this.#tabId, 1);
+      }
       throw err;
     }
   }
 
   /**
-   * Cancels the current prompt by killing the process and restarting.
+   * Cancels the current prompt via the ACP `session/cancel` notification.
+   * This aborts the running turn without killing the process, so the session
+   * (and its conversation context) stays alive. The in-flight session/prompt
+   * request resolves with stopReason "cancelled", which emits copilot:done(-1).
    */
   async cancel() {
-    const sessionId = this.#sessionId;
-    this.#rejectAllPending(new Error('Cancelled'));
-    this.#killProcess();
-    this.#state = 'dead';
-
-    // Signal done (cancelled) to renderer
-    this.#sendToRenderer('copilot:done', this.#tabId, -1);
-
-    // Restart and reload session
-    try {
-      await this.start();
-      if (sessionId) {
-        await this.loadSession(sessionId);
+    if (this.#state !== 'busy' || !this.#process || !this.#sessionId) {
+      // Nothing in flight — emit a done(-1) so the UI unlocks anyway.
+      if (!this.#promptDone) {
+        this.#promptDone = true;
+        this.#sendToRenderer('copilot:done', this.#tabId, -1);
       }
-    } catch (err) {
-      console.error(`[acp:tab${this.#tabId}] restart after cancel failed:`, err.message);
+      return;
     }
+    this.#cancelRequested = true;
+    this.#sendNotification('session/cancel', { sessionId: this.#sessionId });
+  }
+
+  /**
+   * Sends a slash command silently (without rendering to the chat UI).
+   * Collects and returns the raw response text.
+   */
+  async silentCommand(command) {
+    if (this.#state === 'busy') throw new Error('Cannot run command while busy');
+    await this.#ensureReady();
+    if (!this.#sessionId) throw new Error('No active session');
+    if (!this.#sessionLoadedInProcess) {
+      await this.loadSession(this.#sessionId);
+    }
+
+    this.#state = 'busy';
+    this.#promptDone = false;
+    this.#contextQueryCollector = [];
+    try {
+      await this.#sendRequest('session/prompt', {
+        sessionId: this.#sessionId,
+        prompt: [{ type: 'text', text: command }],
+      });
+      return this.#contextQueryCollector.join('');
+    } finally {
+      this.#contextQueryCollector = null;
+      this.#promptDone = true;
+      this.#state = this.#process ? 'ready' : 'dead';
+    }
+  }
+
+  async getContextInfo() {
+    return this.silentCommand('/context');
   }
 
   // ── Private: JSON-RPC Protocol ───────────────────────────────
@@ -313,6 +444,25 @@ class AcpClient extends EventEmitter {
         reject(err);
       }
     });
+  }
+
+  /**
+   * Sends a JSON-RPC notification (no id, no response expected).
+   * @param {string} method
+   * @param {Object} params
+   * @returns {boolean} true if written successfully
+   */
+  #sendNotification(method, params) {
+    if (!this.#process || !this.#process.stdin || this.#process.stdin.destroyed) {
+      return false;
+    }
+    try {
+      this.#process.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
+      return true;
+    } catch (err) {
+      console.warn(`[acp:tab${this.#tabId}] notification ${method} failed:`, err.message);
+      return false;
+    }
   }
 
   // ── Private: Line Parser ─────────────────────────────────────
@@ -359,10 +509,17 @@ class AcpClient extends EventEmitter {
     const eventType = update.sessionUpdate || update.type;
     const content = update.content || update.data || {};
 
+    // During session/load the agent replays the conversation history.
+    // Skip it — the renderer already holds the chat from its own state.
+    if (this.#suppressReplay) return;
+
     switch (eventType) {
       case 'agent_message_chunk': {
-        // → assistant.message_delta { deltaContent }
         const text = content.text || (typeof content === 'string' ? content : '');
+        if (this.#contextQueryCollector) {
+          this.#contextQueryCollector.push(text);
+          break;
+        }
         this.#emitToRenderer({
           type: 'assistant.message_delta',
           data: { deltaContent: text },
@@ -381,13 +538,13 @@ class AcpClient extends EventEmitter {
       }
 
       case 'tool_call': {
-        // → tool.execution_start { toolCallId, toolName, arguments }
+        // ACP tool_call fields live directly on `update`, not in `content`.
         this.#emitToRenderer({
           type: 'tool.execution_start',
           data: {
-            toolCallId: content.toolCallId || content.id || '',
-            toolName: content.name || content.toolName || '',
-            arguments: content.input || content.arguments || {},
+            toolCallId: update.toolCallId || update.id || '',
+            toolName: AcpClient.#mapToolKind(update.kind, update.title),
+            arguments: update.rawInput || update.input || {},
           },
         });
         break;
@@ -395,17 +552,16 @@ class AcpClient extends EventEmitter {
 
       case 'tool_call_update': {
         // → tool.execution_complete { toolCallId, toolName, success, result }
-        const _isCompleted = content.status === 'completed' || content.status === undefined;
         this.#emitToRenderer({
           type: 'tool.execution_complete',
           data: {
-            toolCallId: content.toolCallId || content.id || '',
-            toolName: content.name || content.toolName || '',
-            success: content.error ? false : true,
+            toolCallId: update.toolCallId || update.id || '',
+            toolName: AcpClient.#mapToolKind(update.kind, update.title),
+            success: update.error ? false : true,
             result: {
-              content: content.output || content.result || '',
+              content: AcpClient.#extractToolContent(update.content),
             },
-            error: content.error || undefined,
+            error: update.error || undefined,
           },
         });
         break;
@@ -429,7 +585,7 @@ class AcpClient extends EventEmitter {
       }
 
       case 'agent_message': {
-        // Final complete message
+        if (this.#contextQueryCollector) break;
         this.#emitToRenderer({
           type: 'assistant.message',
           data: {
@@ -441,6 +597,7 @@ class AcpClient extends EventEmitter {
       }
 
       case 'agent_turn_start': {
+        if (this.#contextQueryCollector) break;
         this.#emitToRenderer({
           type: 'assistant.turn_start',
           data: {},
@@ -449,10 +606,16 @@ class AcpClient extends EventEmitter {
       }
 
       case 'agent_turn_end': {
+        if (this.#contextQueryCollector) break;
         this.#emitToRenderer({
           type: 'assistant.turn_end',
           data: {},
         });
+        // Signal completion if session/prompt hasn't already done so.
+        if (!this.#promptDone) {
+          this.#promptDone = true;
+          this.#sendToRenderer('copilot:done', this.#tabId, this.#cancelRequested ? -1 : 0);
+        }
         break;
       }
 
@@ -488,12 +651,75 @@ class AcpClient extends EventEmitter {
         break;
       }
 
+      case 'user_message_chunk': {
+        // Echo of the user's own message (e.g. during session/load history replay) — ignore.
+        break;
+      }
+
       default: {
-        // Pass through unknown events with a generic type
         console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType}`);
         break;
       }
     }
+  }
+
+  // ── Private: Tool Mapping Helpers ────────────────────────────
+
+  /**
+   * Maps an ACP tool `kind` to the tool name the renderer's toolIcon expects.
+   * @param {string} kind - ACP tool kind (read, edit, search, execute, fetch, ...)
+   * @param {string} [title] - Human-readable title (fallback)
+   * @returns {string}
+   */
+  static #mapToolKind(kind, title) {
+    const map = {
+      read: 'view',
+      edit: 'edit',
+      create: 'create',
+      search: 'grep',
+      execute: 'powershell',
+      fetch: 'web_fetch',
+      think: 'task',
+    };
+    return map[kind] || kind || title || '';
+  }
+
+  /**
+   * Extracts text content from an ACP tool_call_update `content` array.
+   * @param {Array|string} content - ACP content array or string
+   * @returns {string}
+   */
+  static #extractToolContent(content) {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+      .map((item) => {
+        const inner = item?.content ?? item;
+        if (typeof inner === 'string') return inner;
+        return inner?.text || '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /**
+   * Extracts the current model from a session/new or session/load result and
+   * emits it to the renderer so the tab header can show the active model.
+   * @param {Object} result - The JSON-RPC result of session/new or session/load
+   */
+  #emitCurrentModel(result) {
+    const models = result?.models;
+    let modelId = models?.currentModelId;
+    if (!modelId) {
+      const modelOption = (result?.configOptions || []).find((o) => o.id === 'model');
+      modelId = modelOption?.currentValue;
+    }
+    if (!modelId) return;
+    // Resolve the human-readable name if available.
+    const match = (models?.availableModels || []).find((m) => m.modelId === modelId);
+    const name = match?.name || modelId;
+    this.#emitToRenderer({ type: 'session.tools_updated', data: { model: name } });
   }
 
   // ── Private: Emit to Renderer ────────────────────────────────
