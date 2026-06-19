@@ -68,6 +68,38 @@ describe('HTML CSS-Link Integrität', () => {
   });
 });
 
+// ── Renderer-JS Browser-Kompatibilität ───────────────────────
+
+describe('Renderer-JS ist browser-kompatibel (kein require)', () => {
+  // Der Renderer läuft mit nodeIntegration: false und ohne Bundler,
+  // daher ist require() nicht verfügbar. Ein require(-Aufruf wirft zur
+  // Laufzeit ReferenceError und bricht die gesamte Script-Ausführung ab.
+  // Dieser Guard fängt genau diese Fehlerklasse statisch ab.
+  const rendererDir = path.join(ROOT, 'renderer');
+  const rendererJsFiles = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.js')) rendererJsFiles.push(p);
+    }
+  })(rendererDir);
+
+  // Kommentare entfernen, damit erklärende Erwähnungen von require() nicht anschlagen
+  function stripComments(src) {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  test('mindestens eine Renderer-JS-Datei gefunden', () => {
+    expect(rendererJsFiles.length).toBeGreaterThan(0);
+  });
+
+  test.each(rendererJsFiles)('%s nutzt kein require()', (file) => {
+    const code = stripComments(fs.readFileSync(file, 'utf-8'));
+    expect(code).not.toMatch(/\brequire\s*\(/);
+  });
+});
+
 // ── IPC-Konsistenz: preload → main ──────────────────────────
 
 describe('IPC-Konsistenz (preload → main)', () => {
@@ -132,8 +164,6 @@ describe('HTML-Element-IDs die im JS referenziert werden', () => {
   // Critical IDs that app.js relies on
   const criticalIds = [
     'chatInput',
-    'terminalPanel',
-    'terminalBody',
     'sessionList',
     'sessionCount',
     'sessionSearch',

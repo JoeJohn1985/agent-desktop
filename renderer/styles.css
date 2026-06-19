@@ -1816,6 +1816,69 @@ mark.chat-search-highlight--active {
   font-size: 10px;
   color: var(--text-muted);
 }
+/* Mode dropdown: stack label + description vertically */
+.mode-dropdown .model-dropdown__item,
+.context-dropdown .model-dropdown__item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.model-dropdown__desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* ── Context Info Panel ───────────────────────────────── */
+.context-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  min-width: 380px;
+  max-width: 520px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  animation: model-dropdown-in 0.12s ease-out;
+}
+.context-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.context-panel__close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.context-panel__close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.context-panel__body {
+  padding: 10px 12px;
+  margin: 0;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-y: auto;
+  white-space: pre;
+}
 
 /* ── Chat Input Bar ───────────────────────────────────── */
 .chat-input-bar {
@@ -1965,10 +2028,111 @@ mark.chat-search-highlight--active {
   align-items: center;
 }
 
-.pinned-tools {
+
+.session-actions__usage {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  cursor: default;
+}
+.session-actions__cost-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.session-actions__cost-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Costs Page (eigene Page wie der Marketplace) ────────── */
+.costs-view__page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 20px;
+}
+.costs-view__breakdown-section {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
+}
+.costs-view__breakdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.costs-view__toggle {
+  display: flex;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.costs-view__toggle-btn {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.costs-view__toggle-btn--active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+.costs-view__clear-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+#costsChart {
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+.costs-breakdown__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.costs-breakdown__row:last-child { border-bottom: none; }
+.costs-breakdown__name {
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.costs-breakdown__name--total {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.costs-breakdown__value {
+  color: var(--text-primary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.costs-breakdown__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .pinned-tool {
@@ -2148,7 +2312,7 @@ mark.chat-search-highlight--active {
   color: #fff;
 }
 
-.session-tools-popup__pin {
+.session-tools-popup__pin--unused {
   width: 22px;
   height: 22px;
   border: none;

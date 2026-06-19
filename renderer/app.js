@@ -20,10 +20,6 @@ console.log = (...args) => { _rendererOrigLog(...args); _rendererLog('info', arg
 console.warn = (...args) => { _rendererOrigWarn(...args); _rendererLog('warn', args); };
 console.error = (...args) => { _rendererOrigError(...args); _rendererLog('error', args); };
 
-// ── Terminal Panel State ──────────────────────────────────────
-// Per-tab terminal state is stored in the tab object:
-//   tab.terminal = { instance, fitAddon, bodyEl, alive }
-
 // ── Skills Definition ────────────────────────────────────────
 /** @type {Array<{id: string, name: string, icon: string, description: string, source: string, dirName?: string}>} Skill definitions loaded from main process. */
 let skills = [];
@@ -35,6 +31,8 @@ let agents = [];
 // ── MCP Servers State ────────────────────────────────────────
 /** @type {Array<{name: string, status: string}>} MCP server list for the active tab. */
 let mcpServers = [];
+/** @type {Array<{name: string, type: string, status: string}>} User/workspace MCP servers from `copilot mcp list`. */
+let globalMcpServers = [];
 
 // ── Plugins State ────────────────────────────────────────────
 /** @type {Array<{success: boolean, marketplace: string, name: string, plugins: Array, error?: string}>} Marketplace browse results. */
@@ -72,7 +70,7 @@ let richTextMode = false;
 /**
  * Map of all open chat tabs. Each entry holds the tab's DOM elements, session
  * state, processing flags, terminal reference, and context metadata.
- * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, autopilot: boolean, context: Object}>}
+ * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, mode: string, context: Object}>}
  */
 const tabs = new Map();
 /** @type {Map<string, {toolName: string, arguments: Object}>} Pending tool calls awaiting completion, keyed by toolCallId. */
@@ -213,14 +211,7 @@ async function restoreOpenTabs() {
         }
         activeSessionId = t.sessionId;
         loadTodos(t.sessionId);
-        // Render pinned tools now that sessionDeniedTools are loaded
-        renderPinnedTools();
-        // Start background terminal for restored tab
-        if (t.sessionId) {
-          copilot.terminal.spawnBackground(tabId, t.sessionId).catch(e => {
-            console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
-          });
-        }
+        renderSessionTools();
         // Display session context for restored tabs
         if (t.sessionId) displaySessionContext(tab, t.sessionId);
       }
@@ -493,39 +484,6 @@ function playNotificationSound() {
   } catch (e) { console.warn('[audio] Benachrichtigungston fehlgeschlagen:', e.message); }
 }
 
-// ── Context Color Helper ─────────────────────────────────────
-/**
- * Return a CSS color string for a context-usage percentage (red/orange/green).
- * @param {number} percent - Context usage 0–100.
- * @returns {string} CSS color hex code.
- */
-function contextColor(percent) {
-  return percent > 80 ? '#f38ba8' : percent > 60 ? '#fab387' : '#a6e3a1';
-}
-
-// ── Context Category HTML Builder ────────────────────────────
-/**
- * Build an HTML snippet showing token-usage bars for each context category.
- * @param {Array<{name: string, tokens: number, percent: number}>} categories
- * @returns {string} HTML string (must be sanitized before insertion).
- */
-function buildContextCategoryHtml(categories) {
-  if (!categories || !categories.length) return '';
-  let html = '<div style="border-top:1px solid var(--border-color,#45475a);padding-top:10px;">';
-  for (const cat of categories) {
-    const catColor = cat.name === 'Free Space' ? '#a6e3a1' : cat.name === 'Messages' ? '#89b4fa' : cat.name === 'Buffer' ? '#a6adc8' : '#f5c2e7';
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;">
-      <span style="color:var(--text-secondary,#a6adc8);">${escapeHtml(cat.name)}</span>
-      <span style="font-weight:600;">${cat.tokens} <span style="color:${catColor};">(${cat.percent}%)</span></span>
-    </div>
-    <div style="background:var(--bg-tertiary,#313244);border-radius:3px;height:4px;overflow:hidden;margin-bottom:8px;">
-      <div style="width:${cat.percent}%;height:100%;background:${catColor};border-radius:3px;"></div>
-    </div>`;
-  }
-  html += '</div>';
-  return html;
-}
-
 // ── Generic Tag List Rendering ───────────────────────────────
 function stripShellWrapper(name) {
   const m = name.match(/^shell\((.+)\)$/);
@@ -626,9 +584,14 @@ async function createTab(label) {
     _unlockBtnTimer: null,
     _unlockBtnEl: null,
     allowedTools: new Set(),
-    sessionDeniedTools: [],  // per-session denied tools [{name, enabled}]
-    autopilot: false,
-    selectedModel: DEFAULT_MODEL_ID,
+    sessionDeniedTools: [],
+    mode: DEFAULT_MODE_ID,
+    _lastUsageParsed: null,
+    _lastUsageText: null,
+    _lastUsageTokens: null,
+    _creditTotal: 0,
+    _sessionName: null,
+    selectedModel: getDefaultModelId(),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -665,32 +628,13 @@ function switchTab(tabId) {
   // If plugins view is active, switch back to chat view
   switchToChatView();
 
-  const panel = document.getElementById('terminalPanel');
-  const body = document.getElementById('terminalBody');
-
   // Hide all stream outputs, show only active
   tabs.forEach((tab, id) => {
     tab.streamEl.classList.toggle('stream-output--active', id === tabId);
-    // Hide all terminal bodies
-    if (tab.terminal && tab.terminal.bodyEl) {
-      tab.terminal.bodyEl.style.display = 'none';
-    }
   });
 
   activeTabId = tabId;
   const activeTab = tabs.get(tabId);
-
-  // Show/hide terminal panel based on whether this tab has a visible terminal
-  if (activeTab && activeTab.terminal && activeTab.terminalVisible !== false) {
-    activeTab.terminal.bodyEl.style.display = '';
-    panel.classList.add('terminal-panel--open');
-    // Re-fit after showing
-    requestAnimationFrame(() => {
-      if (activeTab.terminal.fitAddon) activeTab.terminal.fitAddon.fit();
-    });
-  } else {
-    panel.classList.remove('terminal-panel--open');
-  }
 
   // Load todos and context for this tab's session
   if (activeTab && activeTab.sessionId) {
@@ -705,26 +649,16 @@ function switchTab(tabId) {
   // Reload project skills/agents for the newly active tab's CWD
   loadProjectSkillsAndAgents(activeTab?.cwd || null);
   
-  // Update context button for this tab
-  const ctxBtn = document.getElementById('btnSlashContext');
-  if (activeTab && activeTab.contextPercent != null) {
-    const pct = activeTab.contextPercent;
-    const color = contextColor(pct);
-    ctxBtn.innerHTML = `📊 <span style="color:${color}">${pct}%</span>`;
-  } else {
-    ctxBtn.textContent = '📊 Context';
-  }
-
   // Refresh session tools list for this tab
   renderSessionTools();
 
-  // Update MCP servers for this tab
-  mcpServers = activeTab?.context?.mcpServers || [];
+  // Update MCP servers for this tab: global (user/workspace) servers as base,
+  // plus any tab-specific servers — deduplicated by name (global wins).
+  mcpServers = mergeMcpByName(globalMcpServers, activeTab?.context?.mcpServers || []);
   renderMcpServers();
 
-  // Update autopilot button for this tab
-  const autopilotBtn = document.getElementById('btnAutopilot');
-  autopilotBtn.classList.toggle('session-actions__btn--active', !!activeTab?.autopilot);
+  // Update mode select button for this tab
+  updateModeSelectBtn();
 
   // Update model select button for this tab
   updateModelSelectBtn();
@@ -766,6 +700,11 @@ function switchTab(tabId) {
   } else {
     chatInput?.focus();
   }
+
+  updateUsageDisplay(activeTab?._lastUsageParsed ?? null, activeTab?._lastUsageTokens ?? null, activeTab?._lastUsageText ?? null);
+  if (activeTab?.sessionId && !activeTab.isProcessing) {
+    refreshUsageDisplay(tabId);
+  }
 }
 
 /**
@@ -780,14 +719,6 @@ function closeTab(tabId) {
   stopInactivityMonitor(tabId);
   try { copilot.chat.stop(tabId); } catch (_) {}
   tab.streamEl.remove();
-
-  // Clean up terminal if present
-  if (tab.terminal) {
-    copilot.terminal.close(tabId);
-    if (tab.terminal.instance) tab.terminal.instance.dispose();
-    if (tab.terminal.bodyEl) tab.terminal.bodyEl.remove();
-    tab.terminal = null;
-  }
 
   tabs.delete(tabId);
 
@@ -1146,18 +1077,6 @@ function sendMessage() {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
 
-  // Detect slash commands → open terminal
-  if (text.startsWith('/')) {
-    if (richTextMode) {
-      richInput.innerHTML = '';
-    } else {
-      input.value = '';
-      input.style.height = 'auto';
-    }
-    openTerminal(activeTabId, tab.sessionId, text);
-    return;
-  }
-
   if (tab.isProcessing) return;
 
   // Show user message in stream
@@ -1243,7 +1162,7 @@ function sendMessage() {
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
     addDirs: getEffectiveExtraDirs(),
-    autopilot: tab.autopilot || undefined,
+    mode: tab.mode || DEFAULT_MODE_ID,
     model: tab.selectedModel || DEFAULT_MODEL_ID,
     cwd: tab.cwd || undefined,
   });
@@ -1524,11 +1443,6 @@ function initCopilotIPC() {
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           saveOpenTabs();
-          // Start background terminal for this session
-          copilot.terminal.spawnBackground(tabId, event.sessionId).catch(e => {
-            console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
-            showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
-          });
           // Show todos panel for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
@@ -1536,6 +1450,15 @@ function initCopilotIPC() {
           }
         }
         break;
+
+      case 'session.restore_failed': {
+        const el = document.createElement('div');
+        el.className = 'stream-unlock-info';
+        el.textContent = 'ℹ️ Frühere Session konnte nicht wiederhergestellt werden — eine neue Session wurde gestartet.';
+        tab.streamEl.insertBefore(el, tab.statusEl);
+        scrollToBottom(tab.streamEl);
+        break;
+      }
 
       case 'error': {
         const errEl = document.createElement('div');
@@ -1553,12 +1476,26 @@ function initCopilotIPC() {
 
     stopInactivityMonitor(tabId);
     tab.isProcessing = false;
+    // Flush any pending throttled markdown render so the final streamed
+    // chunks aren't lost when the response element is cleared below.
+    if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
+    if (tab._responseEl && tab._responseRaw) {
+      tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+    }
     tab._responseEl = null;
+    tab._responseRaw = '';
     tab._thinkingEl = null;
     tab._thinkingDetails = null;
     tab.statusEl.style.display = 'none';
 
-    if (code !== 0) {
+    if (code === -1) {
+      // Cancelled by user — keep partial output, show an "aborted" indicator.
+      const el = document.createElement('div');
+      el.className = 'stream-unlock-info';
+      el.textContent = '⏹ Antwort abgebrochen';
+      tab.streamEl.insertBefore(el, tab.statusEl);
+      setTabStatus(tabId, 'done');
+    } else if (code !== 0) {
       const el = document.createElement('div');
       el.className = 'stream-error';
       el.textContent = `[Prozess beendet mit Code ${code}]`;
@@ -1576,6 +1513,12 @@ function initCopilotIPC() {
     // Play sound if tab finished in background
     if (tabId !== activeTabId) {
       playNotificationSound();
+    }
+
+    if (code === 0) {
+      // Always refresh so cost tracking works for background tabs too.
+      // updateUsageDisplay() inside only updates the visible bar for the active tab.
+      refreshUsageDisplay(tabId);
     }
   });
 }
@@ -1604,6 +1547,39 @@ const DEFAULT_MODELS = [
 
 function getAvailableModels() {
   return DEFAULT_MODELS;
+}
+
+// ── Session Modes (Agent / Plan / Autopilot) ──────────────────
+const DEFAULT_MODE_ID = 'agent';
+const SESSION_MODES = [
+  { id: 'agent', label: 'Agent', short: '🤖 Agent', desc: 'Standard — dialogorientiert' },
+  { id: 'plan', label: 'Plan', short: '📋 Plan', desc: 'Plant mehrstufige Aufgaben' },
+  { id: 'autopilot', label: 'Autopilot', short: '🚀 Autopilot', desc: 'Autonom bis Task-Abschluss (experimentell)' },
+];
+
+/**
+ * Update the tab-header mode select button to reflect the active tab's mode.
+ * @param {string} [tabId]
+ */
+function updateModeSelectBtn(tabId) {
+  const btn = document.getElementById('btnModeSelect');
+  if (!btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  const modeId = tab?.mode || DEFAULT_MODE_ID;
+  const found = SESSION_MODES.find(m => m.id === modeId);
+  btn.textContent = found ? found.short : '🤖 Agent';
+  // Highlight when not in the default Agent mode.
+  btn.classList.toggle('session-actions__btn--active', modeId !== DEFAULT_MODE_ID);
+}
+
+/**
+ * The default model new tabs start with — configurable in settings,
+ * falling back to DEFAULT_MODEL_ID if unset or invalid.
+ * @returns {string}
+ */
+function getDefaultModelId() {
+  const configured = getSettings().defaultModel;
+  return DEFAULT_MODELS.some(m => m.id === configured) ? configured : DEFAULT_MODEL_ID;
 }
 
 /**
@@ -1685,6 +1661,284 @@ function initTabModelSelector() {
     setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
   });
 }
+
+/**
+ * Initialize the tab-specific mode selector (Agent / Plan / Autopilot).
+ * Sets tab.mode, which is sent to the ACP process via session/set_mode on the
+ * next sendMessage() call.
+ */
+function initTabModeSelector() {
+  const btn = document.getElementById('btnModeSelect');
+  if (!btn) return;
+
+  let activeCloseHandler = null;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const existing = document.querySelector('.mode-dropdown');
+    if (existing) {
+      existing.remove();
+      if (activeCloseHandler) {
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
+      }
+      return;
+    }
+
+    const openedForTabId = activeTabId;
+    const tab = tabs.get(openedForTabId);
+    const currentMode = tab?.mode || DEFAULT_MODE_ID;
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'model-dropdown model-dropdown--below mode-dropdown';
+
+    SESSION_MODES.forEach(m => {
+      const isActive = currentMode === m.id;
+      const item = document.createElement('div');
+      item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.short)}</span><span class="model-dropdown__desc">${escapeHtml(m.desc)}</span>`;
+      item.addEventListener('click', () => {
+        dropdown.remove();
+        if (activeCloseHandler) {
+          document.removeEventListener('click', activeCloseHandler, true);
+          activeCloseHandler = null;
+        }
+        const t = tabs.get(openedForTabId);
+        if (!t) return;
+        t.mode = m.id;
+        updateModeSelectBtn(openedForTabId);
+      });
+      dropdown.appendChild(item);
+    });
+
+    btn.closest('.model-select-wrapper').appendChild(dropdown);
+
+    activeCloseHandler = (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== btn) {
+        dropdown.remove();
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
+      }
+    };
+    setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
+  });
+}
+
+// ── Context Info ───────────────────────────────────────────
+
+/**
+ * Initialize the context info button — queries /context silently and shows
+ * the result in a popup overlay.
+ */
+const CONTEXT_ACTIONS = [
+  { id: 'show',    label: '📊 Kontext anzeigen',   desc: 'Token-Auslastung im Detail' },
+  { id: 'compact', label: '📦 Compact',            desc: 'Konversation zusammenfassen, Kontext freigeben' },
+  { id: 'clear',   label: '🗑️ Clear',              desc: 'Konversation löschen, Kontext zurücksetzen' },
+];
+
+function parseContextPercent(text) {
+  const m = text.match(/(\d+)%\)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function updateContextButton(text) {
+  const btn = document.getElementById('btnContextInfo');
+  if (!btn) return;
+  const pct = parseContextPercent(text);
+  btn.textContent = pct != null ? `📊 ${pct}%` : '📊 Kontext';
+}
+
+async function runContextAction(actionId) {
+  const btn = document.getElementById('btnContextInfo');
+  const tab = tabs.get(activeTabId);
+  if (!tab || tab.isProcessing) return;
+
+  btn.classList.add('session-actions__btn--loading');
+  const origText = btn.textContent;
+  btn.textContent = '⏳ …';
+
+  try {
+    if (actionId === 'show') {
+      const result = await window.copilot.chat.silentCommand(activeTabId, '/context');
+      if (result.success) {
+        updateContextButton(result.text);
+        showContextPanel(result.text);
+      }
+    } else if (actionId === 'compact') {
+      const result = await window.copilot.chat.silentCommand(activeTabId, '/compact');
+      // /compact response may contain context info; also query explicitly
+      const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context');
+      if (ctx.success) updateContextButton(ctx.text);
+    } else if (actionId === 'clear') {
+      await window.copilot.chat.silentCommand(activeTabId, '/clear');
+      const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context');
+      if (ctx.success) updateContextButton(ctx.text);
+    }
+  } catch (err) {
+    console.warn('[context]', err.message);
+  } finally {
+    btn.classList.remove('session-actions__btn--loading');
+    // If button text wasn't updated by updateContextButton, restore it
+    if (btn.textContent === '⏳ …') btn.textContent = origText;
+  }
+}
+
+function showContextPanel(text) {
+  let panel = document.getElementById('contextPanel');
+  if (panel) panel.remove();
+
+  const btn = document.getElementById('btnContextInfo');
+  panel = document.createElement('div');
+  panel.id = 'contextPanel';
+  panel.className = 'context-panel';
+  panel.innerHTML = `
+    <div class="context-panel__header">
+      <span>Kontext-Auslastung</span>
+      <button class="context-panel__close" title="Schließen">✕</button>
+    </div>
+    <pre class="context-panel__body"></pre>
+  `;
+  panel.querySelector('.context-panel__body').textContent = text;
+  panel.querySelector('.context-panel__close').addEventListener('click', () => panel.remove());
+
+  btn.closest('.model-select-wrapper').appendChild(panel);
+
+  const closeOnClick = (e) => {
+    if (!panel.contains(e.target) && e.target !== btn) {
+      panel.remove();
+      document.removeEventListener('click', closeOnClick, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeOnClick, true), 0);
+}
+
+function initContextInfo() {
+  const btn = document.getElementById('btnContextInfo');
+  if (!btn) return;
+
+  let activeCloseHandler = null;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close context detail panel if open
+    const panel = document.getElementById('contextPanel');
+    if (panel) panel.remove();
+
+    const existing = document.querySelector('.context-dropdown');
+    if (existing) {
+      existing.remove();
+      if (activeCloseHandler) {
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
+      }
+      return;
+    }
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'model-dropdown model-dropdown--below context-dropdown';
+
+    CONTEXT_ACTIONS.forEach(action => {
+      const item = document.createElement('div');
+      item.className = 'model-dropdown__item';
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(action.label)}</span><span class="model-dropdown__desc">${escapeHtml(action.desc)}</span>`;
+      item.addEventListener('click', () => {
+        dropdown.remove();
+        if (activeCloseHandler) {
+          document.removeEventListener('click', activeCloseHandler, true);
+          activeCloseHandler = null;
+        }
+        runContextAction(action.id);
+      });
+      dropdown.appendChild(item);
+    });
+
+    btn.closest('.model-select-wrapper').appendChild(dropdown);
+
+    activeCloseHandler = (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== btn) {
+        dropdown.remove();
+        document.removeEventListener('click', activeCloseHandler, true);
+        activeCloseHandler = null;
+      }
+    };
+    setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
+  });
+}
+
+// ── Usage Display ──────────────────────────────────────────
+
+// renderer-logic.js is loaded as a classic <script> before app.js and
+// exposes its API on window.RendererLogic (the renderer has no require()).
+const {
+  MODEL_PRICING,
+  parseUsageTokens,
+  parseUsageRequests,
+  estimateCreditsDelta,
+} = window.RendererLogic;
+// Other RendererLogic helpers (parseTokenK, estimateCredits, buildCostBuckets,
+// aggregateCostBySession, trimCostLog) are used internally by the above or
+// consumed directly by modules/costs.js via window.RendererLogic.
+
+async function refreshUsageDisplay(tabId) {
+  try {
+    const result = await window.copilot.chat.silentCommand(tabId, '/usage');
+    if (!result.success) return;
+    const parsed = parseUsageRequests(result.text);
+    const tokens = parseUsageTokens(result.text);
+    const tab = tabs.get(tabId);
+    if (tab) {
+      const modelId = tab.selectedModel || '';
+      // Bill only the *new* tokens since the last reading, at the current
+      // model's price — so a mid-session model switch never re-prices the
+      // tokens consumed under the previous model.
+      const deltaCredits = estimateCreditsDelta(tokens, tab._lastUsageTokens, modelId);
+      if (deltaCredits && deltaCredits > 0) {
+        tab._creditTotal = (tab._creditTotal || 0) + deltaCredits;
+        tab._creditTotal = Math.round(tab._creditTotal * 10) / 10;
+        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaCredits);
+      }
+      tab._lastUsageParsed = parsed;
+      tab._lastUsageText = result.text;
+      tab._lastUsageTokens = tokens;
+    }
+    if (tabId === activeTabId) updateUsageDisplay(parsed, tokens, result.text);
+  } catch (e) {
+    console.warn('[usage] refreshUsageDisplay fehlgeschlagen:', e?.message);
+  }
+}
+
+function updateUsageDisplay(parsed, tokens, fullText) {
+  const el = document.getElementById('sessionUsage');
+  if (!el) return;
+
+  const tab = tabs.get(activeTabId);
+  const modelId = tab?.selectedModel || '';
+
+  let display;
+  if (MODEL_PRICING[modelId]) {
+    // Known pricing → show the running per-prompt credit total (always ≥ 0,
+    // defaulting to ~0C before the first prompt).
+    const total = tab?._creditTotal || 0;
+    display = `~${total}C`;
+  } else if (parsed) {
+    // Unknown model → fall back to the raw /usage figure.
+    const short = parsed.unit?.toLowerCase().includes('credit') ? 'AIC'
+      : parsed.unit?.toLowerCase().includes('unit') ? 'AIU'
+      : 'Req';
+    display = `${parsed.value} ${short}`;
+  } else {
+    display = '~0C';
+  }
+  el.textContent = display;
+  el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';
+}
+
+// ── Cost Log + Cost Settings Panel → modules/costs.js ────────
+// getCostLog, recordCostEntry, clearCostLog, initCostsPanel,
+// renderCostsPanel, drawCostsChart, niceStep, renderCostsBreakdown
+// live in modules/costs.js (loaded before app.js). They use the
+// globals getPref/setPref (here) and buildCostBuckets/
+// aggregateCostBySession/trimCostLog (from renderer-logic, below).
 
 // ── Session Export ──────────────────────────────────────────
 /**
@@ -1880,6 +2134,8 @@ async function resumeSession(sessionId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
+  tab._sessionName = customName || null;
+
   // Restore session denied tools from namedSessions
   tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
 
@@ -1894,11 +2150,6 @@ async function resumeSession(sessionId) {
   tab.sessionId = sessionId;
   // Update lastUsed timestamp
   touchSession(sessionId);
-  // Start background terminal for instant /context access
-  copilot.terminal.spawnBackground(tabId, sessionId).catch(e => {
-    console.warn('[terminal] spawnBackground fehlgeschlagen:', e.message);
-    showNotification('Terminal-Hintergrundprozess konnte nicht gestartet werden', 'error');
-  });
   activeSessionId = sessionId;
   loadTodos(sessionId);
   saveOpenTabs();
@@ -2065,6 +2316,45 @@ function toggleSkill(skillId) {
 /**
  * Render the MCP servers list in the sidebar.
  */
+/**
+ * Merges MCP server lists, deduplicating by name. Earlier lists win, so the
+ * global (probed) entries take precedence over tab-context copies.
+ * @param {...Array<{name: string}>} lists
+ * @returns {Array<Object>}
+ */
+function mergeMcpByName(...lists) {
+  const byName = new Map();
+  for (const list of lists) {
+    for (const s of (list || [])) {
+      if (!byName.has(s.name)) byName.set(s.name, { ...s });
+    }
+  }
+  return [...byName.values()];
+}
+
+/**
+ * Probes MCP server connectivity in the background and updates the status
+ * badges. HTTP/SSE servers get a real reachable/offline status; stdio servers
+ * stay 'configured'. Merges results by name into the current server lists.
+ */
+async function refreshMcpStatus() {
+  let probed;
+  try {
+    probed = await copilot.mcp.probe();
+  } catch (e) {
+    console.warn('[mcp] Status-Probe fehlgeschlagen:', e.message);
+    return;
+  }
+  if (!Array.isArray(probed)) return;
+  const statusByName = new Map(probed.map(s => [s.name, s.status]));
+  const applyStatus = (list) => list.forEach(s => {
+    if (statusByName.has(s.name)) s.status = statusByName.get(s.name);
+  });
+  applyStatus(globalMcpServers);
+  applyStatus(mcpServers);
+  renderMcpServers();
+}
+
 function renderMcpServers() {
   const container = document.getElementById('mcpList');
   if (!container) return;
@@ -2302,8 +2592,9 @@ async function loadProjectSkillsAndAgents(cwd) {
     }
   }
 
-  // Merge project MCP servers from .github/mcp.json
-  mcpServers = mcpServers.filter(s => !s.fromProject);
+  // Rebuild from the global (user/workspace) servers, then merge project
+  // MCP servers from .github/mcp.json on top.
+  mcpServers = globalMcpServers.map(s => ({ ...s }));
 
   if (cwd) {
     try {
@@ -2889,18 +3180,21 @@ window.removeMarketplace = async function(name) {
  * Switch the main content area from chat to the plugins marketplace view.
  */
 window.switchToPluginsView = function() {
+  // Leave the costs view if it happens to be open.
+  window.costsViewActive = false;
+  const costsView = document.getElementById('costsView');
+  if (costsView) costsView.style.display = 'none';
+
   window.pluginsViewActive = true;
   const pluginsView = document.getElementById('pluginsView');
   const sessionActions = document.getElementById('sessionActions');
   const streamArea = document.getElementById('streamArea');
-  const terminalPanel = document.getElementById('terminalPanel');
   const chatInputBar = document.querySelector('.chat-input-bar');
   const tabPlugins = document.getElementById('tabPlugins');
 
   // Hide chat content, show plugin view (both inside terminal-container)
   if (sessionActions) sessionActions.style.display = 'none';
   if (streamArea) streamArea.style.display = 'none';
-  if (terminalPanel) terminalPanel.style.display = 'none';
   if (chatInputBar) chatInputBar.style.display = 'none';
   if (pluginsView) pluginsView.style.display = 'flex';
 
@@ -2914,25 +3208,51 @@ window.switchToPluginsView = function() {
 };
 
 /**
- * Switch the main content area back from plugins to chat view.
+ * Switch the main content area from chat to the costs view (own page,
+ * like the plugin marketplace — not a modal).
  */
-function switchToChatView() {
-  if (!window.pluginsViewActive) return;
+window.switchToCostsView = function() {
+  // Leave the plugins view if it happens to be open.
   window.pluginsViewActive = false;
   const pluginsView = document.getElementById('pluginsView');
+  const tabPlugins = document.getElementById('tabPlugins');
+  if (pluginsView) pluginsView.style.display = 'none';
+  if (tabPlugins) tabPlugins.classList.remove('tab--active');
+
+  window.costsViewActive = true;
+  const costsView = document.getElementById('costsView');
   const sessionActions = document.getElementById('sessionActions');
   const streamArea = document.getElementById('streamArea');
-  const terminalPanel = document.getElementById('terminalPanel');
+  const chatInputBar = document.querySelector('.chat-input-bar');
+
+  if (sessionActions) sessionActions.style.display = 'none';
+  if (streamArea) streamArea.style.display = 'none';
+  if (chatInputBar) chatInputBar.style.display = 'none';
+  if (costsView) costsView.style.display = 'flex';
+
+  // Render after layout so the canvas has its final width.
+  requestAnimationFrame(renderCostsPanel);
+};
+
+/**
+ * Switch the main content area back from plugins/costs to chat view.
+ */
+function switchToChatView() {
+  if (!window.pluginsViewActive && !window.costsViewActive) return;
+  window.pluginsViewActive = false;
+  window.costsViewActive = false;
+  const pluginsView = document.getElementById('pluginsView');
+  const costsView = document.getElementById('costsView');
+  const sessionActions = document.getElementById('sessionActions');
+  const streamArea = document.getElementById('streamArea');
   const chatInputBar = document.querySelector('.chat-input-bar');
   const tabPlugins = document.getElementById('tabPlugins');
 
   if (pluginsView) pluginsView.style.display = 'none';
+  if (costsView) costsView.style.display = 'none';
   if (sessionActions) sessionActions.style.display = '';
   if (streamArea) streamArea.style.display = '';
   if (chatInputBar) chatInputBar.style.display = '';
-  // terminalPanel nur zeigen wenn es vorher sichtbar war (collapsed state respektieren)
-  const terminalCollapsed = terminalPanel && terminalPanel.classList.contains('terminal-panel--collapsed');
-  if (terminalPanel && !terminalCollapsed) terminalPanel.style.display = '';
 
   if (tabPlugins) tabPlugins.classList.remove('tab--active');
 }
@@ -3037,11 +3357,7 @@ function formatDate(iso) {
 
 // ── Developer Console → modules/dev-console.js ──────────────
 
-// ── Context Widget (opens terminal with /context) ────────────
-
 // toolIcon, toolDisplayName, formatToolArgs → modules/utils.js
-
-// ── Terminal Panel → modules/terminal.js ─────────────────────
 
 // ── Init ─────────────────────────────────────────────────────
 
@@ -3099,6 +3415,17 @@ async function initDataLoad() {
   const savedActiveAgents = getSettings().activeAgents || [];
   activeAgents = new Set(savedActiveAgents);
   renderAgents();
+
+  try {
+    globalMcpServers = await copilot.mcp.list() || [];
+  } catch (e) {
+    console.warn('[mcp] Laden fehlgeschlagen:', e.message);
+    globalMcpServers = [];
+  }
+  mcpServers = globalMcpServers.map(s => ({ ...s }));
+  renderMcpServers();
+  // Probe connectivity in the background (http/sse reachability) — don't block startup.
+  refreshMcpStatus();
 
   await loadSessions();
   await loadImages();
@@ -3222,24 +3549,7 @@ function initWindowControls() {
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
   document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
 
-  document.getElementById('btnOpenTerminal').addEventListener('click', () => {
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab) return;
-    if (tab.terminal && tab.terminalVisible !== false) {
-      minimizeTerminal();
-    } else if (tab.terminal && tab.terminalVisible === false) {
-      tab.terminalVisible = true;
-      document.getElementById('terminalPanel').classList.add('terminal-panel--open');
-      tab.terminal.bodyEl.style.display = '';
-      requestAnimationFrame(() => { if (tab.terminal.fitAddon) tab.terminal.fitAddon.fit(); });
-    } else {
-      openTerminal(activeTabId, tab.sessionId, null);
-    }
-  });
-
   document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
-  document.getElementById('btnTerminalMinimize').addEventListener('click', () => minimizeTerminal());
 
   document.getElementById('btnScrollBottom').addEventListener('click', () => {
     const tab = tabs.get(activeTabId);
@@ -3250,200 +3560,15 @@ function initWindowControls() {
     }
   });
 
-  window.addEventListener('resize', () => {
-    const tab = tabs.get(activeTabId);
-    if (tab && tab.terminal && tab.terminal.fitAddon) {
-      setTimeout(() => tab.terminal.fitAddon.fit(), RESIZE_FIT_DELAY_MS);
-    }
-  });
 }
 
-/**
- * Initialize the context popup (📊 button) that shows token usage
- * and category breakdowns fetched from the background terminal.
- */
-function initContextPopup() {
-  const sbContextBtn = document.getElementById('btnSlashContext');
-  const contextPopup = document.getElementById('contextPopup');
-  const contextPopupBody = document.getElementById('contextPopupBody');
 
-  document.addEventListener('click', (e) => {
-    if (contextPopup.style.display !== 'none' && !contextPopup.contains(e.target) && e.target !== sbContextBtn) {
-      contextPopup.style.display = 'none';
-    }
-  });
-
-  sbContextBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (contextPopup.style.display !== 'none') {
-      contextPopup.style.display = 'none';
-      return;
-    }
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab || !tab.sessionId) {
-      showNotification('Keine aktive Session', 'warning');
-      return;
-    }
-    contextPopup.style.display = '';
-    contextPopupBody.innerHTML = '<div class="context-popup__loading">⏳ Lade Kontext…</div>';
-
-    let result;
-    try {
-      result = await copilot.terminal.fetchContext(activeTabId);
-    } catch (err) {
-      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(err.message || 'Unbekannter Fehler')}</div>`;
-      return;
-    }
-    if (!result.success) {
-      contextPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
-      return;
-    }
-    if (result.percent != null) {
-      const color = contextColor(result.percent);
-      let html = `<div style="margin-bottom:12px;">
-        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
-          <span style="font-size:20px;font-weight:700;color:${color};">${result.percent}%</span>
-          <span style="color:var(--text-secondary,#a6adc8);font-size:11px;">${result.usedTokens || '?'} / ${result.totalTokens || '?'} Tokens</span>
-        </div>
-        <div style="background:var(--bg-tertiary,#313244);border-radius:4px;height:8px;overflow:hidden;">
-          <div style="width:${result.percent}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
-        </div>
-      </div>`;
-      html += buildContextCategoryHtml(result.categories);
-      contextPopupBody.innerHTML = DOMPurify.sanitize(html);
-
-      const tab = tabs.get(activeTabId);
-      if (tab) tab.contextPercent = result.percent;
-      sbContextBtn.innerHTML = `📊 <span style="color:${color}">${result.percent}%</span>`;
-    } else {
-      contextPopupBody.textContent = result.raw;
-    }
-  });
-}
 
 /**
- * Initialize the compact popup (🗜️ button) that triggers /compact
- * and displays before/after token usage comparison.
- */
-function initCompactPopup() {
-  const compactBtn = document.getElementById('btnSlashCompact');
-  const compactPopup = document.getElementById('compactPopup');
-  const compactPopupBody = document.getElementById('compactPopupBody');
-
-  document.addEventListener('click', (e) => {
-    if (compactPopup.style.display !== 'none' && !compactPopup.contains(e.target) && e.target !== compactBtn) {
-      compactPopup.style.display = 'none';
-    }
-  });
-
-  compactBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (compactPopup.style.display !== 'none') {
-      compactPopup.style.display = 'none';
-      return;
-    }
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab || !tab.sessionId) {
-      showNotification('Keine aktive Session', 'warning');
-      return;
-    }
-    compactPopup.style.display = '';
-    compactPopupBody.innerHTML = '<div class="context-popup__loading">🗜️ Komprimiere Kontext…</div>';
-    compactBtn.classList.add('session-actions__btn--loading');
-
-    let result;
-    try {
-      result = await copilot.terminal.sendSlash(activeTabId, '/compact');
-    } catch (err) {
-      result = { success: false, error: err.message || 'Unbekannter Fehler' };
-    }
-    compactBtn.classList.remove('session-actions__btn--loading');
-
-    if (!result.success) {
-      compactPopupBody.innerHTML = `<div class="context-popup__loading">⚠️ ${escapeHtml(result.error)}</div>`;
-      return;
-    }
-    if (result.percent != null) {
-      const oldPct = tab.contextPercent;
-      const newPct = result.percent;
-      const color = contextColor(newPct);
-      const saved = oldPct != null ? oldPct - newPct : null;
-
-      let html = '<div style="text-align:center;margin-bottom:12px;">';
-      html += '<div style="font-size:11px;color:var(--text-secondary,#a6adc8);margin-bottom:4px;">Kontext komprimiert</div>';
-      if (saved != null && saved > 0) {
-        html += `<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px;">
-          <span style="font-size:16px;color:var(--text-secondary,#a6adc8);text-decoration:line-through;">${oldPct}%</span>
-          <span style="font-size:14px;color:var(--text-secondary,#a6adc8);">→</span>
-          <span style="font-size:22px;font-weight:700;color:${color};">${newPct}%</span>
-        </div>`;
-        html += `<div style="font-size:12px;color:#a6e3a1;font-weight:600;">−${saved}% freigeräumt</div>`;
-      } else {
-        html += `<div style="font-size:22px;font-weight:700;color:${color};margin-bottom:4px;">${newPct}%</div>`;
-      }
-      html += `<div style="background:var(--bg-tertiary,#313244);border-radius:4px;height:8px;overflow:hidden;margin-top:8px;">
-        <div style="width:${newPct}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s;"></div>
-      </div>`;
-      if (result.usedTokens && result.totalTokens) {
-        html += `<div style="font-size:10px;color:var(--text-secondary,#a6adc8);margin-top:4px;">${result.usedTokens} / ${result.totalTokens} Tokens</div>`;
-      }
-      html += '</div>';
-      html += buildContextCategoryHtml(result.categories);
-      compactPopupBody.innerHTML = html;
-
-      tab.contextPercent = newPct;
-      const ctxBtn = document.getElementById('btnSlashContext');
-      ctxBtn.innerHTML = `📊 <span style="color:${color}">${newPct}%</span>`;
-      showNotification(`Kontext komprimiert: ${newPct}%`, 'success');
-    } else {
-      compactPopupBody.innerHTML = `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escapeHtml(result.output)}</div>`;
-      showNotification('Kontext komprimiert ✓', 'success');
-    }
-  });
-}
-
-/**
- * Initialize all session action buttons: /clear, todo sync, todo add,
+ * Initialize all session action buttons: todo sync, todo add,
  * and session delete confirmation handlers.
  */
 function initSlashButtons() {
-  document.getElementById('btnSlashClear').addEventListener('click', async () => {
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab || !tab.sessionId) {
-      showNotification('Keine aktive Session', 'warning');
-      return;
-    }
-    const btn = document.getElementById('btnSlashClear');
-    btn.classList.add('session-actions__btn--loading');
-    let result;
-    try {
-      result = await copilot.terminal.sendSlash(activeTabId, '/clear');
-    } catch (err) {
-      result = { success: false, error: err.message || 'Unbekannter Fehler' };
-    }
-    btn.classList.remove('session-actions__btn--loading');
-    if (result.success) {
-      showNotification('Chat-Kontext geleert ✓', 'success');
-      const ctxBtn = document.getElementById('btnSlashContext');
-      ctxBtn.textContent = '📊 Context';
-      const tab2 = tabs.get(activeTabId);
-      if (tab2) tab2.contextPercent = null;
-    } else {
-      showNotification(`Fehler: ${result.error}`, 'error');
-    }
-  });
-
-  document.getElementById('btnAutopilot').addEventListener('click', () => {
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab) return;
-    tab.autopilot = !tab.autopilot;
-    document.getElementById('btnAutopilot').classList.toggle('session-actions__btn--active', tab.autopilot);
-  });
-
   document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());
   document.getElementById('todoInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
@@ -3502,6 +3627,7 @@ function initSettings() {
   const settSound = document.getElementById('settSound');
   const settDevMode = document.getElementById('settDevMode');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
+  const settDefaultModel = document.getElementById('settDefaultModel');
 
   document.querySelectorAll('.settings__tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -3523,6 +3649,14 @@ function initSettings() {
   settDevMode.checked = savedSettings.devMode === true;
   applyDevMode(savedSettings.devMode === true);
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
+
+  // Populate the default-model dropdown from the shared model list.
+  if (settDefaultModel) {
+    settDefaultModel.innerHTML = getAvailableModels()
+      .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`)
+      .join('');
+    settDefaultModel.value = getDefaultModelId();
+  }
 
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
@@ -3548,6 +3682,7 @@ function initSettings() {
   settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
   settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
   settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
+  settDefaultModel?.addEventListener('change', () => saveSetting('defaultModel', settDefaultModel.value));
 
   renderDeniedTools();
   renderExtraDirs();
@@ -3764,6 +3899,24 @@ function initDevConsole() {
   document.getElementById('devConsoleClear')?.addEventListener('click', () => {
     devConsoleLogs.length = 0;
     document.getElementById('devConsoleBody').innerHTML = '';
+  });
+
+  document.getElementById('devConsoleCopy')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const text = formatDevConsoleForClipboard();
+    if (!text) {
+      showNotification('Konsole ist leer', 'info');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      const original = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+      showNotification('Konsole kopiert', 'success');
+    } catch (err) {
+      showNotification(`Kopieren fehlgeschlagen: ${err.message}`, 'error');
+    }
   });
 
   document.querySelectorAll('.dev-console__filter').forEach(btn => {
@@ -4066,6 +4219,8 @@ function initShortcutsSettings() {
   });
   document.querySelector('.settings__tab[data-tab="shortcuts"]')?.addEventListener('click', renderShortcutsSettings);
   renderShortcutsSettings();
+
+  initCostsPanel();
 }
 
 /**
@@ -4939,9 +5094,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
   applyTheme(getCurrentTheme());
   initCopilotIPC();
-  initTerminalIPC();
   initResize();
-  initTerminalResize();
 
   await initStatusbar();
   await initDataLoad();
@@ -4961,8 +5114,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   initChatInput();
   initWindowControls();
-  initContextPopup();
-  initCompactPopup();
   initSlashButtons();
   initSessionTools();
   initSettings();
@@ -4975,5 +5126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initDragDrop();
   initTooltips();
   initTabModelSelector();
+  initTabModeSelector();
+  initContextInfo();
   initOnboarding();
 });
