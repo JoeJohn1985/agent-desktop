@@ -164,13 +164,35 @@ function filterSessions(sessions, query) {
 
 // ── Usage / Cost Parsing ─────────────────────────────────────
 
-// Preise in AI Credits pro 1M Tokens. Bei neuen Modellen hier ergänzen.
+// Preise pro 1M Tokens. Copilot-Modelle (mit Punkt in der ID) in AI Credits;
+// Direkt-API-Modelle (mit Bindestrich) in US-Dollar (input/cache-read/output).
+// Bei neuen Modellen hier ergänzen.
 const MODEL_PRICING = {
+  // Copilot CLI (Credits)
   'claude-haiku-4.5':  { input: 100, cache: 10, output: 500  },
   'claude-sonnet-4.6': { input: 300, cache: 30, output: 1500 },
   'claude-opus-4.6':   { input: 500, cache: 50, output: 2500 },
   'claude-opus-4.8':   { input: 500, cache: 50, output: 2500 },
+  // Anthropic API (USD pro 1M)
+  'claude-haiku-4-5':  { input: 1,   cache: 0.1, output: 5  },
+  'claude-sonnet-4-6': { input: 3,   cache: 0.3, output: 15 },
+  'claude-opus-4-7':   { input: 5,   cache: 0.5, output: 25 },
+  'claude-opus-4-8':   { input: 5,   cache: 0.5, output: 25 },
 };
+
+// Maps a model ID to its backend provider. Unknown IDs default to 'copilot'
+// (the CLI passthrough accepts arbitrary model strings), preserving the
+// existing behaviour for anything not explicitly an API model.
+const MODEL_PROVIDERS = {
+  'claude-haiku-4-5':  'anthropic',
+  'claude-sonnet-4-6': 'anthropic',
+  'claude-opus-4-7':   'anthropic',
+  'claude-opus-4-8':   'anthropic',
+};
+
+function getModelProvider(modelId) {
+  return MODEL_PROVIDERS[modelId] || 'copilot';
+}
 
 function parseTokenK(str) {
   if (!str) return null;
@@ -180,13 +202,17 @@ function parseTokenK(str) {
 }
 
 function parseUsageTokens(text) {
-  const m = text.match(/Tokens:\s*input\s*([\d.]+k?),\s*output\s*([\d.]+k?),\s*cached\s*([\d.]+k?)/i);
+  const m = text.match(/Tokens:\s*input\s*([\d.]+k?),\s*output\s*([\d.]+k?),\s*cached\s*([\d.]+k?)(?:,\s*cachewrite\s*([\d.]+k?))?/i);
   if (!m) return null;
-  return {
+  const tokens = {
     input:  parseTokenK(m[1]),
     output: parseTokenK(m[2]),
     cache:  parseTokenK(m[3]),
   };
+  // Direct-API providers also report cache-write tokens (billed at 1.25x input).
+  // Copilot's /usage line has no such field, so the key is only added when present.
+  if (m[4] !== undefined) tokens.cacheWrite = parseTokenK(m[4]);
+  return tokens;
 }
 
 function parseUsageRequests(text) {
@@ -198,7 +224,14 @@ function parseUsageRequests(text) {
 function estimateCredits(tokens, modelId) {
   const pricing = MODEL_PRICING[modelId];
   if (!pricing || !tokens) return null;
-  const c = ((tokens.input || 0) * pricing.input + (tokens.cache || 0) * pricing.cache + (tokens.output || 0) * pricing.output) / 1_000_000;
+  // Cache-write tokens (first time a prefix is cached) bill at 1.25x input.
+  const cacheWritePrice = pricing.cacheWrite != null ? pricing.cacheWrite : pricing.input * 1.25;
+  const c = (
+    (tokens.input || 0) * pricing.input +
+    (tokens.cache || 0) * pricing.cache +
+    (tokens.cacheWrite || 0) * cacheWritePrice +
+    (tokens.output || 0) * pricing.output
+  ) / 1_000_000;
   return Math.round(c * 10) / 10;
 }
 
@@ -217,9 +250,10 @@ function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
   if (!MODEL_PRICING[modelId] || !currentTokens) return null;
   const prev = previousTokens || {};
   const deltaTokens = {
-    input:  Math.max(0, (currentTokens.input  || 0) - (prev.input  || 0)),
-    output: Math.max(0, (currentTokens.output || 0) - (prev.output || 0)),
-    cache:  Math.max(0, (currentTokens.cache  || 0) - (prev.cache  || 0)),
+    input:      Math.max(0, (currentTokens.input      || 0) - (prev.input      || 0)),
+    output:     Math.max(0, (currentTokens.output     || 0) - (prev.output     || 0)),
+    cache:      Math.max(0, (currentTokens.cache      || 0) - (prev.cache      || 0)),
+    cacheWrite: Math.max(0, (currentTokens.cacheWrite || 0) - (prev.cacheWrite || 0)),
   };
   return estimateCredits(deltaTokens, modelId);
 }
@@ -271,6 +305,8 @@ const _api = {
   TOOL_DISPLAY_NAMES,
   TOOL_ARGS_MAX_LENGTH,
   MODEL_PRICING,
+  MODEL_PROVIDERS,
+  getModelProvider,
   parseTokenK,
   parseUsageTokens,
   parseUsageRequests,

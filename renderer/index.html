@@ -194,6 +194,9 @@
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
         <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnProviderSelect" data-tooltip="Provider für diesen Tab auswählen">🔌 Provider</button>
+        </div>
+        <div class="model-select-wrapper">
           <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model für diesen Tab auswählen">🧠 Model</button>
         </div>
         <div class="model-select-wrapper">
@@ -304,6 +307,7 @@
       <div class="settings__tabs">
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
         <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
+        <button class="settings__tab" data-tab="providers">API-Provider</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
       </div>
@@ -401,6 +405,19 @@
             </div>
           </div>
 
+        </div>
+        <!-- Tab: API-Provider -->
+        <div class="settings__panel" data-panel="providers">
+          <div class="settings__group">
+            <div class="settings__hint" style="margin-bottom:12px;">
+              API-Keys für direkte LLM-Provider. Die Keys werden über den OS-Schlüsselbund
+              verschlüsselt gespeichert und verlassen den Hauptprozess nicht.
+            </div>
+            <div id="providersKeyList" class="providers-list"></div>
+            <div class="settings__hint" id="providersUnavailable" style="display:none;color:var(--red,#e74c3c);">
+              ⚠️ OS-Verschlüsselung ist nicht verfügbar — Keys können nicht sicher gespeichert werden.
+            </div>
+          </div>
         </div>
         <!-- Tab: Ordner -->
         <div class="settings__panel" data-panel="folders">

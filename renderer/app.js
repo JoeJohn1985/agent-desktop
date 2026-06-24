@@ -1155,6 +1155,12 @@ function sendMessage() {
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
   const mergedDenied = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
 
+  // For direct-API backends, pass the active skill/agent identifiers so main
+  // can inline their .md content into the (cached) system prompt. Ignored by
+  // the Copilot backend (the CLI reads these files itself).
+  const activeSkillDirs = [...activeSkills].map(id => skills.find(s => s.id === id)?.dirName).filter(Boolean);
+  const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
+
   copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
@@ -1165,6 +1171,8 @@ function sendMessage() {
     mode: tab.mode || DEFAULT_MODE_ID,
     model: tab.selectedModel || DEFAULT_MODEL_ID,
     cwd: tab.cwd || undefined,
+    activeSkills: activeSkillDirs,
+    activeAgents: activeAgentSlugs,
   });
 
   // Update lastUsed for sorting
@@ -1519,6 +1527,10 @@ function initCopilotIPC() {
       // Always refresh so cost tracking works for background tabs too.
       // updateUsageDisplay() inside only updates the visible bar for the active tab.
       refreshUsageDisplay(tabId);
+      // Direct-API tabs: refresh the context % and auto-compact if it's high.
+      if (getTabProvider(tab) !== 'copilot') {
+        refreshApiContext(tabId);
+      }
     }
   });
 }
@@ -1538,12 +1550,143 @@ window.confirmDeleteAgent = confirmDeleteAgent;
 // the background terminal. We use a preferences-stored model list instead.
 const DEFAULT_MODEL_ID = 'claude-sonnet-4.6';
 const DEFAULT_MODELS = [
-  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
-  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
-  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
-  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8' },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
+  // Copilot CLI (provider: 'copilot')
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'copilot' },
+  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'copilot' },
+  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot' },
+  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot' },
+  // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic' },
 ];
+
+const PROVIDER_LABELS = {
+  copilot: 'GitHub Copilot',
+  anthropic: 'Anthropic API',
+  gemini: 'Google Gemini',
+  openai: 'OpenAI-kompatibel',
+};
+
+const PROVIDER_ICON = '🔌';
+
+// Providers offered in the provider selector. `active: false` ones are shown
+// but not yet selectable (backend not implemented).
+const PROVIDERS = [
+  { id: 'copilot', active: true },
+  { id: 'anthropic', active: true },
+  { id: 'gemini', active: false },
+  { id: 'openai', active: false },
+];
+
+/** Default model chosen when switching to a provider (first model of that provider). */
+function getDefaultModelForProvider(provider) {
+  const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
+  return m ? m.id : DEFAULT_MODEL_ID;
+}
+
+/** Models belonging to a given provider. */
+function getModelsForProvider(provider) {
+  return DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
+}
+
+/**
+ * The provider of a tab, always derived from its selected model (the model is
+ * the single source of truth; the provider is implied by it).
+ */
+function getTabProvider(tab) {
+  return window.RendererLogic.getModelProvider(tab?.selectedModel || '') || 'copilot';
+}
+
+const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI' };
+
+/** Update the provider button label/highlight for a tab. */
+function updateProviderSelectBtn(tabId) {
+  const btn = document.getElementById('btnProviderSelect');
+  if (!btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  const provider = getTabProvider(tab);
+  btn.textContent = `${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`;
+  btn.classList.toggle('session-actions__btn--active', provider !== 'copilot');
+}
+
+/**
+ * Initialize the provider selector. Switching provider sets the tab's model to
+ * that provider's default model (the model implies the provider), tears down
+ * any existing backend on the next send, and refreshes the model button.
+ */
+function initTabProviderSelector() {
+  const btn = document.getElementById('btnProviderSelect');
+  if (!btn) return;
+
+  let activeCloseHandler = null;
+  const closeDropdown = (dd) => {
+    dd.remove();
+    if (activeCloseHandler) { document.removeEventListener('click', activeCloseHandler, true); activeCloseHandler = null; }
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const existing = document.querySelector('.provider-dropdown');
+    if (existing) { closeDropdown(existing); return; }
+
+    const openedForTabId = activeTabId;
+    const tab = tabs.get(openedForTabId);
+    const currentProvider = getTabProvider(tab);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'model-dropdown model-dropdown--below provider-dropdown';
+
+    PROVIDERS.forEach(p => {
+      const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+      const isActive = currentProvider === p.id;
+      const item = document.createElement('div');
+      item.className = 'model-dropdown__item'
+        + (isActive ? ' model-dropdown__item--active' : '')
+        + (p.active ? '' : ' model-dropdown__item--disabled');
+      let badge = '';
+      if (!p.active) badge = ' <span class="model-dropdown__hint">in Vorbereitung</span>';
+      else if (!hasKey) badge = ' <span class="model-dropdown__hint">Key nötig</span>';
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
+
+      item.addEventListener('click', () => {
+        if (!p.active) {
+          showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
+          return;
+        }
+        closeDropdown(dropdown);
+        const t = tabs.get(openedForTabId);
+        if (!t) return;
+        if (p.id === currentProvider) return;
+        t.selectedModel = getDefaultModelForProvider(p.id);
+        if (t.sessionId) saveSessionModel(t.sessionId, t.selectedModel);
+        updateModelSelectBtn(openedForTabId);
+        if (p.id !== 'copilot' && !hasKey) {
+          showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
+        }
+      });
+      dropdown.appendChild(item);
+    });
+
+    btn.closest('.model-select-wrapper').appendChild(dropdown);
+    activeCloseHandler = (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== btn) closeDropdown(dropdown);
+    };
+    setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
+  });
+}
+
+/** @type {{available: boolean, keyed: Object<string,boolean>}} Cached provider key status. */
+let _providerStatus = { available: false, keyed: {} };
+
+async function refreshProviderStatus() {
+  try {
+    _providerStatus = await window.copilot.providers.status();
+  } catch (e) {
+    console.warn('[providers] status fehlgeschlagen:', e?.message);
+  }
+}
 
 function getAvailableModels() {
   return DEFAULT_MODELS;
@@ -1596,6 +1739,7 @@ function updateModelSelectBtn(tabId) {
   const found = DEFAULT_MODELS.find(m => m.id === modelId);
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
+  updateProviderSelectBtn(tabId);
 }
 
 /**
@@ -1621,10 +1765,11 @@ function initTabModelSelector() {
       return;
     }
 
-    const models = getAvailableModels();
     const openedForTabId = activeTabId;
     const tab = tabs.get(openedForTabId);
     const currentModel = tab?.selectedModel || '';
+    // Only show models for the tab's currently selected provider.
+    const models = getModelsForProvider(getTabProvider(tab));
 
     const dropdown = document.createElement('div');
     dropdown.className = 'model-dropdown model-dropdown--below';
@@ -1904,6 +2049,33 @@ async function refreshUsageDisplay(tabId) {
     if (tabId === activeTabId) updateUsageDisplay(parsed, tokens, result.text);
   } catch (e) {
     console.warn('[usage] refreshUsageDisplay fehlgeschlagen:', e?.message);
+  }
+}
+
+/** Context utilisation (%) at which a direct-API tab auto-compacts. */
+const AUTO_COMPACT_PERCENT = 80;
+
+/**
+ * For direct-API tabs: refresh the context-% button after a turn and, if the
+ * window is filling up, automatically compact the conversation. Copilot tabs
+ * are unaffected (their context is managed by the CLI).
+ * @param {number} tabId
+ */
+async function refreshApiContext(tabId) {
+  try {
+    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    if (!res.success) return;
+    if (tabId === activeTabId) updateContextButton(res.text);
+
+    const pct = parseContextPercent(res.text);
+    if (pct != null && pct >= AUTO_COMPACT_PERCENT) {
+      showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
+      await window.copilot.chat.silentCommand(tabId, '/compact');
+      const after = await window.copilot.chat.silentCommand(tabId, '/context');
+      if (after.success && tabId === activeTabId) updateContextButton(after.text);
+    }
+  } catch (e) {
+    console.warn('[context] refreshApiContext fehlgeschlagen:', e?.message);
   }
 }
 
@@ -2199,20 +2371,26 @@ async function displaySessionContext(tab, sessionId) {
   headerEl.innerHTML = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
   insertBefore(headerEl);
 
-  // 2. Letzte Nachrichten als echte Chat-Bubbles
+  // 2. Letzte Nachrichten als echte Chat-Bubbles. Direkt-API-Sessions haben
+  // keine CLI-State-Dateien — ihren Verlauf laden wir aus dem API-Session-Store.
   try {
-    const messages = await copilot.sessions.readRecentMessages(sessionId);
-    if (messages && messages.length > 0) {
-      for (const msg of messages) {
-        const el = document.createElement('div');
-        if (msg.role === 'user') {
-          el.className = 'stream-input stream-input--history';
-          el.textContent = msg.content;
-        } else {
-          el.className = 'stream-response markdown-body stream-response--history';
-          el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+    if (getTabProvider(tab) !== 'copilot') {
+      const history = await window.copilot.providers.loadSessionHistory(sessionId);
+      renderApiHistory(history, insertBefore);
+    } else {
+      const messages = await copilot.sessions.readRecentMessages(sessionId);
+      if (messages && messages.length > 0) {
+        for (const msg of messages) {
+          const el = document.createElement('div');
+          if (msg.role === 'user') {
+            el.className = 'stream-input stream-input--history';
+            el.textContent = msg.content;
+          } else {
+            el.className = 'stream-response markdown-body stream-response--history';
+            el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+          }
+          insertBefore(el);
         }
-        insertBefore(el);
       }
     }
   } catch (e) { console.warn('[sessions] Nachrichten nicht verfügbar:', e.message); }
@@ -2222,6 +2400,53 @@ async function displaySessionContext(tab, sessionId) {
   footerEl.className = 'stream-session-context';
   footerEl.innerHTML = '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
   insertBefore(footerEl);
+}
+
+/**
+ * Render a persisted direct-API conversation (Anthropic-native messages) as
+ * history bubbles + tool-call lines. Tool-result messages (internal to the
+ * agent loop) and thinking blocks are skipped.
+ * @param {Array} messages - Provider-native message history.
+ * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
+ */
+function renderApiHistory(messages, insertBefore) {
+  if (!Array.isArray(messages)) return;
+
+  const userBubble = (text) => {
+    const el = document.createElement('div');
+    el.className = 'stream-input stream-input--history';
+    el.textContent = text;
+    insertBefore(el);
+  };
+  const assistantBubble = (text) => {
+    const el = document.createElement('div');
+    el.className = 'stream-response markdown-body stream-response--history';
+    el.innerHTML = window.markdown ? window.markdown.render(text) : escapeHtml(text);
+    insertBefore(el);
+  };
+  const toolLine = (name, input) => {
+    const el = document.createElement('div');
+    el.className = 'stream-tool--history';
+    let args = '';
+    try { args = typeof formatToolArgs === 'function' ? formatToolArgs(input) : ''; } catch (_) { /* ignore */ }
+    if (!args && input) { try { args = JSON.stringify(input).slice(0, 120); } catch (_) { /* ignore */ } }
+    el.textContent = `🔧 ${name}${args ? ' — ' + args : ''}`;
+    insertBefore(el);
+  };
+
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      if (typeof msg.content === 'string' && msg.content.trim()) userBubble(msg.content);
+      // array content = tool_result blocks (internal) → skip
+    } else if (msg.role === 'assistant') {
+      const blocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content || '') }];
+      const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      if (text) assistantBubble(text);
+      for (const b of blocks) {
+        if (b.type === 'tool_use') toolLine(b.name, b.input);
+      }
+    }
+  }
 }
 
 // ── Delete Session ────────────────────────────────────────────
@@ -3653,7 +3878,10 @@ function initSettings() {
   // Populate the default-model dropdown from the shared model list.
   if (settDefaultModel) {
     settDefaultModel.innerHTML = getAvailableModels()
-      .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`)
+      .map(m => {
+        const prov = PROVIDER_SHORT[m.provider || 'copilot'] || m.provider;
+        return `<option value="${escapeHtml(m.id)}">${escapeHtml(prov)}: ${escapeHtml(m.label)}</option>`;
+      })
       .join('');
     settDefaultModel.value = getDefaultModelId();
   }
@@ -3762,6 +3990,8 @@ function initSettings() {
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
   initShortcutsSettings();
+
+  document.querySelector('.settings__tab[data-tab="providers"]')?.addEventListener('click', renderProvidersSettings);
 
   // Dev tools: Onboarding toggle
   async function loadDevOnboardingState() {
@@ -3885,6 +4115,67 @@ function initTestRunner() {
   document.getElementById('btnRunTests')?.addEventListener('click', runTests);
   document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
   document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
+}
+
+// ── API-Provider Settings ────────────────────────────────────
+
+/** Providers shown in the settings panel. `active` ones have a working backend. */
+const PROVIDER_SETTINGS = [
+  { id: 'anthropic', active: true, placeholder: 'sk-ant-…' },
+  { id: 'gemini', active: false, placeholder: 'AIza…' },
+  { id: 'openai', active: false, placeholder: 'sk-…' },
+];
+
+/**
+ * (Re)render the API-provider key settings panel: one row per provider with a
+ * masked input, save/delete buttons and the stored/empty status.
+ */
+async function renderProvidersSettings() {
+  const list = document.getElementById('providersKeyList');
+  if (!list) return;
+  await refreshProviderStatus();
+
+  document.getElementById('providersUnavailable').style.display =
+    _providerStatus.available ? 'none' : 'block';
+
+  list.innerHTML = '';
+  for (const p of PROVIDER_SETTINGS) {
+    const hasKey = Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const row = document.createElement('div');
+    row.className = 'providers-row';
+    row.innerHTML = `
+      <div class="providers-row__head">
+        <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        <span class="providers-row__status ${hasKey ? 'is-set' : ''}">${hasKey ? '● hinterlegt' : '○ leer'}</span>
+        ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
+      </div>
+      <div class="providers-row__controls">
+        <input type="password" class="providers-row__input" placeholder="${escapeAttr(p.placeholder)}" autocomplete="off" />
+        <button class="action-btn providers-row__save">Speichern</button>
+        <button class="action-btn providers-row__delete" ${hasKey ? '' : 'disabled'}>Löschen</button>
+      </div>`;
+
+    const input = row.querySelector('.providers-row__input');
+    row.querySelector('.providers-row__save').addEventListener('click', async () => {
+      const key = input.value.trim();
+      if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
+      const res = await window.copilot.providers.setKey(p.id, key);
+      if (res.success) {
+        input.value = '';
+        showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
+        renderProvidersSettings();
+      } else {
+        showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+      }
+    });
+    row.querySelector('.providers-row__delete').addEventListener('click', async () => {
+      await window.copilot.providers.deleteKey(p.id);
+      showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
+      renderProvidersSettings();
+    });
+
+    list.appendChild(row);
+  }
 }
 
 /**
@@ -5125,8 +5416,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initKeyboardShortcuts();
   initDragDrop();
   initTooltips();
+  initTabProviderSelector();
   initTabModelSelector();
   initTabModeSelector();
   initContextInfo();
   initOnboarding();
+  refreshProviderStatus();
 });

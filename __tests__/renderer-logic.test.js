@@ -345,6 +345,17 @@ describe('parseUsageTokens', () => {
     const result = parseUsageTokens('tokens: INPUT 1k, OUTPUT 2, CACHED 3k');
     expect(result).toEqual({ input: 1000, output: 2, cache: 3000 });
   });
+
+  it('parst optionales cachewrite (Direkt-API-Format)', () => {
+    const result = parseUsageTokens('Tokens: input 1000, output 50, cached 200, cachewrite 800');
+    expect(result).toEqual({ input: 1000, output: 50, cache: 200, cacheWrite: 800 });
+  });
+
+  it('ohne cachewrite bleibt das Objekt unverändert (kein cacheWrite-Key)', () => {
+    const result = parseUsageTokens('Tokens: input 1000, output 50, cached 200');
+    expect(result).toEqual({ input: 1000, output: 50, cache: 200 });
+    expect('cacheWrite' in result).toBe(false);
+  });
 });
 
 // ── parseUsageRequests ───────────────────────────────────────
@@ -403,6 +414,12 @@ describe('estimateCredits', () => {
     const sonnet = estimateCredits(tokens, 'claude-sonnet-4.6');
     const opus = estimateCredits(tokens, 'claude-opus-4.8');
     expect(opus).toBeGreaterThan(sonnet);
+  });
+
+  it('berechnet cache-write zu 1,25x Input', () => {
+    // Opus API: Input $5/1M → cache-write $6.25/1M. 2M cacheWrite = $12.5
+    const v = estimateCredits({ input: 0, output: 0, cache: 0, cacheWrite: 2_000_000 }, 'claude-opus-4-8');
+    expect(v).toBe(12.5);
   });
 });
 

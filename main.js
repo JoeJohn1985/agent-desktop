@@ -15,6 +15,8 @@ const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
 const { AcpClient } = require('./src/acp-client');
+const { getModelProvider, createApiBackend } = require('./src/providers');
+const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 
@@ -77,8 +79,8 @@ const folderConfig = readFolderConfig();
 // ── Globals ──────────────────────────────────────────────────
 /** @type {BrowserWindow|null} Main application window */
 let mainWindow = null;
-/** @type {Map<number, import('./src/acp-client').AcpClient>} tabId → AcpClient instance */
-const acpClients = new Map();
+/** @type {Map<number, object>} tabId → ChatBackend instance (AcpClient or a direct-API backend) */
+const backends = new Map();
 /** @type {number} Auto-incrementing tab identifier */
 let nextTabId = 1;
 /** @type {string} Directory for Copilot session state files */
@@ -162,8 +164,8 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    acpClients.forEach(client => client.destroy().catch(() => {}));
-    acpClients.clear();
+    backends.forEach(client => client.destroy().catch(() => {}));
+    backends.clear();
   });
 }
 
@@ -184,9 +186,23 @@ function createWindow() {
  * @returns {Promise<number>} The tab ID
  */
 async function sendCopilotPrompt(tabId, prompt, options = {}) {
-  let client = acpClients.get(tabId);
-
   const cwd = options.cwd || COPILOT_CWD;
+  const provider = getModelProvider(options.model || '');
+
+  let client = backends.get(tabId);
+
+  // If the selected provider changed for this tab, tear down the old backend.
+  if (client && client.__provider && client.__provider !== provider) {
+    try { await client.destroy(); } catch (_) { /* ignore */ }
+    backends.delete(tabId);
+    client = null;
+  }
+
+  if (provider !== 'copilot') {
+    return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
+  }
+
+  // ── Copilot CLI (ACP) path ───────────────────────────────────
   const clientOptions = {
     cwd,
     copilotBin: COPILOT_BIN,
@@ -205,7 +221,8 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
 
   if (!client) {
     client = new AcpClient(tabId, sendToRenderer, clientOptions);
-    acpClients.set(tabId, client);
+    client.__provider = 'copilot';
+    backends.set(tabId, client);
   } else {
     // Update options if they changed (e.g., model switch)
     client.updateOptions(clientOptions);
@@ -237,6 +254,72 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   return tabId;
 }
 
+/**
+ * Sends a prompt to a direct-API backend (Anthropic/Gemini/OpenAI). Constructs
+ * the backend on first use with the decrypted API key from the secure store.
+ * @param {number} tabId
+ * @param {string} prompt
+ * @param {Object} options - includes provider, cwd, model, deniedTools, existing
+ * @returns {Promise<number>}
+ */
+async function sendApiPrompt(tabId, prompt, options) {
+  const { provider, cwd } = options;
+  const apiKey = secureStore.getKey(provider);
+  if (!apiKey) {
+    throw new Error(`Kein API-Key für ${provider} hinterlegt. Bitte in den Einstellungen unter „API-Provider" eintragen.`);
+  }
+
+  // Compose the system context (instructions + active agents + active skills)
+  // from their .md files — for direct APIs there is no CLI to read them.
+  let systemContext = '';
+  try {
+    const { composeSystemContext } = require('./src/providers/system-context');
+    systemContext = composeSystemContext({
+      cwd,
+      skillsDir: folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
+      agentsDir: folderConfig.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),
+      instructionsFile: folderConfig.instructionsFile,
+      activeSkills: options.activeSkills || [],
+      activeAgents: options.activeAgents || [],
+    });
+  } catch (e) {
+    console.warn('[api] composeSystemContext failed:', e?.message);
+  }
+
+  const backendOptions = {
+    cwd,
+    model: options.model,
+    deniedTools: options.deniedTools || [],
+    apiKey,
+    baseURL: options.baseURL,
+    systemContext,
+  };
+
+  let client = options.existing || backends.get(tabId);
+  if (!client) {
+    client = createApiBackend(provider, tabId, sendToRenderer, backendOptions);
+    if (!client) throw new Error(`Provider „${provider}" wird noch nicht unterstützt.`);
+    client.__provider = provider;
+    backends.set(tabId, client);
+  } else {
+    client.updateOptions(backendOptions);
+  }
+
+  if (client.state === 'dead') await client.start();
+
+  if (!client.sessionId) {
+    if (options.sessionId) await client.loadSession(options.sessionId, cwd);
+    else await client.newSession(cwd);
+  }
+
+  client.prompt(prompt).catch((err) => {
+    if (err.message === 'Cancelled') return;
+    console.error(`[api:tab${tabId}] prompt error:`, err.message);
+  });
+
+  return tabId;
+}
+
 // ── IPC Handlers ─────────────────────────────────────────────
 
 /**
@@ -263,7 +346,7 @@ ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
 
 /** @ipc copilot:silentCommand — Runs a slash command silently and returns the text response. */
 ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
   try {
     const text = await client.silentCommand(command);
@@ -277,6 +360,43 @@ ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
 ipcMain.handle('copilot:newTab', () => {
   return nextTabId++;
+});
+
+// ── Provider API keys (secure store) ─────────────────────────
+/** @ipc providers:status — Whether OS encryption is available + which providers have a stored key. */
+ipcMain.handle('providers:status', () => {
+  const keyed = {};
+  for (const p of secureStore.KNOWN_PROVIDERS) keyed[p] = secureStore.hasKey(p);
+  return { available: secureStore.isAvailable(), keyed };
+});
+
+/** @ipc providers:setKey — Stores an encrypted API key for a provider. Never returns the key. */
+ipcMain.handle('providers:setKey', (_event, provider, key) => {
+  if (!secureStore.KNOWN_PROVIDERS.includes(provider)) {
+    return { success: false, error: 'Unbekannter Provider' };
+  }
+  try {
+    secureStore.setKey(provider, key);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/** @ipc providers:deleteKey — Removes the stored API key for a provider. */
+ipcMain.handle('providers:deleteKey', (_event, provider) => {
+  secureStore.deleteKey(provider);
+  return { success: true };
+});
+
+/** @ipc providers:loadSessionHistory — Persisted direct-API conversation history for a session. */
+ipcMain.handle('providers:loadSessionHistory', (_event, sessionId) => {
+  try {
+    const data = require('./src/providers/session-store').load(sessionId);
+    return (data && Array.isArray(data.messages)) ? data.messages : [];
+  } catch (_) {
+    return [];
+  }
 });
 
 /** @ipc copilot:getCwd @returns {string} Current working directory */
@@ -344,8 +464,13 @@ ipcMain.handle('copilot:getInstructions', () => {
 
 /** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
 ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (!client) return { success: false, error: 'Kein aktiver Client' };
+  // Direct-API backends read the deny list live per tool call — no restart needed.
+  if (client.__provider && client.__provider !== 'copilot') {
+    client.updateOptions({ deniedTools });
+    return { success: true };
+  }
   const sessionId = client.sessionId;
   if (!sessionId) return { success: false, error: 'Keine aktive Session' };
   try {
@@ -363,7 +488,7 @@ ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedToo
 
 /** @ipc copilot:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('copilot:stop', (_event, tabId) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (client) {
     client.cancel().catch(err => {
       console.warn(`[copilot:stop] cancel error for tab ${tabId}:`, err.message);
@@ -420,6 +545,8 @@ ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
 
 /** @ipc sessions:delete — Deletes a session directory recursively. @returns {Promise<boolean>} */
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
+  // Also drop any persisted direct-API history for this session.
+  try { require('./src/providers/session-store').remove(sessionId); } catch (_) { /* ignore */ }
   try {
     const sessionPath = safeSessionPath(sessionId);
     if (!fs.existsSync(sessionPath)) return false;
@@ -1518,8 +1645,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  acpClients.forEach(client => client.destroy().catch(() => {}));
-  acpClients.clear();
+  backends.forEach(client => client.destroy().catch(() => {}));
+  backends.clear();
   stopImageWatcher();
   closeLogger();
   app.quit();

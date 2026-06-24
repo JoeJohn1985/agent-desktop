@@ -228,6 +228,25 @@ contextBridge.exposeInMainWorld('copilot', {
     write: (prefs) => ipcRenderer.invoke('preferences:write', prefs),
   },
 
+  // ── Provider API keys (secure store) ──────────────────────
+
+  /**
+   * Encrypted provider API key management. Keys are stored via the OS keychain
+   * in the main process and are never returned to the renderer.
+   *
+   * @namespace copilot.providers
+   */
+  providers: {
+    /** @ipc providers:status @returns {Promise<{available: boolean, keyed: Object<string,boolean>}>} */
+    status: () => ipcRenderer.invoke('providers:status'),
+    /** @ipc providers:setKey @param {string} provider @param {string} key @returns {Promise<{success:boolean,error?:string}>} */
+    setKey: (provider, key) => ipcRenderer.invoke('providers:setKey', provider, key),
+    /** @ipc providers:deleteKey @param {string} provider @returns {Promise<{success:boolean}>} */
+    deleteKey: (provider) => ipcRenderer.invoke('providers:deleteKey', provider),
+    /** @ipc providers:loadSessionHistory @param {string} sessionId @returns {Promise<Array>} Persisted API conversation */
+    loadSessionHistory: (sessionId) => ipcRenderer.invoke('providers:loadSessionHistory', sessionId),
+  },
+
   // ── Folders ───────────────────────────────────────────────
 
   /**

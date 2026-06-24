@@ -1698,6 +1698,13 @@ mark.chat-search-highlight--active {
 .stream-response--history {
   opacity: 0.65;
 }
+.stream-tool--history {
+  opacity: 0.6;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-muted);
+  padding: 2px 0 2px 12px;
+}
 
 /* ── Session Info Bar (under tabs, session-specific) ──── */
 /* Session Actions (slash command buttons, under tabs) */
@@ -1816,6 +1823,67 @@ mark.chat-search-highlight--active {
   font-size: 10px;
   color: var(--text-muted);
 }
+.model-dropdown__group {
+  padding: 6px 12px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.model-dropdown__item--disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.model-dropdown__item--disabled:hover {
+  background: transparent;
+}
+.model-dropdown__hint {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+/* ── API-Provider Settings ──────────────────────────────── */
+.providers-list { display: flex; flex-direction: column; gap: 14px; }
+.providers-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 12px;
+  background: var(--bg-surface);
+}
+.providers-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.providers-row__name { font-weight: 600; }
+.providers-row__status { font-size: 11px; color: var(--text-muted); }
+.providers-row__status.is-set { color: var(--green, #40a02b); }
+.providers-row__soon {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.providers-row__controls { display: flex; gap: 6px; }
+.providers-row__input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+}
+.providers-row__input:focus { border-color: var(--accent); }
 /* Mode dropdown: stack label + description vertically */
 .mode-dropdown .model-dropdown__item,
 .context-dropdown .model-dropdown__item {
