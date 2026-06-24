@@ -1,44 +1,24 @@
-# Release Notes v0.31.0
+# Release Notes v0.32.0
 
 ## Was ist neu?
 
-### Kosten-Tracking und Credit-Schätzung 💰
+### Mehrere LLM-Provider — Anthropic API direkt nutzen 🔌
 
-Die App berechnet jetzt geschätzte AI Credits aus dem Token-Verbrauch jeder Session:
+Neben der GitHub Copilot CLI kann jetzt **pro Tab** die **Anthropic-API direkt** verwendet werden — mit vollem Agent-Funktionsumfang.
 
-- **Kostenanzeige in der Session-Leiste**: Zeigt `~12.5C` nach jedem Prompt (berechnet aus Input/Cache/Output-Tokens × Modellpreis)
-- **Kosten-Verlauf in den Einstellungen**: Neuer Tab „Kosten" mit gestapeltem Balkendiagramm
-  - Umschalter zwischen **Tages-** und **Wochenansicht**
-  - Farbcodierte Aufschlüsselung nach Session
-  - Gesamtsumme am Ende
-  - Verlauf löschen per Button
-- Kosten werden dauerhaft gespeichert und sessionübergreifend aufsummiert
+- **Provider-Auswahl** in der Session-Leiste (`🔌 Provider`): Umschalten zwischen *GitHub Copilot* und *Anthropic API* (Gemini/OpenAI sind vorbereitet). Das Modell-Dropdown zeigt nur die Modelle des gewählten Providers.
+- **Voll agentisch**: Das API-Backend führt eine eigene Tool-Schleife aus — lesen/schreiben/bearbeiten von Dateien und Shell-Befehle (unter Windows über PowerShell), inkl. Streaming und adaptivem Thinking.
+- **Sichere API-Keys**: Neuer Einstellungen-Tab „API-Provider". Keys werden über den OS-Schlüsselbund verschlüsselt gespeichert und verlassen den Hauptprozess nie.
+- **Projekt-Kontext**: Skills, Agents und `copilot-instructions.md` werden als (gecachter) System-Prompt mitgegeben.
+- **Prompt-Caching**: Der wachsende Verlauf wird zwischengespeichert → deutlich geringere Kosten bei langen Sessions.
+- **Kontext-Management**: Auslastungsanzeige in Prozent und **automatisches Verdichten** ab 80 %.
+- **Session-Wiederaufnahme**: Verlauf wird gespeichert und beim erneuten Öffnen wieder angezeigt; das Gespräch läuft mit vollem Kontext weiter.
+- **Exakte Kosten**: Direkt-API liefert echte Token-Zahlen (inkl. Cache-Write zu 1,25× Input) statt Schätzung.
 
-> **Hinweis:** Die Berechnung basiert auf Token-Daten aus `/usage`. Da ACP aktuell „AI Units" statt „AI Credits" zurückgibt, wird die Schätzung aus Tokens berechnet. Fällt kein Modellpreis an (z.B. Haiku), wird der AIU-Wert als Fallback angezeigt.
-
----
-
-### Kontext-Dropdown mit Compact und Clear 📊
-
-Der Kontext-Button wurde zu einem vollwertigen Dropdown ausgebaut:
-
-- **Prozentzahl direkt im Button** (`📊 18%`) — auf einen Blick sichtbar
-- **Kontext anzeigen**: Detail-Panel mit Kategorien (System/Tools, Messages, Free Space, Buffer) und Farbcodierung
-- **Compact**: Fasst die Konversation zusammen und gibt Kontext frei — %-Anzeige aktualisiert sich danach automatisch
-- **Clear**: Löscht den Kontext komplett — folgt automatisch ein `/context`-Abruf für die neue Anzeige
-
----
-
-### Session-Tools mit automatischem Prozess-Neustart 🔧
-
-Der `🔧 Tools`-Button öffnet ein Popup für session-spezifische Tool-Sperren:
-
-- Tools können per Session gesperrt werden (ergänzend zur globalen Deny-Liste)
-- **Automatischer Neustart**: Da ACP `--deny-tool`-Flags nur beim Start akzeptiert, wird der Prozess bei jeder Änderung automatisch neu gestartet und die Session wiederhergestellt — kein Datenverlust
+> **Hinweis:** Für die Anthropic-API wird ein eigener API-Key benötigt (Einstellungen → API-Provider).
 
 ---
 
 ## Bug Fixes
 
-- **Mode-Dropdown öffnete sich nach oben** statt nach unten (falscher CSS-Klassenname)
-- Credit-Berechnung funktionierte nicht (Modell-IDs enthielten Punkte statt Bindestriche)
+- **Copilot-Antworten brachen nach 60 s mit „Code 1" ab und liefen dann scheinbar endlos weiter**: Längere agentische Turns liefen in ein festes 60-Sekunden-Timeout des `session/prompt`-Requests — die Anzeige blieb auf „Running" hängen, obwohl die CLI noch arbeitete. Der Turn hat jetzt kein künstliches Timeout mehr (begrenzt durch Stop-Button und Prozess-Ende).

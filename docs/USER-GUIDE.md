@@ -1,6 +1,6 @@
 # 📘 Copilot Desktop – Benutzerhandbuch
 
-**Version 0.31.0** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
+**Version 0.32.0** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
 
 ---
 
@@ -92,7 +92,7 @@ Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🟢 Copilot Desktop                  v0.31.0         _ □ ✕     │  ← Titlebar
+│  🟢 Copilot Desktop                  v0.32.0         _ □ ✕     │  ← Titlebar
 ├────────────┬────────────────────────────────────────────────────┤
 │            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab-Bar
 │  Sessions  ├────────────────────────────────────────────────────┤
@@ -172,7 +172,8 @@ Direkt unter der Tab-Bar steuert du die aktive Session:
 
 | Element | Beschreibung |
 |---|---|
-| **🧠 Modell-Name** | Öffnet Dropdown zur Modellauswahl (pro Tab, persistent) |
+| **🔌 Provider** | Wählt das Backend pro Tab: *GitHub Copilot* oder *Anthropic API* (Gemini/OpenAI vorbereitet). API-Provider benötigen einen Key (Einstellungen → API-Provider) |
+| **🧠 Modell-Name** | Öffnet Dropdown zur Modellauswahl (zeigt nur Modelle des gewählten Providers; pro Tab, persistent) |
 | **🤖 Modus** | Öffnet Dropdown zur Modus-/Agent-Auswahl |
 | **📊 XX%** | Kontext-Dropdown — zeigt Auslastung, öffnet Detail-Panel oder führt Compact/Clear aus |
 | **🔧 Tools** | Öffnet Popup für session-spezifische Tool-Sperren |
@@ -335,7 +336,7 @@ Beim Laden einer gespeicherten Session werden nur die **letzten Nachrichten** an
 
 ### Settings
 
-Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt vier Tabs:
+Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt fünf Tabs:
 
 #### UI-Tab
 
@@ -353,6 +354,16 @@ Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt vie
 | **Standard-Modell** | Modell für neue Tabs (überschreibbar pro Tab) |
 | **Verbotene Shell Tools (global)** | Shell-Befehle, die in allen Sessions blockiert werden |
 | **Zusätzliche Verzeichnisse** | Extra Pfade, die Copilot durchsuchen darf |
+
+#### API-Provider-Tab
+
+Hier hinterlegst du API-Keys für die direkten LLM-Provider (z. B. Anthropic). Die Keys werden über
+den **OS-Schlüsselbund verschlüsselt** gespeichert und verlassen den Hauptprozess nicht.
+
+- Pro Provider ein maskiertes Key-Feld mit **Speichern**/**Löschen** und Status (hinterlegt/leer).
+- Sobald ein Key hinterlegt ist, lässt sich der Provider in der Session-Leiste (🔌) wählen.
+- Anthropic-Tabs laufen voll agentisch (eigene Tool-Schleife) mit exakter Token-Kostenabrechnung,
+  Prompt-Caching, automatischem Kontext-Compact und Session-Wiederaufnahme.
 
 #### Ordner-Tab
 
@@ -410,4 +421,4 @@ Konfigurierbare Kürzel sind über **Settings → Tastenkürzel** anpassbar.
 
 ---
 
-> **Copilot Desktop v0.31.0** · Entwickelt für GEBIT Solutions
+> **Copilot Desktop v0.32.0** · Entwickelt für GEBIT Solutions

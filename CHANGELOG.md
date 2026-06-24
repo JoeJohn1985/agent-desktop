@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.32.0] - 2026-06-24
+
+### Added
+- **Multi-LLM-Provider: Anthropic API (voll agentisch)** — neben der Copilot CLI kann pro Tab jetzt die Anthropic-API direkt genutzt werden. Eigene Agent-Schleife mit lokaler Tool-Ausführung (`shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`), Streaming, adaptivem Thinking und Token-genauer Kostenabrechnung. (`src/providers/*`, `src/secure-store.js`)
+- **Provider-Auswahl in der Session-Leiste** (`🔌 Provider`): umschalten zwischen GitHub Copilot und Anthropic API (Gemini/OpenAI vorbereitet); das Modell-Dropdown zeigt nur die Modelle des gewählten Providers
+- **Sichere API-Key-Speicherung** über den OS-Schlüsselbund (Electron `safeStorage`); neuer Einstellungen-Tab „API-Provider". Keys verlassen den Hauptprozess nicht
+- **Skills, Agents und `copilot-instructions.md`** werden für die Direkt-API als (gecachter) System-Prompt-Kontext injiziert
+- **Prompt-Caching** für die Anthropic-API (wachsender System-/Tool-/Historien-Präfix wird gecacht)
+- **Kontext-Management für Direkt-Provider**: `📊 %`-Anzeige + **automatisches Compact** ab 80 % Auslastung
+- **Session-Persistenz + Wiederanzeige** für Direkt-API-Sessions (Historie unter `~/.copilot-desktop/api-sessions/`)
+- **Cache-Write-Tokens** (1,25× Input) werden in der Kostenrechnung berücksichtigt
+
+### Changed
+- `shell`-Tool der Direkt-API läuft unter Windows über **PowerShell** statt cmd.exe (plattformabhängig via `spawn`)
+
+### Fixed
+- **ACP `session/prompt`-Timeout (kritisch)**: Längere Copilot-Turns (> 60 s) liefen in ein festes 60-Sekunden-Timeout → „[Prozess beendet mit Code 1]", während die CLI weiterlief und die Antwort endlos weiterstreamte (Anzeige blieb auf „Running" hängen). `session/prompt` hat jetzt kein Timeout mehr (begrenzt durch Cancel/Prozess-Ende); stille Slash-Commands nutzen 180 s
+
 ## [0.31.0] - 2026-06-19
 
 ### Added
