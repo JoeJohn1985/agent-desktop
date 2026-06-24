@@ -4,7 +4,8 @@
 
 ### Added
 - **Multi-LLM-Provider: Anthropic API (voll agentisch)** — neben der Copilot CLI kann pro Tab jetzt die Anthropic-API direkt genutzt werden. Eigene Agent-Schleife mit lokaler Tool-Ausführung (`shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`), Streaming, adaptivem Thinking und Token-genauer Kostenabrechnung. (`src/providers/*`, `src/secure-store.js`)
-- **Provider-Auswahl in der Session-Leiste** (`🔌 Provider`): umschalten zwischen GitHub Copilot und Anthropic API (Gemini/OpenAI vorbereitet); das Modell-Dropdown zeigt nur die Modelle des gewählten Providers
+- **Multi-LLM-Provider: Google Gemini (recherche-orientiert)** — Gemini 2.5 Pro/Flash als Direkt-API. **Live-Google-Suche** (Grounding) mit automatischen Quellenangaben + Datei-Tools (lesen/schreiben/bearbeiten), aber ohne Shell und ohne Skills/Agents/Instructions. (`src/providers/gemini-provider.js`, `@google/genai`)
+- **Provider-Auswahl beim neuen Tab**: Klick auf „+" öffnet ein Provider-Dropdown (Copilot, Gemini, Anthropic, OpenAI); der Provider ist pro Tab fix. In der Session-Leiste wird der Provider als reine Anzeige neben den Kosten gezeigt
 - **Sichere API-Key-Speicherung** über den OS-Schlüsselbund (Electron `safeStorage`); neuer Einstellungen-Tab „API-Provider". Keys verlassen den Hauptprozess nicht
 - **Skills, Agents und `copilot-instructions.md`** werden für die Direkt-API als (gecachter) System-Prompt-Kontext injiziert
 - **Prompt-Caching** für die Anthropic-API (wachsender System-/Tool-/Historien-Präfix wird gecacht)
@@ -17,6 +18,8 @@
 
 ### Fixed
 - **ACP `session/prompt`-Timeout (kritisch)**: Längere Copilot-Turns (> 60 s) liefen in ein festes 60-Sekunden-Timeout → „[Prozess beendet mit Code 1]", während die CLI weiterlief und die Antwort endlos weiterstreamte (Anzeige blieb auf „Running" hängen). `session/prompt` hat jetzt kein Timeout mehr (begrenzt durch Cancel/Prozess-Ende); stille Slash-Commands nutzen 180 s
+- **Verschmolzene Nachrichten**: Aufeinanderfolgende Antwort-Segmente um Tool-Aufrufe herum („… aufrufen:Jetzt …") wurden in eine Blase gerendert. Ein Tool-Aufruf schließt jetzt die Antwort-Blase → getrennte, lesbare Nachrichten (Copilot und Direkt-API)
+- **Provider-Dropdown**: fehlender Panel-Hintergrund/falsche Position beim „+"-Provider-Menü behoben (eigene Panel-Klasse, fixe Positionierung)
 
 ## [0.31.0] - 2026-06-19
 
