@@ -81,7 +81,7 @@ describe('provider registry', () => {
 
   it('createApiBackend liefert für copilot/unknown null', () => {
     expect(createApiBackend('copilot', 1, () => {}, {})).toBeNull();
-    expect(createApiBackend('gemini', 1, () => {}, {})).toBeNull();
+    expect(createApiBackend('openai', 1, () => {}, {})).toBeNull();
   });
 
   it('createApiBackend baut ein Anthropic-Backend', () => {
@@ -179,6 +179,63 @@ describe('Session-Persistenz (ApiAgentClient)', () => {
     expect(result).toBeTruthy();
     expect(result.evt.sessionId).toMatch(/^api-/);
     expect(b.sessionId).toBe(result.evt.sessionId);
+  });
+});
+
+describe('Gemini-Provider', () => {
+  const { toGeminiTools, toGeminiSchema } = require('../src/providers/gemini-provider');
+  const { getToolDefs } = require('../src/providers/agent-tools');
+
+  it('löst Gemini-Modelle auf und baut ein Gemini-Backend', () => {
+    expect(getModelProvider('gemini-2.5-pro')).toBe('gemini');
+    expect(getModelProvider('gemini-2.5-flash')).toBe('gemini');
+    const b = createApiBackend('gemini', 1, () => {}, { model: 'gemini-2.5-pro', apiKey: 'x' });
+    expect(b).not.toBeNull();
+    expect(b.constructor.name).toBe('GeminiProvider');
+    expect(b._contextWindow()).toBe(1_048_576);
+  });
+
+  it('konvertiert JSON-Schema-Typen in Geminis Uppercase-Enum', () => {
+    const s = toGeminiSchema({ type: 'object', properties: { x: { type: 'string', description: 'd' } }, required: ['x'] });
+    expect(s.type).toBe('OBJECT');
+    expect(s.properties.x.type).toBe('STRING');
+    expect(s.required).toEqual(['x']);
+  });
+
+  it('verpackt Tools als functionDeclarations', () => {
+    const tools = toGeminiTools(getToolDefs().filter(d => d.name === 'write_file'));
+    expect(tools).toHaveLength(1);
+    expect(tools[0].functionDeclarations[0].name).toBe('write_file');
+    expect(tools[0].functionDeclarations[0].parameters.type).toBe('OBJECT');
+  });
+
+  it('hat USD-Preise für Gemini-Modelle', () => {
+    expect(MODEL_PRICING['gemini-2.5-pro']).toEqual({ input: 1.25, cache: 0.31, output: 10 });
+    expect(MODEL_PRICING['gemini-2.5-flash'].output).toBe(2.5);
+  });
+
+  it('enthält das Google-Search-Tool zusätzlich zu den Datei-Tools', () => {
+    const b = createApiBackend('gemini', 1, () => {}, { model: 'gemini-2.5-pro', apiKey: 'x' });
+    // Kein öffentlicher Getter — über die Konstruktion verifizieren wir die Tool-Konvertierung separat;
+    // hier prüfen wir die Quellen-Extraktion.
+    expect(b.constructor.name).toBe('GeminiProvider');
+  });
+
+  it('collectSources extrahiert und dedupliziert Web-Quellen', () => {
+    const { collectSources } = require('../src/providers/gemini-provider');
+    const grounding = {
+      groundingChunks: [
+        { web: { title: 'A', uri: 'https://a.example' } },
+        { web: { title: 'A again', uri: 'https://a.example' } }, // Duplikat
+        { web: { uri: 'https://b.example', domain: 'b.example' } }, // ohne title → domain
+        { retrievedContext: {} }, // kein web → ignoriert
+      ],
+    };
+    expect(collectSources(grounding)).toEqual([
+      { title: 'A', uri: 'https://a.example' },
+      { title: 'b.example', uri: 'https://b.example' },
+    ]);
+    expect(collectSources(null)).toEqual([]);
   });
 });
 

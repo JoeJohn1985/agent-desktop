@@ -271,10 +271,11 @@ async function sendApiPrompt(tabId, prompt, options) {
 
   // Compose the system context (instructions + active agents + active skills)
   // from their .md files — for direct APIs there is no CLI to read them.
+  // Only Anthropic uses it; Gemini is intentionally kept context-light.
   let systemContext = '';
   try {
     const { composeSystemContext } = require('./src/providers/system-context');
-    systemContext = composeSystemContext({
+    if (provider === 'anthropic') systemContext = composeSystemContext({
       cwd,
       skillsDir: folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
       agentsDir: folderConfig.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),

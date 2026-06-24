@@ -7,6 +7,7 @@
 
 const { getModelProvider } = require('../renderer-logic');
 const { AnthropicProvider } = require('./anthropic-provider');
+const { GeminiProvider } = require('./gemini-provider');
 
 /**
  * Creates a direct-API backend for the given provider, or returns null if the
@@ -21,7 +22,9 @@ function createApiBackend(provider, tabId, sendToRenderer, options) {
   switch (provider) {
     case 'anthropic':
       return new AnthropicProvider(tabId, sendToRenderer, options);
-    // 'gemini' and 'openai' are added in later phases.
+    case 'gemini':
+      return new GeminiProvider(tabId, sendToRenderer, options);
+    // 'openai' is added in a later phase.
     default:
       return null;
   }

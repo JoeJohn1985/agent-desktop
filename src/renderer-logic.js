@@ -178,6 +178,9 @@ const MODEL_PRICING = {
   'claude-sonnet-4-6': { input: 3,   cache: 0.3, output: 15 },
   'claude-opus-4-7':   { input: 5,   cache: 0.5, output: 25 },
   'claude-opus-4-8':   { input: 5,   cache: 0.5, output: 25 },
+  // Google Gemini API (USD pro 1M)
+  'gemini-2.5-pro':    { input: 1.25, cache: 0.31,  output: 10  },
+  'gemini-2.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
 };
 
 // Maps a model ID to its backend provider. Unknown IDs default to 'copilot'
@@ -188,6 +191,8 @@ const MODEL_PROVIDERS = {
   'claude-sonnet-4-6': 'anthropic',
   'claude-opus-4-7':   'anthropic',
   'claude-opus-4-8':   'anthropic',
+  'gemini-2.5-pro':    'gemini',
+  'gemini-2.5-flash':  'gemini',
 };
 
 function getModelProvider(modelId) {
