@@ -194,9 +194,6 @@
       <!-- Session Actions (slash command buttons, under tabs) -->
       <div class="session-actions" id="sessionActions">
         <div class="model-select-wrapper">
-          <button class="session-actions__btn" id="btnProviderSelect" data-tooltip="Provider für diesen Tab auswählen">🔌 Provider</button>
-        </div>
-        <div class="model-select-wrapper">
           <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model für diesen Tab auswählen">🧠 Model</button>
         </div>
         <div class="model-select-wrapper">
@@ -218,6 +215,7 @@
           </div>
         </div>
         <div class="session-actions__spacer"></div>
+        <span class="session-actions__provider" id="sessionProvider" data-tooltip="Provider dieses Tabs (wird beim Erstellen über „+" festgelegt)">🔌 Copilot</span>
         <button class="session-actions__cost-btn" id="btnOpenCosts" data-tooltip="Kostenauflistung öffnen">📈</button>
         <span class="session-actions__usage" id="sessionUsage">~0C</span>
       </div>

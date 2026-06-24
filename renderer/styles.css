@@ -1752,6 +1752,31 @@ mark.chat-search-highlight--active {
   pointer-events: none;
 }
 
+/* Provider label — read-only output next to the cost, not a button. */
+.session-actions__provider {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  cursor: default;
+}
+.session-actions__provider--api {
+  color: var(--accent);
+}
+
+/* New-tab provider chooser (fixed, anchored under the "+" button). */
+.provider-add-dropdown {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  padding: 4px 0;
+  z-index: 2000;
+  animation: model-dropdown-in 0.12s ease-out;
+}
+
 .session-actions__btn--active {
   background: var(--accent, #2ea043);
   border-color: var(--accent, #2ea043);

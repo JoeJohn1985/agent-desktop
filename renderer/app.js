@@ -554,7 +554,7 @@ function showNotification(message, type = 'info') {
  * @param {string} [label='🤖 Copilot'] - Display label for the tab.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label) {
+async function createTab(label, initialModel) {
   const tabLabel = label || '🤖 Copilot';
   const tabId = await copilot.chat.newTab();
 
@@ -591,7 +591,7 @@ async function createTab(label) {
     _lastUsageTokens: null,
     _creditTotal: 0,
     _sessionName: null,
-    selectedModel: getDefaultModelId(),
+    selectedModel: initialModel || getDefaultModelId(),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -1194,6 +1194,23 @@ function sendMessage() {
 }
 
 // ── Copilot Event Processing (JSONL) ─────────────────────────
+
+/**
+ * Finalize the current streaming response bubble: flush the throttled markdown
+ * render and detach it, so the next message text starts a fresh bubble. Called
+ * at tool-call boundaries so interleaved "narrate → act → narrate" turns are
+ * shown as separate messages instead of one concatenated blob.
+ * @param {Object} tab
+ */
+function finalizeResponseBubble(tab) {
+  if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
+  if (tab._responseEl && tab._responseRaw) {
+    tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+  }
+  tab._responseEl = null;
+  tab._responseRaw = '';
+}
+
 /**
  * Register IPC event handlers for all Copilot CLI JSONL events.
  * Handles reasoning deltas, streaming message text, tool execution,
@@ -1321,6 +1338,9 @@ function initCopilotIPC() {
           tab.statusEl.style.display = 'block';
           break;
         }
+        // A real tool call ends the current message — close its bubble so the
+        // text after the tool renders as a separate message.
+        finalizeResponseBubble(tab);
         if (event.data.toolName === 'ask_user') {
           setTabStatus(tabId, 'question');
         }
@@ -1560,6 +1580,9 @@ const DEFAULT_MODELS = [
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic' },
+  // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini' },
 ];
 
 const PROVIDER_LABELS = {
@@ -1573,10 +1596,12 @@ const PROVIDER_ICON = '🔌';
 
 // Providers offered in the provider selector. `active: false` ones are shown
 // but not yet selectable (backend not implemented).
+// Order shown in the new-tab provider menu: Copilot (default) first, then the
+// direct-API providers. Gemini/OpenAI are listed but not yet selectable.
 const PROVIDERS = [
   { id: 'copilot', active: true },
+  { id: 'gemini', active: true },
   { id: 'anthropic', active: true },
-  { id: 'gemini', active: false },
   { id: 'openai', active: false },
 ];
 
@@ -1601,80 +1626,15 @@ function getTabProvider(tab) {
 
 const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI' };
 
-/** Update the provider button label/highlight for a tab. */
+/** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {
-  const btn = document.getElementById('btnProviderSelect');
-  if (!btn) return;
+  const el = document.getElementById('sessionProvider');
+  if (!el) return;
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = getTabProvider(tab);
-  btn.textContent = `${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`;
-  btn.classList.toggle('session-actions__btn--active', provider !== 'copilot');
-}
-
-/**
- * Initialize the provider selector. Switching provider sets the tab's model to
- * that provider's default model (the model implies the provider), tears down
- * any existing backend on the next send, and refreshes the model button.
- */
-function initTabProviderSelector() {
-  const btn = document.getElementById('btnProviderSelect');
-  if (!btn) return;
-
-  let activeCloseHandler = null;
-  const closeDropdown = (dd) => {
-    dd.remove();
-    if (activeCloseHandler) { document.removeEventListener('click', activeCloseHandler, true); activeCloseHandler = null; }
-  };
-
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const existing = document.querySelector('.provider-dropdown');
-    if (existing) { closeDropdown(existing); return; }
-
-    const openedForTabId = activeTabId;
-    const tab = tabs.get(openedForTabId);
-    const currentProvider = getTabProvider(tab);
-
-    const dropdown = document.createElement('div');
-    dropdown.className = 'model-dropdown model-dropdown--below provider-dropdown';
-
-    PROVIDERS.forEach(p => {
-      const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
-      const isActive = currentProvider === p.id;
-      const item = document.createElement('div');
-      item.className = 'model-dropdown__item'
-        + (isActive ? ' model-dropdown__item--active' : '')
-        + (p.active ? '' : ' model-dropdown__item--disabled');
-      let badge = '';
-      if (!p.active) badge = ' <span class="model-dropdown__hint">in Vorbereitung</span>';
-      else if (!hasKey) badge = ' <span class="model-dropdown__hint">Key nötig</span>';
-      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
-
-      item.addEventListener('click', () => {
-        if (!p.active) {
-          showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
-          return;
-        }
-        closeDropdown(dropdown);
-        const t = tabs.get(openedForTabId);
-        if (!t) return;
-        if (p.id === currentProvider) return;
-        t.selectedModel = getDefaultModelForProvider(p.id);
-        if (t.sessionId) saveSessionModel(t.sessionId, t.selectedModel);
-        updateModelSelectBtn(openedForTabId);
-        if (p.id !== 'copilot' && !hasKey) {
-          showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
-        }
-      });
-      dropdown.appendChild(item);
-    });
-
-    btn.closest('.model-select-wrapper').appendChild(dropdown);
-    activeCloseHandler = (ev) => {
-      if (!dropdown.contains(ev.target) && ev.target !== btn) closeDropdown(dropdown);
-    };
-    setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
-  });
+  el.textContent = `${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`;
+  // Subtle accent for non-default (direct-API) providers.
+  el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
 }
 
 /** @type {{available: boolean, keyed: Object<string,boolean>}} Cached provider key status. */
@@ -2435,7 +2395,19 @@ function renderApiHistory(messages, insertBefore) {
   };
 
   for (const msg of messages) {
-    if (msg.role === 'user') {
+    if (Array.isArray(msg.parts)) {
+      // Gemini shape: { role: 'user' | 'model', parts: [{text}|{functionCall}|{functionResponse}] }
+      const text = msg.parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+      if (msg.role === 'model') {
+        if (text) assistantBubble(text);
+        for (const p of msg.parts) {
+          if (p.functionCall) toolLine(p.functionCall.name, p.functionCall.args);
+        }
+      } else if (text) {
+        userBubble(text); // functionResponse parts (internal) skipped
+      }
+    } else if (msg.role === 'user') {
+      // Anthropic shape
       if (typeof msg.content === 'string' && msg.content.trim()) userBubble(msg.content);
       // array content = tool_result blocks (internal) → skip
     } else if (msg.role === 'assistant') {
@@ -3760,9 +3732,64 @@ function initChatInput() {
     renderSessions(filterSessions());
   });
 
-  document.getElementById('btnAddTab').addEventListener('click', () => {
-    createTab('🤖 Copilot');
+  document.getElementById('btnAddTab').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openAddTabProviderMenu(e.currentTarget);
   });
+}
+
+/**
+ * Opens the provider chooser anchored to the "+" new-tab button. Selecting a
+ * provider creates a new tab pre-set to that provider's default model (the
+ * model implies the provider; switching providers within a tab is not offered
+ * because it would discard the tab's conversation).
+ * @param {HTMLElement} btn - The "+" button.
+ */
+function openAddTabProviderMenu(btn) {
+  const existing = document.querySelector('.provider-add-dropdown');
+  if (existing) { existing.remove(); return; }
+
+  const dropdown = document.createElement('div');
+  // Own panel class (fixed-positioned) — not .model-dropdown, whose
+  // bottom/animation rules conflict with fixed anchoring under the "+".
+  dropdown.className = 'provider-add-dropdown';
+  const rect = btn.getBoundingClientRect();
+  // Right-align to the button so it doesn't overflow the window edge.
+  dropdown.style.top = `${rect.bottom + 4}px`;
+  dropdown.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+
+  let closeHandler = null;
+  const close = () => {
+    dropdown.remove();
+    if (closeHandler) { document.removeEventListener('click', closeHandler, true); closeHandler = null; }
+  };
+
+  PROVIDERS.forEach(p => {
+    const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const item = document.createElement('div');
+    item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
+    let badge = '';
+    if (!p.active) badge = ' <span class="model-dropdown__hint">in Vorbereitung</span>';
+    else if (!hasKey) badge = ' <span class="model-dropdown__hint">Key nötig</span>';
+    item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
+    item.addEventListener('click', () => {
+      if (!p.active) {
+        showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
+        return;
+      }
+      close();
+      const label = p.id === 'copilot' ? '🤖 Copilot' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
+      createTab(label, getDefaultModelForProvider(p.id));
+      if (p.id !== 'copilot' && !hasKey) {
+        showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
+      }
+    });
+    dropdown.appendChild(item);
+  });
+
+  document.body.appendChild(dropdown);
+  closeHandler = (ev) => { if (!dropdown.contains(ev.target) && ev.target !== btn) close(); };
+  setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
 }
 
 /**
@@ -4122,7 +4149,7 @@ function initTestRunner() {
 /** Providers shown in the settings panel. `active` ones have a working backend. */
 const PROVIDER_SETTINGS = [
   { id: 'anthropic', active: true, placeholder: 'sk-ant-…' },
-  { id: 'gemini', active: false, placeholder: 'AIza…' },
+  { id: 'gemini', active: true, placeholder: 'AIza…' },
   { id: 'openai', active: false, placeholder: 'sk-…' },
 ];
 
@@ -5416,7 +5443,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initKeyboardShortcuts();
   initDragDrop();
   initTooltips();
-  initTabProviderSelector();
   initTabModelSelector();
   initTabModeSelector();
   initContextInfo();
