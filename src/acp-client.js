@@ -9,6 +9,7 @@ const MAX_RESTARTS_PER_MINUTE = 3;
 const RESTART_WINDOW_MS = 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 60_000;
+const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /compact …)
 const STOP_GRACE_MS = 5_000;
 
 /**
@@ -331,7 +332,7 @@ class AcpClient extends EventEmitter {
       const result = await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text }],
-      });
+      }, 0); // no timeout — an agentic turn can run for minutes (see #sendRequest)
       this.#state = 'ready';
       // A cancelled turn returns stopReason "cancelled" → report code -1 to the UI.
       const cancelled = this.#cancelRequested || result?.stopReason === 'cancelled';
@@ -392,7 +393,7 @@ class AcpClient extends EventEmitter {
       await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
-      });
+      }, SLASH_COMMAND_TIMEOUT_MS);
       return this.#contextQueryCollector.join('');
     } finally {
       this.#contextQueryCollector = null;
@@ -428,10 +429,15 @@ class AcpClient extends EventEmitter {
       const id = ++this.#requestId;
       const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-      const timer = setTimeout(() => {
+      // timeout <= 0 means "no timeout" — used for session/prompt, whose agentic
+      // turns can run for minutes. Such turns are bounded by user cancel and by
+      // the process lifecycle (a process exit rejects all pending requests), so
+      // a fixed timeout here would falsely abort a still-running turn while the
+      // CLI keeps streaming — leaving the UI stuck in a "running" state.
+      const timer = timeout > 0 ? setTimeout(() => {
         this.#pendingRequests.delete(id);
         reject(new Error(`Request ${method} (id=${id}) timed out after ${timeout}ms`));
-      }, timeout);
+      }, timeout) : null;
 
       this.#pendingRequests.set(id, { resolve, reject, timer });
 
