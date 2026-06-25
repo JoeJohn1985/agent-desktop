@@ -1520,26 +1520,38 @@ ipcMain.handle('auth:check', async () => {
 });
 
 /**
- * @ipc auth:login — Opens a detached PowerShell window running `copilot login`.
- * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: null}>}
+ * @ipc auth:login — Opens a VISIBLE terminal window running `copilot login`
+ * so the user can complete the device-code flow.
+ * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: string|null}>}
  */
 ipcMain.handle('auth:login', async () => {
-  console.log('[auth:login] Starting copilot login in new terminal window');
-  const psScript = [
-    'Write-Host "Copilot CLI Login" -ForegroundColor Cyan;',
-    'copilot login;',
-    'Write-Host "";',
-    'Write-Host "Dieses Fenster kann jetzt geschlossen werden." -ForegroundColor Green;',
-    'Start-Sleep -Seconds 3',
-  ].join(' ');
-  const child = require('child_process').spawn('powershell.exe', ['-NoLogo', '-Command', psScript], {
-    detached: true,
-    stdio: 'ignore',
-    shell: false,
-    windowsHide: false,
-  });
-  child.unref();
-  return { success: true, pendingInTerminal: true, error: null };
+  console.log('[auth:login] Opening copilot login in a new terminal window');
+  try {
+    if (process.platform === 'win32') {
+      // A bare detached spawn from a GUI app does NOT allocate a visible
+      // console on Windows. Use cmd's `start` (via shell) to pop a real
+      // window, and `-NoExit` so it stays open for the login flow + output.
+      const cmd = 'start "Copilot Login" powershell -NoLogo -NoExit -Command "copilot login"';
+      const child = require('child_process').spawn(cmd, {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      const child = require('child_process').spawn('open', ['-a', 'Terminal', COPILOT_BIN], { detached: true, stdio: 'ignore' });
+      child.unref();
+    } else {
+      // Linux: try a common terminal emulator.
+      const child = require('child_process').spawn('x-terminal-emulator', ['-e', 'copilot', 'login'], { detached: true, stdio: 'ignore' });
+      child.unref();
+    }
+    return { success: true, pendingInTerminal: true, error: null };
+  } catch (err) {
+    console.error('[auth:login]', err.message);
+    return { success: false, pendingInTerminal: false, error: err.message };
+  }
 });
 
 // Window controls
