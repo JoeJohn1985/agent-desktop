@@ -538,6 +538,8 @@ contextBridge.exposeInMainWorld('copilot', {
     maximize: () => ipcRenderer.send('window:maximize'),
     /** @ipc window:close */
     close: () => ipcRenderer.send('window:close'),
+    /** @ipc app:relaunch — Restarts the app (e.g. after Copilot login). @returns {Promise<{success: boolean}>} */
+    relaunch: () => ipcRenderer.invoke('app:relaunch'),
   },
 
   // ── File Utilities ────────────────────────────────────────

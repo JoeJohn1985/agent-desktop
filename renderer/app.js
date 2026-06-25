@@ -1237,8 +1237,24 @@ function showAuthRequiredBanner(tab) {
   const el = document.createElement('div');
   el.className = 'stream-auth-required';
   const msg = document.createElement('span');
-  msg.textContent = '🔐 Copilot-Anmeldung erforderlich — bitte erneut bei GitHub Copilot anmelden und die Nachricht dann erneut senden.';
+  msg.textContent = '🔐 Copilot-Anmeldung erforderlich — im Terminal anmelden, danach die App neu starten, damit die Sitzung übernommen wird.';
   el.appendChild(msg);
+
+  // Restart button — hidden until login is triggered; the new auth state is only
+  // picked up at main-process startup, so a renderer reload is not enough.
+  const restartBtn = document.createElement('button');
+  restartBtn.className = 'stream-auth-required__btn';
+  restartBtn.textContent = 'App neu starten';
+  restartBtn.style.display = 'none';
+  restartBtn.addEventListener('click', () => {
+    restartBtn.disabled = true;
+    restartBtn.textContent = 'Wird neu gestartet…';
+    copilot.window.relaunch().catch((e) => {
+      showNotification('Neustart fehlgeschlagen: ' + (e?.message || e), 'error');
+      restartBtn.disabled = false;
+      restartBtn.textContent = 'App neu starten';
+    });
+  });
 
   const btn = document.createElement('button');
   btn.className = 'stream-auth-required__btn';
@@ -1250,10 +1266,14 @@ function showAuthRequiredBanner(tab) {
       const r = await copilot.auth.login();
       showNotification(
         r && r.pendingInTerminal
-          ? 'Login im Terminal abschließen, dann die Nachricht erneut senden.'
+          ? 'Login im Terminal abschließen, danach „App neu starten" klicken.'
           : 'Anmeldung gestartet.',
         'info',
       );
+      // Offer the restart once login is running in the terminal.
+      restartBtn.style.display = '';
+      btn.textContent = 'Login erneut öffnen';
+      btn.disabled = false;
     } catch (e) {
       showNotification('Login fehlgeschlagen: ' + (e?.message || e), 'error');
       btn.disabled = false;
@@ -1261,6 +1281,7 @@ function showAuthRequiredBanner(tab) {
     }
   });
   el.appendChild(btn);
+  el.appendChild(restartBtn);
 
   tab.streamEl.insertBefore(el, tab.statusEl);
   showNotification('Copilot-Anmeldung erforderlich.', 'warning');

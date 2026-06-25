@@ -1554,6 +1554,18 @@ ipcMain.handle('auth:login', async () => {
   }
 });
 
+/**
+ * @ipc app:relaunch — Restarts the app. Needed after `copilot login` because the
+ * authentication state is picked up at main-process startup; a renderer reload
+ * alone does not re-establish the Copilot session.
+ */
+ipcMain.handle('app:relaunch', async () => {
+  console.log('[app:relaunch] Relaunching the app');
+  app.relaunch();
+  app.exit(0);
+  return { success: true };
+});
+
 // Window controls
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
