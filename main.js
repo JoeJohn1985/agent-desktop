@@ -544,14 +544,45 @@ ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
   return readRecentMessages(safeSessionPath(sessionId), 5);
 });
 
-/** @ipc sessions:delete — Deletes a session directory recursively. @returns {Promise<boolean>} */
+/**
+ * Backs up a session's todos.json (if present and non-empty) before deletion,
+ * so a manually curated todo list is never lost permanently. Copies go to
+ * ~/.copilot-desktop/deleted-todos/<sessionId>-<timestamp>.json.
+ * @param {string} sessionPath - Absolute path to the session directory.
+ * @param {string} sessionId
+ */
+function backupSessionTodos(sessionPath, sessionId) {
+  try {
+    const todosPath = path.join(sessionPath, 'todos.json');
+    if (!fs.existsSync(todosPath)) return;
+    const raw = fs.readFileSync(todosPath, 'utf-8').trim();
+    if (!raw || raw === '[]') return; // nichts Sinnvolles zu sichern
+    const backupDir = path.join(os.homedir(), '.copilot-desktop', 'deleted-todos');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(backupDir, `${sessionId}-${stamp}.json`), raw, 'utf-8');
+  } catch (e) {
+    console.warn('[sessions:delete] Todo-Backup fehlgeschlagen:', e.message || e);
+  }
+}
+
+/** @ipc sessions:delete — Moves a session directory to the OS trash (recoverable). @returns {Promise<boolean>} */
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
   // Also drop any persisted direct-API history for this session.
   try { require('./src/providers/session-store').remove(sessionId); } catch (_) { /* ignore */ }
   try {
     const sessionPath = safeSessionPath(sessionId);
     if (!fs.existsSync(sessionPath)) return false;
-    fs.rmSync(sessionPath, { recursive: true, force: true });
+    // Insurance: keep a copy of the curated todo list outside the session.
+    backupSessionTodos(sessionPath, sessionId);
+    // Prefer the OS trash so an accidental delete stays recoverable; fall back
+    // to a hard delete only if trashing is unavailable.
+    try {
+      await shell.trashItem(sessionPath);
+    } catch (trashErr) {
+      console.warn('[sessions:delete] Papierkorb nicht verfügbar, lösche hart:', trashErr.message || trashErr);
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
     return true;
   } catch (e) {
     console.warn('[sessions:delete] Fehler:', e.message || e);
