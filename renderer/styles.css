@@ -1600,6 +1600,33 @@ mark.chat-search-highlight--active {
   max-width: 80%;
 }
 
+/* ── Authentication-required banner ─────────────────────── */
+.stream-auth-required {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: rgba(223,142,29,0.10);
+  border: 1px solid var(--yellow, #df8e1d);
+  border-radius: var(--radius-sm);
+}
+.stream-auth-required span { flex: 1; }
+.stream-auth-required__btn {
+  flex-shrink: 0;
+  background: var(--yellow, #df8e1d);
+  color: #1e1e2e;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.stream-auth-required__btn:disabled { opacity: 0.6; cursor: default; }
+
 /* ── Force Unlock Button & Info ───────────────────────── */
 .stream-unlock-btn {
   display: inline-flex;

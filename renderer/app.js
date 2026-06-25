@@ -1161,6 +1161,7 @@ function sendMessage() {
   const activeSkillDirs = [...activeSkills].map(id => skills.find(s => s.id === id)?.dirName).filter(Boolean);
   const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
 
+  const sendTabId = activeTabId;
   copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
@@ -1173,7 +1174,9 @@ function sendMessage() {
     cwd: tab.cwd || undefined,
     activeSkills: activeSkillDirs,
     activeAgents: activeAgentSlugs,
-  });
+  })
+    .then((res) => handleSendResult(sendTabId, res))
+    .catch((err) => handleSendResult(sendTabId, { success: false, error: err?.message || String(err) }));
 
   // Update lastUsed for sorting
   if (tab.sessionId) touchSession(tab.sessionId);
@@ -1191,6 +1194,76 @@ function sendMessage() {
   tab.inputRichHtml = '';
 
   scrollToBottom(tab.streamEl);
+}
+
+/**
+ * Handle the result of copilot.chat.send. On success the backend streams events
+ * and emits copilot:done; on failure no events arrive, so we must unstick the
+ * tab's "processing" state here and surface the error (with an auth action when
+ * the failure is an authentication problem).
+ * @param {number} tabId
+ * @param {number|{success:false,error:string}} res
+ */
+function handleSendResult(tabId, res) {
+  // Success → res is the tab id (number). Failure → { success:false, error }.
+  if (!res || typeof res !== 'object' || res.success !== false) return;
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  stopInactivityMonitor(tabId);
+  tab.isProcessing = false;
+  if (tab.statusEl) tab.statusEl.style.display = 'none';
+
+  const err = res.error || 'Unbekannter Fehler';
+  if (/auth/i.test(err)) {
+    showAuthRequiredBanner(tab);
+  } else {
+    const el = document.createElement('div');
+    el.className = 'stream-error';
+    el.textContent = `⚠️ ${err}`;
+    tab.streamEl.insertBefore(el, tab.statusEl);
+    showNotification(err, 'error');
+  }
+  setTabStatus(tabId, 'error');
+  scrollToBottom(tab.streamEl);
+}
+
+/**
+ * Insert an "authentication required" banner with a login button into a tab's
+ * stream. The button triggers the existing Copilot CLI login flow.
+ * @param {Object} tab
+ */
+function showAuthRequiredBanner(tab) {
+  const el = document.createElement('div');
+  el.className = 'stream-auth-required';
+  const msg = document.createElement('span');
+  msg.textContent = '🔐 Copilot-Anmeldung erforderlich — bitte erneut bei GitHub Copilot anmelden und die Nachricht dann erneut senden.';
+  el.appendChild(msg);
+
+  const btn = document.createElement('button');
+  btn.className = 'stream-auth-required__btn';
+  btn.textContent = 'Anmelden';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Login geöffnet…';
+    try {
+      const r = await copilot.auth.login();
+      showNotification(
+        r && r.pendingInTerminal
+          ? 'Login im Terminal abschließen, dann die Nachricht erneut senden.'
+          : 'Anmeldung gestartet.',
+        'info',
+      );
+    } catch (e) {
+      showNotification('Login fehlgeschlagen: ' + (e?.message || e), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Anmelden';
+    }
+  });
+  el.appendChild(btn);
+
+  tab.streamEl.insertBefore(el, tab.statusEl);
+  showNotification('Copilot-Anmeldung erforderlich.', 'warning');
 }
 
 // ── Copilot Event Processing (JSONL) ─────────────────────────
