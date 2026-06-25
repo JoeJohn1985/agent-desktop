@@ -1764,6 +1764,21 @@ mark.chat-search-highlight--active {
   color: var(--accent);
 }
 
+/* "Beta" marker for not-yet-fully-tested providers. */
+.beta-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--yellow, #df8e1d);
+  border: 1px solid var(--yellow, #df8e1d);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
 /* New-tab provider chooser (fixed, anchored under the "+" button). */
 .provider-add-dropdown {
   position: fixed;

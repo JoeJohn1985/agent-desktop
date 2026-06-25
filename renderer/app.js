@@ -1605,6 +1605,9 @@ const PROVIDERS = [
   { id: 'openai', active: false },
 ];
 
+// Providers still in beta (not yet extensively tested) — shown with a Beta badge.
+const BETA_PROVIDERS = new Set(['anthropic', 'gemini']);
+
 /** Default model chosen when switching to a provider (first model of that provider). */
 function getDefaultModelForProvider(provider) {
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
@@ -1632,7 +1635,8 @@ function updateProviderSelectBtn(tabId) {
   if (!el) return;
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = getTabProvider(tab);
-  el.textContent = `${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`;
+  const beta = BETA_PROVIDERS.has(provider) ? ' <span class="beta-badge">Beta</span>' : '';
+  el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${beta}`;
   // Subtle accent for non-default (direct-API) providers.
   el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
 }
@@ -3769,8 +3773,9 @@ function openAddTabProviderMenu(btn) {
     const item = document.createElement('div');
     item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
     let badge = '';
-    if (!p.active) badge = ' <span class="model-dropdown__hint">in Vorbereitung</span>';
-    else if (!hasKey) badge = ' <span class="model-dropdown__hint">Key nötig</span>';
+    if (BETA_PROVIDERS.has(p.id)) badge += ' <span class="beta-badge">Beta</span>';
+    if (!p.active) badge += ' <span class="model-dropdown__hint">in Vorbereitung</span>';
+    else if (!hasKey) badge += ' <span class="model-dropdown__hint">Key nötig</span>';
     item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
     item.addEventListener('click', () => {
       if (!p.active) {
@@ -4173,6 +4178,7 @@ async function renderProvidersSettings() {
     row.innerHTML = `
       <div class="providers-row__head">
         <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        ${BETA_PROVIDERS.has(p.id) ? '<span class="beta-badge">Beta</span>' : ''}
         <span class="providers-row__status ${hasKey ? 'is-set' : ''}">${hasKey ? '● hinterlegt' : '○ leer'}</span>
         ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
       </div>
