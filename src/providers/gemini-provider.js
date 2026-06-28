@@ -17,6 +17,7 @@ const MAX_OUTPUT_TOKENS = 8192;
 const CONTEXT_WINDOWS = {
   'gemini-2.5-pro': 1_048_576,
   'gemini-2.5-flash': 1_048_576,
+  'gemini-3.5-flash': 1_048_576,
 };
 
 // File tools only — research + file creation, no arbitrary command execution.

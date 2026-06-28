@@ -1678,6 +1678,7 @@ const DEFAULT_MODELS = [
   // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini' },
 ];
 
 const PROVIDER_LABELS = {

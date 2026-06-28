@@ -181,6 +181,8 @@ const MODEL_PRICING = {
   // Google Gemini API (USD pro 1M)
   'gemini-2.5-pro':    { input: 1.25, cache: 0.31,  output: 10  },
   'gemini-2.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
+  // TODO: Preise bestätigen — vorläufig wie 2.5 Flash übernommen.
+  'gemini-3.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
 };
 
 // Maps a model ID to its backend provider. Unknown IDs default to 'copilot'
@@ -193,6 +195,7 @@ const MODEL_PROVIDERS = {
   'claude-opus-4-8':   'anthropic',
   'gemini-2.5-pro':    'gemini',
   'gemini-2.5-flash':  'gemini',
+  'gemini-3.5-flash':  'gemini',
 };
 
 function getModelProvider(modelId) {
