@@ -69,26 +69,44 @@ function collectSources(grounding) {
   return out;
 }
 
-function buildSystemPrompt(cwd) {
-  return [
+// Gemini 2.5 forbids combining the built-in googleSearch tool with custom
+// functionDeclarations in the same request, so each turn runs in exactly one
+// mode. The mode is switchable per tab between turns.
+const GEMINI_MODES = ['search', 'files'];
+const DEFAULT_GEMINI_MODE = 'search';
+
+const FILE_TOOLS = toGeminiTools(getToolDefs().filter(d => GEMINI_TOOL_NAMES.includes(d.name)));
+const SEARCH_TOOLS = [{ googleSearch: {} }];
+
+function resolveGeminiMode(mode) {
+  return GEMINI_MODES.includes(mode) ? mode : DEFAULT_GEMINI_MODE;
+}
+
+function buildSystemPrompt(cwd, mode) {
+  const lines = [
     'You are a helpful research and writing assistant embedded in a desktop app.',
-    'You can search the web (Google Search) for current information and cite your sources.',
-    'You can read files and create or edit files via the provided tools (there is no shell).',
-    `Working directory: ${cwd}`,
-    `Operating system: ${os.platform()} (${os.release()})`,
-    'Lead with the outcome; keep explanations concise.',
-  ].join('\n');
+  ];
+  if (resolveGeminiMode(mode) === 'search') {
+    lines.push('You can search the web (Google Search) for current information and cite your sources.');
+    lines.push('File tools are disabled in this mode; if the user wants the result saved to a file, tell them to switch to "Datei-Modus" and ask again.');
+  } else {
+    lines.push('You can read files and create or edit files via the provided tools (there is no shell).');
+    lines.push('Live web search is disabled in this mode; rely on the conversation and files. If current web info is needed, tell the user to switch to "Recherche-Modus".');
+  }
+  lines.push(`Working directory: ${cwd}`);
+  lines.push(`Operating system: ${os.platform()} (${os.release()})`);
+  lines.push('Lead with the outcome; keep explanations concise.');
+  return lines.join('\n');
 }
 
 class GeminiProvider extends ApiAgentClient {
   #client = null;
   #contents = [];
-  // File tools (functionDeclarations) + live Google Search grounding. Gemini 2.5
-  // allows combining the two, so the model can research the web and write files.
-  #tools = [
-    ...toGeminiTools(getToolDefs().filter(d => GEMINI_TOOL_NAMES.includes(d.name))),
-    { googleSearch: {} },
-  ];
+
+  // Active tool set per turn: either live Google Search OR the file tools — never
+  // both (Gemini 2.5 rejects the combination). Driven by options.geminiMode.
+  get #mode() { return resolveGeminiMode(this.options.geminiMode); }
+  get #tools() { return this.#mode === 'search' ? SEARCH_TOOLS : FILE_TOOLS; }
 
   _ensureClient() {
     if (!this.options.apiKey) throw new Error('Kein Google-Gemini-API-Key hinterlegt.');
@@ -114,7 +132,7 @@ class GeminiProvider extends ApiAgentClient {
       model: this.options.model,
       contents: this.#contents,
       config: {
-        systemInstruction: buildSystemPrompt(this.options.cwd || process.cwd()),
+        systemInstruction: buildSystemPrompt(this.options.cwd || process.cwd(), this.#mode),
         tools: this.#tools,
         abortSignal: signal,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -189,4 +207,4 @@ class GeminiProvider extends ApiAgentClient {
   _restoreHistory(arr) { this.#contents = Array.isArray(arr) ? arr : []; }
 }
 
-module.exports = { GeminiProvider, toGeminiTools, toGeminiSchema, buildSystemPrompt, collectSources };
+module.exports = { GeminiProvider, toGeminiTools, toGeminiSchema, buildSystemPrompt, collectSources, resolveGeminiMode, GEMINI_MODES, DEFAULT_GEMINI_MODE };

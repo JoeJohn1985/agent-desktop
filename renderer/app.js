@@ -1174,6 +1174,7 @@ function sendMessage() {
     cwd: tab.cwd || undefined,
     activeSkills: activeSkillDirs,
     activeAgents: activeAgentSlugs,
+    geminiMode: tab.geminiMode || 'search',
   })
     .then((res) => handleSendResult(sendTabId, res))
     .catch((err) => handleSendResult(sendTabId, { success: false, error: err?.message || String(err) }));
@@ -1733,6 +1734,44 @@ function updateProviderSelectBtn(tabId) {
   el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${beta}`;
   // Subtle accent for non-default (direct-API) providers.
   el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
+  updateGeminiModeBtn(tabId);
+}
+
+const GEMINI_MODE_LABELS = {
+  search: '🔍 Recherche',
+  files: '📁 Dateien',
+};
+
+/**
+ * Show/refresh the Gemini tool-mode toggle. Only visible for Gemini tabs, since
+ * Gemini 2.5 cannot use live search and file tools in the same request.
+ */
+function updateGeminiModeBtn(tabId) {
+  const wrapper = document.getElementById('geminiModeWrapper');
+  const btn = document.getElementById('btnGeminiMode');
+  if (!wrapper || !btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  const isGemini = tab && getTabProvider(tab) === 'gemini';
+  wrapper.style.display = isGemini ? '' : 'none';
+  if (!isGemini) return;
+  const mode = tab.geminiMode || 'search';
+  btn.textContent = GEMINI_MODE_LABELS[mode] || GEMINI_MODE_LABELS.search;
+}
+
+/** Wire the Gemini mode toggle (switches the active tab between search/files). */
+function initGeminiModeToggle() {
+  const btn = document.getElementById('btnGeminiMode');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const tab = tabs.get(activeTabId);
+    if (!tab || getTabProvider(tab) !== 'gemini') return;
+    tab.geminiMode = (tab.geminiMode || 'search') === 'search' ? 'files' : 'search';
+    updateGeminiModeBtn(activeTabId);
+    const label = tab.geminiMode === 'search'
+      ? 'Gemini: Live-Suche aktiv (Datei-Tools aus).'
+      : 'Gemini: Datei-Tools aktiv (Live-Suche aus).';
+    showNotification(label, 'info');
+  });
 }
 
 /** @type {{available: boolean, keyed: Object<string,boolean>}} Cached provider key status. */
@@ -5545,6 +5584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTooltips();
   initTabModelSelector();
   initTabModeSelector();
+  initGeminiModeToggle();
   initContextInfo();
   initOnboarding();
   refreshProviderStatus();

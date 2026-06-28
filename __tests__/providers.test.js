@@ -183,7 +183,7 @@ describe('Session-Persistenz (ApiAgentClient)', () => {
 });
 
 describe('Gemini-Provider', () => {
-  const { toGeminiTools, toGeminiSchema } = require('../src/providers/gemini-provider');
+  const { toGeminiTools, toGeminiSchema, buildSystemPrompt } = require('../src/providers/gemini-provider');
   const { getToolDefs } = require('../src/providers/agent-tools');
 
   it('löst Gemini-Modelle auf und baut ein Gemini-Backend', () => {
@@ -214,11 +214,23 @@ describe('Gemini-Provider', () => {
     expect(MODEL_PRICING['gemini-2.5-flash'].output).toBe(2.5);
   });
 
-  it('enthält das Google-Search-Tool zusätzlich zu den Datei-Tools', () => {
-    const b = createApiBackend('gemini', 1, () => {}, { model: 'gemini-2.5-pro', apiKey: 'x' });
-    // Kein öffentlicher Getter — über die Konstruktion verifizieren wir die Tool-Konvertierung separat;
-    // hier prüfen wir die Quellen-Extraktion.
-    expect(b.constructor.name).toBe('GeminiProvider');
+  it('resolveGeminiMode normalisiert auf gültige Modi', () => {
+    const { resolveGeminiMode, GEMINI_MODES, DEFAULT_GEMINI_MODE } = require('../src/providers/gemini-provider');
+    expect(GEMINI_MODES).toEqual(['search', 'files']);
+    expect(DEFAULT_GEMINI_MODE).toBe('search');
+    expect(resolveGeminiMode('files')).toBe('files');
+    expect(resolveGeminiMode('search')).toBe('search');
+    expect(resolveGeminiMode(undefined)).toBe('search'); // Default
+    expect(resolveGeminiMode('quatsch')).toBe('search');  // Fallback
+  });
+
+  it('buildSystemPrompt beschreibt je Modus das passende Tool-Set', () => {
+    const search = buildSystemPrompt('C:/x', 'search');
+    expect(search).toMatch(/Google Search/);
+    expect(search).toMatch(/File tools are disabled/);
+    const files = buildSystemPrompt('C:/x', 'files');
+    expect(files).toMatch(/create or edit files/);
+    expect(files).toMatch(/Live web search is disabled/);
   });
 
   it('collectSources extrahiert und dedupliziert Web-Quellen', () => {

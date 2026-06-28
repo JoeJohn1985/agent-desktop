@@ -294,6 +294,7 @@ async function sendApiPrompt(tabId, prompt, options) {
     apiKey,
     baseURL: options.baseURL,
     systemContext,
+    geminiMode: options.geminiMode,
   };
 
   let client = options.existing || backends.get(tabId);
