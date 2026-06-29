@@ -1223,11 +1223,8 @@ function handleSendResult(tabId, res) {
   if (/auth/i.test(err)) {
     showAuthRequiredBanner(tab);
   } else {
-    const el = document.createElement('div');
-    el.className = 'stream-error';
-    el.textContent = `⚠️ ${err}`;
-    tab.streamEl.insertBefore(el, tab.statusEl);
-    showNotification(err, 'error');
+    const quota = appendStreamError(tab, err);
+    showNotification(quota ? `${quota.title}: ${quota.detail}` : err, quota ? 'warning' : 'error');
   }
   setTabStatus(tabId, 'error');
   scrollToBottom(tab.streamEl);
@@ -1308,6 +1305,28 @@ function finalizeResponseBubble(tab) {
   }
   tab._responseEl = null;
   tab._responseRaw = '';
+}
+
+/**
+ * Append an error bubble to a tab's stream. Quota / rate-limit / billing errors
+ * (Gemini 429, Anthropic credit limit, OpenAI insufficient_quota, …) are parsed
+ * into a short, friendly info message; anything else is shown verbatim.
+ * @param {Object} tab
+ * @param {string} message - Raw error message/JSON.
+ * @returns {{title:string, detail:string}|null} The parsed quota info, or null.
+ */
+function appendStreamError(tab, message) {
+  const quota = window.RendererLogic.parseQuotaError(message);
+  const el = document.createElement('div');
+  if (quota) {
+    el.className = 'stream-error stream-error--quota';
+    el.innerHTML = `<strong>ℹ️ ${escapeHtml(quota.title)}</strong><br>${escapeHtml(quota.detail)}`;
+  } else {
+    el.className = 'stream-error';
+    el.textContent = `⚠️ ${message}`;
+  }
+  tab.streamEl.insertBefore(el, tab.statusEl);
+  return quota;
 }
 
 /**
@@ -1592,10 +1611,7 @@ function initCopilotIPC() {
       }
 
       case 'error': {
-        const errEl = document.createElement('div');
-        errEl.className = 'stream-error';
-        errEl.textContent = `⚠️ ${event.data.message}`;
-        tab.streamEl.insertBefore(errEl, tab.statusEl);
+        appendStreamError(tab, event.data.message);
         break;
       }
     }

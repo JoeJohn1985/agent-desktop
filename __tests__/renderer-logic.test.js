@@ -22,7 +22,43 @@ const {
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  parseQuotaError,
 } = require('../src/renderer-logic');
+
+// ── parseQuotaError ──────────────────────────────────────────
+describe('parseQuotaError', () => {
+  it('erkennt Gemini Free-Tier limit:0 (kein Guthaben) inkl. Modell', () => {
+    const raw = JSON.stringify({ error: { message: 'You exceeded your current quota ... Quota exceeded for metric: ... limit: 0, model: gemini-2.5-pro\nPlease retry in 4.42s.', code: 429, status: 'Too Many Requests' } });
+    const r = parseQuotaError(raw);
+    expect(r).not.toBeNull();
+    expect(r.title).toMatch(/Kontingent nicht verfügbar/);
+    expect(r.model).toBe('gemini-2.5-pro');
+    expect(r.retrySeconds).toBe(5); // aufgerundet von 4.42
+  });
+
+  it('erkennt allgemeines Rate-Limit (429) mit Retry-Hinweis', () => {
+    const raw = '{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Please retry in 12s"}';
+    const r = parseQuotaError(raw);
+    expect(r.title).toBe('Rate-Limit erreicht');
+    expect(r.retrySeconds).toBe(12);
+  });
+
+  it('erkennt Anthropic „credit balance is too low" als Limit', () => {
+    const r = parseQuotaError('{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}');
+    expect(r.title).toMatch(/Kosten-\/Nutzungslimit/);
+  });
+
+  it('erkennt OpenAI insufficient_quota', () => {
+    const r = parseQuotaError('{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}');
+    expect(r).not.toBeNull();
+  });
+
+  it('gibt null für nicht-quota-Fehler zurück', () => {
+    expect(parseQuotaError('TypeError: foo is not a function')).toBeNull();
+    expect(parseQuotaError('')).toBeNull();
+    expect(parseQuotaError(null)).toBeNull();
+  });
+});
 
 // ── shortenPath ──────────────────────────────────────────────
 describe('shortenPath', () => {

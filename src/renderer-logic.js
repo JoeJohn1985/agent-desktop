@@ -295,6 +295,57 @@ function trimCostLog(log, maxEntries) {
   return log;
 }
 
+// ── Provider error parsing ───────────────────────────────────
+
+/**
+ * Recognise quota / rate-limit / billing errors from any provider (Gemini,
+ * Anthropic, OpenAI, …) and turn the raw error text into a short, friendly
+ * German message. Returns null if the error is not quota/limit related (so the
+ * caller can fall back to showing the raw message).
+ *
+ * @param {string|object} raw - Raw error message or object.
+ * @returns {{title:string, detail:string, retrySeconds:number|null, model:string|null}|null}
+ */
+function parseQuotaError(raw) {
+  if (!raw) return null;
+  const text = typeof raw === 'string' ? raw : (() => { try { return JSON.stringify(raw); } catch { return String(raw); } })();
+
+  const codeMatch = text.match(/"code"\s*:\s*(\d{3})/);
+  const code = codeMatch ? parseInt(codeMatch[1], 10) : null;
+
+  const isQuota =
+    code === 429 ||
+    /resource_exhausted|too many requests|rate[\s_-]?limit|\bquota\b|insufficient_quota|overloaded/i.test(text) ||
+    /credit balance is too low|out of credits|insufficient funds|exceeded your current quota|billing|limit:\s*0/i.test(text);
+  if (!isQuota) return null;
+
+  // Optional retry hint (Gemini "Please retry in 4.4s" / retryDelay "4s").
+  let retrySeconds = null;
+  const retry = text.match(/retry in\s*(\d+(?:\.\d+)?)\s*s/i) || text.match(/retry(?:delay)?["':\s]+(\d+(?:\.\d+)?)\s*s/i);
+  if (retry) retrySeconds = Math.ceil(parseFloat(retry[1]));
+
+  const modelMatch = text.match(/model:\s*([\w.\-]+)/i) || text.match(/"model"\s*:\s*"([^"]+)"/i);
+  const model = modelMatch ? modelMatch[1] : null;
+
+  const noFreeQuota = /limit:\s*0/i.test(text);
+  const billing = /credit balance is too low|out of credits|insufficient funds|exceeded your current quota|billing/i.test(text);
+
+  let title, detail;
+  if (noFreeQuota) {
+    title = 'Modell im aktuellen Kontingent nicht verfügbar';
+    detail = (model ? `„${model}" ` : 'Dieses Modell ') +
+      'hat im kostenlosen Kontingent kein Guthaben (Limit 0). Aktiviere die Abrechnung beim Provider oder wähle ein kostenloses Modell.';
+  } else if (billing) {
+    title = 'Kosten-/Nutzungslimit erreicht';
+    detail = 'Das Guthaben bzw. Ausgabenlimit dieses Providers ist erschöpft. Bitte Plan/Abrechnung prüfen oder ein anderes Modell wählen.';
+  } else {
+    title = 'Rate-Limit erreicht';
+    detail = 'Zu viele Anfragen in kurzer Zeit.' +
+      (retrySeconds ? ` Bitte in ~${retrySeconds}s erneut versuchen.` : ' Bitte kurz warten und erneut versuchen.');
+  }
+  return { title, detail, retrySeconds, model };
+}
+
 // ── Exports ──────────────────────────────────────────────────
 const _api = {
   shortenPath,
@@ -323,6 +374,7 @@ const _api = {
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  parseQuotaError,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -1601,6 +1601,14 @@ mark.chat-search-highlight--active {
   border-radius: var(--radius-sm);
   max-width: 80%;
 }
+/* Quota / rate-limit / billing info — calmer than a hard error. */
+.stream-error--quota {
+  color: var(--text-primary);
+  background: rgba(223,142,29,0.10);
+  border: 1px solid var(--yellow, #df8e1d);
+  font-size: 14px;
+  line-height: 1.5;
+}
 
 /* ── Authentication-required banner ─────────────────────── */
 .stream-auth-required {
