@@ -1740,10 +1740,75 @@ const PROVIDERS = [
 // Providers still in beta (not yet extensively tested) — shown with a Beta badge.
 const BETA_PROVIDERS = new Set(['anthropic', 'gemini']);
 
-/** Default model chosen when switching to a provider (first model of that provider). */
+/** Providers that have selectable models (in display order). */
+function getProvidersWithModels() {
+  const seen = [];
+  for (const m of DEFAULT_MODELS) {
+    const p = m.provider || 'copilot';
+    if (!seen.includes(p)) seen.push(p);
+  }
+  return seen;
+}
+
+/** The configured default provider for new tabs (falls back to copilot). */
+function getDefaultProvider() {
+  const p = getSettings().defaultProvider;
+  return getProvidersWithModels().includes(p) ? p : 'copilot';
+}
+
+/**
+ * Default model for a provider: the user-configured choice if valid, else the
+ * first model of that provider. Used by the "+" menu and new-tab creation.
+ */
 function getDefaultModelForProvider(provider) {
+  const configured = (getSettings().defaultModels || {})[provider];
+  if (configured && DEFAULT_MODELS.some(m => m.id === configured && (m.provider || 'copilot') === provider)) {
+    return configured;
+  }
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
   return m ? m.id : DEFAULT_MODEL_ID;
+}
+
+/** Persist the default model for one provider. */
+function saveDefaultModelForProvider(provider, modelId) {
+  const map = { ...(getSettings().defaultModels || {}) };
+  map[provider] = modelId;
+  saveSetting('defaultModels', map);
+}
+
+const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)' };
+
+/** Render the "default provider" + "default model per provider" settings controls. */
+function renderDefaultModelSettings() {
+  const provSel = document.getElementById('settDefaultProvider');
+  const container = document.getElementById('settDefaultModelsPerProvider');
+  const providers = getProvidersWithModels();
+  if (provSel) {
+    provSel.innerHTML = providers
+      .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(PROVIDER_SHORT[p] || p)}</option>`)
+      .join('');
+    provSel.value = getDefaultProvider();
+  }
+  if (container) {
+    container.innerHTML = '';
+    for (const p of providers) {
+      const row = document.createElement('div');
+      row.className = 'settings__provider-default-row';
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'settings__provider-default-label';
+      labelSpan.textContent = PROVIDER_SHORT[p] || p;
+      const sel = document.createElement('select');
+      sel.className = 'settings__select';
+      sel.innerHTML = getModelsForProvider(p)
+        .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
+        .join('');
+      sel.value = getDefaultModelForProvider(p);
+      sel.addEventListener('change', () => saveDefaultModelForProvider(p, sel.value));
+      row.appendChild(labelSpan);
+      row.appendChild(sel);
+      container.appendChild(row);
+    }
+  }
 }
 
 /** Models belonging to a given provider. */
@@ -1850,11 +1915,15 @@ function updateModeSelectBtn(tabId) {
 }
 
 /**
- * The default model new tabs start with — configurable in settings,
- * falling back to DEFAULT_MODEL_ID if unset or invalid.
+ * The default model new tabs start with: the default model of the configured
+ * default provider. Falls back to legacy `defaultModel` / DEFAULT_MODEL_ID.
  * @returns {string}
  */
 function getDefaultModelId() {
+  // Per-provider default of the configured default provider (#2 + #3).
+  const byProvider = getDefaultModelForProvider(getDefaultProvider());
+  if (byProvider) return byProvider;
+  // Legacy single-default fallback.
   const configured = getSettings().defaultModel;
   return DEFAULT_MODELS.some(m => m.id === configured) ? configured : DEFAULT_MODEL_ID;
 }
@@ -4057,7 +4126,7 @@ function initSettings() {
   const settSound = document.getElementById('settSound');
   const settDevMode = document.getElementById('settDevMode');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
-  const settDefaultModel = document.getElementById('settDefaultModel');
+  const settDefaultProvider = document.getElementById('settDefaultProvider');
 
   document.querySelectorAll('.settings__tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -4080,16 +4149,8 @@ function initSettings() {
   applyDevMode(savedSettings.devMode === true);
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
 
-  // Populate the default-model dropdown from the shared model list.
-  if (settDefaultModel) {
-    settDefaultModel.innerHTML = getAvailableModels()
-      .map(m => {
-        const prov = PROVIDER_SHORT[m.provider || 'copilot'] || m.provider;
-        return `<option value="${escapeHtml(m.id)}">${escapeHtml(prov)}: ${escapeHtml(m.label)}</option>`;
-      })
-      .join('');
-    settDefaultModel.value = getDefaultModelId();
-  }
+  // Default provider (#3) + default model per provider (#2).
+  renderDefaultModelSettings();
 
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
@@ -4115,7 +4176,9 @@ function initSettings() {
   settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
   settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
   settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
-  settDefaultModel?.addEventListener('change', () => saveSetting('defaultModel', settDefaultModel.value));
+  settDefaultProvider?.addEventListener('change', () => {
+    saveSetting('defaultProvider', settDefaultProvider.value);
+  });
 
   renderDeniedTools();
   renderExtraDirs();

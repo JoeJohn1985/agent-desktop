@@ -1615,6 +1615,16 @@ mark.chat-search-highlight--active {
 .model-tier--free { background: rgba(64,160,43,0.16); color: var(--green, #40a02b); }
 .model-tier--aic  { background: rgba(137,180,250,0.16); color: var(--accent, #89b4fa); }
 
+/* ── Default-model-per-provider settings rows ─────────────── */
+.settings__provider-defaults { display: flex; flex-direction: column; gap: 8px; }
+.settings__provider-default-row { display: flex; align-items: center; gap: 10px; }
+.settings__provider-default-label {
+  flex: 0 0 110px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.settings__provider-default-row .settings__select { flex: 1; }
+
 /* Quota / rate-limit / billing info — calmer than a hard error. */
 .stream-error--quota {
   color: var(--text-primary);

@@ -370,9 +370,14 @@
         <!-- Tab: Copilot Konfiguration -->
         <div class="settings__panel" data-panel="copilot">
           <div class="settings__group">
-            <label class="settings__label">Standard-Modell</label>
-            <div class="settings__hint">Modell, mit dem neue Tabs starten. Pro Tab über das 🧠-Menü überschreibbar.</div>
-            <select class="settings__select" id="settDefaultModel"></select>
+            <label class="settings__label">Standard-Provider</label>
+            <div class="settings__hint">Provider, mit dem neue Tabs und das „+“ starten.</div>
+            <select class="settings__select" id="settDefaultProvider"></select>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">Standard-Modell pro Provider</label>
+            <div class="settings__hint">Modell, mit dem ein neuer Tab des jeweiligen Providers startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
+            <div id="settDefaultModelsPerProvider" class="settings__provider-defaults"></div>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
