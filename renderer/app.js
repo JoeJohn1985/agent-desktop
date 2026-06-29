@@ -1688,22 +1688,34 @@ window.confirmDeleteAgent = confirmDeleteAgent;
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
 // the background terminal. We use a preferences-stored model list instead.
 const DEFAULT_MODEL_ID = 'claude-sonnet-4.6';
+// `tier`: 'aic' = über Copilot-Abo/AI Credits abgerechnet, 'free' = im
+// kostenlosen Kontingent des Providers nutzbar, 'paid' = direkt kostenpflichtig.
 const DEFAULT_MODELS = [
   // Copilot CLI (provider: 'copilot')
-  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'copilot' },
-  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'copilot' },
-  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot' },
-  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot' },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot' },
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot', tier: 'aic' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot', tier: 'aic' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic' },
-  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic', tier: 'paid' },
   // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini' },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini', tier: 'paid' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini', tier: 'free' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini', tier: 'paid' },
 ];
+
+// Badge-Markup für die Modell-Kennzeichnung (kostenpflichtig / kostenlos / AIC).
+const MODEL_TIER_BADGE = {
+  paid: '<span class="model-tier model-tier--paid" data-tooltip="Direkt kostenpflichtig (Abrechnung pro Token beim Provider)">💲 kostenpflichtig</span>',
+  free: '<span class="model-tier model-tier--free" data-tooltip="Im kostenlosen Kontingent des Providers nutzbar">🆓 kostenlos</span>',
+  aic: '<span class="model-tier model-tier--aic" data-tooltip="Abrechnung über dein GitHub-Copilot-Abo / AI Credits">AIC</span>',
+};
+function modelTierBadge(model) {
+  return model && model.tier ? (MODEL_TIER_BADGE[model.tier] || '') : '';
+}
 
 const PROVIDER_LABELS = {
   copilot: 'GitHub Copilot',
@@ -1900,7 +1912,7 @@ function initTabModelSelector() {
       const isActive = currentModel === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
-      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>`;
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>${modelTierBadge(m)}`;
       item.addEventListener('click', () => {
         dropdown.remove();
         if (activeCloseHandler) {

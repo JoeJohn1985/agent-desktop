@@ -1601,6 +1601,20 @@ mark.chat-search-highlight--active {
   border-radius: var(--radius-sm);
   max-width: 80%;
 }
+/* ── Model tier badges (kostenpflichtig / kostenlos / AIC) ─── */
+.model-tier {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.model-tier--paid { background: rgba(209,56,61,0.14); color: var(--red, #d1383d); }
+.model-tier--free { background: rgba(64,160,43,0.16); color: var(--green, #40a02b); }
+.model-tier--aic  { background: rgba(137,180,250,0.16); color: var(--accent, #89b4fa); }
+
 /* Quota / rate-limit / billing info — calmer than a hard error. */
 .stream-error--quota {
   color: var(--text-primary);
