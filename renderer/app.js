@@ -4888,6 +4888,104 @@ function initDragDrop() {
  * Initialize the global tooltip system. Tooltips appear for any element
  * with a `data-tooltip` attribute after a short hover delay.
  */
+// ── Self-Update (git-basiert) ────────────────────────────────
+
+/** True while an update check or apply is in flight (prevents double-clicks). */
+let _updateBusy = false;
+
+/**
+ * Check for a newer release. On startup this runs silently (only surfaces a
+ * banner if an update exists); the settings button passes silent=false to also
+ * report "up to date" / errors.
+ * @param {{silent?: boolean}} [opts]
+ */
+async function checkForUpdates({ silent = true } = {}) {
+  if (_updateBusy) return;
+  if (!window.copilot?.updates) return;
+  _updateBusy = true;
+  const statusEl = document.getElementById('updateCheckStatus');
+  if (!silent && statusEl) statusEl.textContent = 'Suche…';
+  try {
+    const res = await copilot.updates.check();
+    if (res.updateAvailable) {
+      showUpdateBanner(res.currentVersion, res.latestVersion);
+      if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+    } else if (!silent) {
+      if (res.ok) {
+        if (statusEl) statusEl.textContent = `Aktuell (v${res.currentVersion}).`;
+        showNotification(`Du nutzt bereits die neueste Version (v${res.currentVersion}).`, 'success');
+      } else {
+        const msg = updateReasonText(res.reason, res.error);
+        if (statusEl) statusEl.textContent = msg;
+        showNotification('Update-Prüfung fehlgeschlagen: ' + msg, 'warning');
+      }
+    }
+  } catch (e) {
+    if (!silent) showNotification('Update-Prüfung fehlgeschlagen: ' + (e?.message || e), 'error');
+  } finally {
+    _updateBusy = false;
+  }
+}
+
+/** Human-readable explanation for a non-ok check/apply reason. */
+function updateReasonText(reason, error) {
+  switch (reason) {
+    case 'not-a-git-checkout': return 'App läuft nicht aus einem Git-Checkout.';
+    case 'git-failed': return 'Git-Abfrage fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    case 'dirty-working-tree': return 'Lokale, nicht gespeicherte Änderungen vorhanden — bitte committen oder verwerfen.';
+    case 'pull-failed': return 'git pull fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    case 'npm-install-failed': return 'npm install fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    default: return error || 'Unbekannter Fehler.';
+  }
+}
+
+/** Show the top update banner (idempotent — replaces any existing one). */
+function showUpdateBanner(currentVersion, latestVersion) {
+  document.getElementById('updateBanner')?.remove();
+  const bar = document.createElement('div');
+  bar.id = 'updateBanner';
+  bar.className = 'update-banner';
+  bar.innerHTML = `
+    <span class="update-banner__text">🔄 Neue Version <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
+    <button class="update-banner__btn" id="btnApplyUpdate">Herunterladen & Neustarten</button>
+    <button class="update-banner__close" id="btnDismissUpdate" aria-label="Schließen">✕</button>`;
+  document.body.appendChild(bar);
+  document.getElementById('btnDismissUpdate').addEventListener('click', () => bar.remove());
+  document.getElementById('btnApplyUpdate').addEventListener('click', () => applyUpdate(bar));
+}
+
+/** Apply the update: confirm, run via main, handle failure reasons. */
+async function applyUpdate(bar) {
+  if (_updateBusy) return;
+  const btn = document.getElementById('btnApplyUpdate');
+  _updateBusy = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Wird aktualisiert…'; }
+  try {
+    const res = await copilot.updates.apply();
+    if (res.ok) {
+      if (btn) btn.textContent = 'Neustart…';
+      showNotification('Update geladen' + (res.depsInstalled ? ' (inkl. Abhängigkeiten)' : '') + ' — App startet neu.', 'success');
+      // Main process relaunches shortly; nothing else to do here.
+    } else {
+      const msg = updateReasonText(res.reason, res.error);
+      showNotification('Update fehlgeschlagen: ' + msg, 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+    }
+  } catch (e) {
+    showNotification('Update fehlgeschlagen: ' + (e?.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+  } finally {
+    _updateBusy = false;
+  }
+}
+
+/** Wire the settings "check for updates" button and run the silent startup check. */
+function initUpdateChecker() {
+  document.getElementById('btnCheckUpdates')?.addEventListener('click', () => checkForUpdates({ silent: false }));
+  // Silent check shortly after startup so it never blocks the UI.
+  setTimeout(() => checkForUpdates({ silent: true }), 3000);
+}
+
 function initTooltips() {
   const tooltip = document.createElement('div');
   tooltip.className = 'js-tooltip';
@@ -5622,4 +5720,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   initContextInfo();
   initOnboarding();
   refreshProviderStatus();
+  initUpdateChecker();
 });

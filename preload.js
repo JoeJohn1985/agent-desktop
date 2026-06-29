@@ -524,6 +524,18 @@ contextBridge.exposeInMainWorld('copilot', {
     login: () => ipcRenderer.invoke('auth:login'),
   },
 
+  /**
+   * Self-update (git-based): check for newer release tags and apply via git pull.
+   *
+   * @namespace copilot.updates
+   */
+  updates: {
+    /** @ipc updates:check @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>} */
+    check: () => ipcRenderer.invoke('updates:check'),
+    /** @ipc updates:apply — Pulls latest main, installs deps if needed, relaunches. @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>} */
+    apply: () => ipcRenderer.invoke('updates:apply'),
+  },
+
   // ── Window ────────────────────────────────────────────────
 
   /**

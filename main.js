@@ -435,6 +435,43 @@ ipcMain.handle('copilot:getVersions', async () => {
   return { app: appVersion, cli: cliVersion };
 });
 
+// ── Self-Update (git-basiert) ────────────────────────────────
+const updater = require('./src/updater');
+/** Repo root = directory containing this main.js. */
+const REPO_DIR = __dirname;
+
+/**
+ * @ipc updates:check — Checks the remote for a newer release tag.
+ * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>}
+ */
+ipcMain.handle('updates:check', async () => {
+  try {
+    return await updater.checkForUpdate(REPO_DIR);
+  } catch (e) {
+    console.warn('[updates:check] Fehler:', e.message || e);
+    return { ok: false, currentVersion: require('./package.json').version, latestVersion: null, updateAvailable: false, reason: 'exception', error: e.message || String(e) };
+  }
+});
+
+/**
+ * @ipc updates:apply — Pulls the latest `main`, runs npm install if deps
+ * changed, then relaunches the app. Blocks on a dirty working tree.
+ * @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>}
+ */
+ipcMain.handle('updates:apply', async () => {
+  try {
+    const res = await updater.applyUpdate(REPO_DIR);
+    if (res.ok) {
+      // Give the renderer a tick to show its "restarting" state, then relaunch.
+      setTimeout(() => { app.relaunch(); app.exit(0); }, 400);
+    }
+    return res;
+  } catch (e) {
+    console.error('[updates:apply] Fehler:', e.message || e);
+    return { ok: false, reason: 'exception', error: e.message || String(e) };
+  }
+});
+
 /**
  * @ipc copilot:getInstructions — Discovers all copilot-instructions.md files
  * from configured paths, CWD, and home directory.

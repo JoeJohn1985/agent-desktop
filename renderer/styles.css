@@ -1629,6 +1629,49 @@ mark.chat-search-highlight--active {
 }
 .stream-auth-required__btn:disabled { opacity: 0.6; cursor: default; }
 
+/* ── Update Banner (oben, global) ─────────────────────── */
+.update-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 640px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-overlay, #1e1e2e);
+  border: 1px solid var(--accent, #89b4fa);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+}
+.update-banner__text { flex: 1; }
+.update-banner__btn {
+  flex-shrink: 0;
+  background: var(--accent, #89b4fa);
+  color: #1e1e2e;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.update-banner__btn:disabled { opacity: 0.6; cursor: default; }
+.update-banner__close {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.update-banner__close:hover { color: var(--text-primary); }
+
 /* ── Force Unlock Button & Info ───────────────────────── */
 .stream-unlock-btn {
   display: inline-flex;

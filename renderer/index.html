@@ -339,6 +339,15 @@
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
+            <label class="settings__label">🔄 Updates</label>
+            <div class="settings__hint">Prüft, ob eine neuere Version im Repository veröffentlicht wurde, und aktualisiert per <code>git pull</code>.</div>
+            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
+              <button class="action-btn" id="btnCheckUpdates">Nach Updates suchen</button>
+              <span id="updateCheckStatus" class="settings__hint" style="margin:0;"></span>
+            </div>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
             <div class="settings__row">
               <label class="settings__label">🛠️ Entwicklermodus</label>
               <label class="settings__toggle">
