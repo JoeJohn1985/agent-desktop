@@ -171,11 +171,16 @@ function applyTheme(theme) {
  */
 function saveOpenTabs() {
   const openTabs = [];
-  tabs.forEach((tab, id) => {
+  tabs.forEach((tab) => {
+    // Persist the chosen model with every tab so the provider survives a
+    // restart even for tabs saved before their first message (no sessionId).
     if (tab.sessionId) {
-      openTabs.push({ sessionId: tab.sessionId, label: tab.label });
+      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null });
       // Persist denied tools in namedSessions
       saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
+    } else if (tab.selectedModel && tab.selectedModel !== getDefaultModelId()) {
+      // Unsent tab with a non-default (e.g. Gemini/Anthropic) provider chosen.
+      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel });
     }
   });
   setPref('openTabs', openTabs);
@@ -194,21 +199,17 @@ async function restoreOpenTabs() {
       // Use namedSessions as primary label source
       const customName = t.sessionId ? getSessionName(t.sessionId) : null;
       const label = customName ? '🤖 ' + customName : (t.label || '🤖 Copilot');
-      const tabId = await createTab(label);
+      // Resolve the model up front (entry first, then per-session map) so the
+      // provider is correct from creation — including unsent tabs without id.
+      const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
+      const tabId = await createTab(label, model);
       const tab = tabs.get(tabId);
       if (tab) {
-        tab.sessionId = t.sessionId;
+        tab.sessionId = t.sessionId || null;
         tab.cwd = t.sessionId ? getSessionCwd(t.sessionId) : null;
         // Load denied tools from namedSessions
         tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
-        // Restore persisted model for this session
-        if (t.sessionId) {
-          const sessionModel = getSessionModel(t.sessionId);
-          if (sessionModel) {
-            tab.selectedModel = sessionModel;
-            updateModelSelectBtn(tabId);
-          }
-        }
+        updateModelSelectBtn(tabId);
         activeSessionId = t.sessionId;
         loadTodos(tab.cwd);
         renderSessionTools();
@@ -854,6 +855,11 @@ function startTabRename(tabId, tabEl, labelSpan) {
             tab.sessionId = newId;
             activeSessionId = newId;
             setSessionName(newId, newName);
+            // Persist the tab's chosen model/provider (and cwd) against the new
+            // session id. Without this, a tab saved before its first message
+            // would lose its provider and fall back to Copilot on resume.
+            if (tab.selectedModel) saveSessionModel(newId, tab.selectedModel);
+            if (tab.cwd) saveSessionCwd(newId, tab.cwd);
             saveOpenTabs();
           }
         } catch (e) {
