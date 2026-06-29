@@ -4287,9 +4287,41 @@ function initTestRunner() {
 
 /** Providers shown in the settings panel. `active` ones have a working backend. */
 const PROVIDER_SETTINGS = [
-  { id: 'anthropic', active: true, placeholder: 'sk-ant-…' },
-  { id: 'gemini', active: true, placeholder: 'AIza…' },
-  { id: 'openai', active: false, placeholder: 'sk-…' },
+  {
+    id: 'anthropic', active: true, placeholder: 'sk-ant-…',
+    info: [
+      'Claude – voll agentisch (direkte API).',
+      '',
+      'Tools:',
+      '• Shell (Befehle ausführen)',
+      '• Datei lesen / schreiben / bearbeiten',
+      '• Verzeichnis auflisten, glob, grep',
+      '',
+      'Besonderheiten:',
+      '• Skills, Agents & Instructions werden mitgegeben',
+      '• Prompt-Caching + adaptives Thinking',
+      '• Exakte Token-/Kostenabrechnung',
+    ].join('\n'),
+  },
+  {
+    id: 'gemini', active: true, placeholder: 'AIza…',
+    info: [
+      'Gemini – recherche-orientiert (direkte API).',
+      '',
+      'Zwei Modi pro Tab umschaltbar (nicht gleichzeitig):',
+      '🔍 Recherche: Live-Google-Suche mit Quellenangaben',
+      '📁 Dateien: lesen / schreiben / bearbeiten, Verzeichnis, glob, grep',
+      '',
+      'Besonderheiten:',
+      '• Kein Shell-Zugriff',
+      '• Keine Skills/Agents/Instructions',
+      '• Suche & Datei-Tools schließen sich pro Anfrage aus',
+    ].join('\n'),
+  },
+  {
+    id: 'openai', active: false, placeholder: 'sk-…',
+    info: 'OpenAI-kompatibel – noch in Vorbereitung (inkl. konfigurierbarer Base-URL für OpenRouter/Ollama).',
+  },
 ];
 
 /**
@@ -4312,6 +4344,7 @@ async function renderProvidersSettings() {
     row.innerHTML = `
       <div class="providers-row__head">
         <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
         ${BETA_PROVIDERS.has(p.id) ? '<span class="beta-badge">Beta</span>' : ''}
         <span class="providers-row__status ${hasKey ? 'is-set' : ''}">${hasKey ? '● hinterlegt' : '○ leer'}</span>
         ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}

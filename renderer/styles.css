@@ -135,8 +135,10 @@ body {
   font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
-  white-space: normal;
-  max-width: 280px;
+  white-space: pre-line;
+  text-align: left;
+  line-height: 1.5;
+  max-width: 320px;
   word-wrap: break-word;
   pointer-events: none;
   z-index: 9999;
@@ -1929,6 +1931,24 @@ mark.chat-search-highlight--active {
   margin-bottom: 8px;
 }
 .providers-row__name { font-weight: 600; }
+.providers-row__info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: help;
+  user-select: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.providers-row__info:hover {
+  color: var(--accent, var(--text-primary));
+  border-color: var(--accent, var(--text-primary));
+}
 .providers-row__status { font-size: 11px; color: var(--text-muted); }
 .providers-row__status.is-set { color: var(--green, #40a02b); }
 .providers-row__soon {
