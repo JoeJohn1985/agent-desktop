@@ -142,33 +142,33 @@ contextBridge.exposeInMainWorld('copilot', {
    * @namespace copilot.todos
    */
   todos: {
-    /** @ipc todos:list @param {string} sessionId @returns {Promise<Array<Object>>} */
-    list: (sessionId) => ipcRenderer.invoke('todos:list', sessionId),
+    /** @ipc todos:list @param {string} cwd Project directory @returns {Promise<Array<Object>>} */
+    list: (cwd) => ipcRenderer.invoke('todos:list', cwd),
     /**
      * @ipc todos:add
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {Object} todo - Todo object with at least `text` property
      * @returns {Promise<Array<Object>>} Updated todo list
      */
-    add: (sessionId, todo) => ipcRenderer.invoke('todos:add', sessionId, todo),
+    add: (cwd, todo) => ipcRenderer.invoke('todos:add', cwd, todo),
     /**
      * @ipc todos:update
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {string} todoId
      * @param {Object} updates - Fields to merge into the todo
      * @returns {Promise<Array<Object>>} Updated todo list
      */
-    update: (sessionId, todoId, updates) => ipcRenderer.invoke('todos:update', sessionId, todoId, updates),
-    /** @ipc todos:delete @param {string} sessionId @param {string} todoId @returns {Promise<Array<Object>>} */
-    delete: (sessionId, todoId) => ipcRenderer.invoke('todos:delete', sessionId, todoId),
+    update: (cwd, todoId, updates) => ipcRenderer.invoke('todos:update', cwd, todoId, updates),
+    /** @ipc todos:delete @param {string} cwd @param {string} todoId @returns {Promise<Array<Object>>} */
+    delete: (cwd, todoId) => ipcRenderer.invoke('todos:delete', cwd, todoId),
     /**
      * Reorders todos according to the given ID sequence.
      * @ipc todos:reorder
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {string[]} orderedIds - Todo IDs in desired order
      * @returns {Promise<Array<Object>>} Reordered todo list
      */
-    reorder: (sessionId, orderedIds) => ipcRenderer.invoke('todos:reorder', sessionId, orderedIds),
+    reorder: (cwd, orderedIds) => ipcRenderer.invoke('todos:reorder', cwd, orderedIds),
   },
 
   // ── Images ────────────────────────────────────────────────

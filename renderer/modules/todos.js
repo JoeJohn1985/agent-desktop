@@ -4,16 +4,22 @@
 
 /** @type {Array<{id: string, text: string, status: 'open'|'done'}>} */
 let currentTodos = [];
+/** Project directory the currently shown todos belong to (or null). */
+let todosCwd = null;
 
 /**
- * Lädt die Todos einer Session vom Backend und rendert sie.
- * Versteckt die Todo-Sektion wenn keine Session aktiv ist.
+ * Lädt die Todos eines Projekts (cwd) vom Backend und rendert sie.
+ * Versteckt die Todo-Sektion wenn kein Arbeitsverzeichnis aktiv ist.
  *
- * @param {string|null} sessionId - Die aktive Session-ID oder null
+ * Todos sind projekt- statt session-gebunden: sie liegen unter
+ * <cwd>/todo/todos.md und überleben damit das Löschen einer Session.
+ *
+ * @param {string|null} cwd - Das aktive Arbeitsverzeichnis oder null
  * @returns {Promise<void>}
  */
-async function loadTodos(sessionId) {
-  if (!sessionId) {
+async function loadTodos(cwd) {
+  todosCwd = cwd || null;
+  if (!cwd) {
     currentTodos = [];
     renderTodos();
     document.getElementById('todosSection').style.display = 'none';
@@ -21,7 +27,7 @@ async function loadTodos(sessionId) {
   }
   document.getElementById('todosSection').style.display = '';
   try {
-    currentTodos = await copilot.todos.list(sessionId) || [];
+    currentTodos = await copilot.todos.list(cwd) || [];
   } catch (e) {
     console.warn('[todos] Laden fehlgeschlagen:', e.message);
     currentTodos = [];
@@ -95,8 +101,8 @@ function initTodoDragDrop(container) {
       // Update local array to match new order
       const byId = new Map(currentTodos.map(t => [t.id, t]));
       currentTodos = orderedIds.map(id => byId.get(id)).filter(Boolean);
-      if (activeSessionId) {
-        copilot.todos.reorder(activeSessionId, orderedIds);
+      if (todosCwd) {
+        copilot.todos.reorder(todosCwd, orderedIds);
       }
     });
 
@@ -133,10 +139,10 @@ function initTodoDragDrop(container) {
 async function addTodo() {
   const input = document.getElementById('todoInput');
   const text = input.value.trim();
-  if (!text || !activeSessionId) return;
+  if (!text || !todosCwd) return;
 
   try {
-    currentTodos = await copilot.todos.add(activeSessionId, { text }) || currentTodos;
+    currentTodos = await copilot.todos.add(todosCwd, { text }) || currentTodos;
   } catch (e) {
     console.warn('[todos] Hinzufügen fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht hinzugefügt werden', 'error');
@@ -154,10 +160,10 @@ async function addTodo() {
  */
 async function toggleTodo(todoId) {
   const todo = currentTodos.find(t => t.id === todoId);
-  if (!todo || !activeSessionId) return;
+  if (!todo || !todosCwd) return;
   const newStatus = todo.status === 'done' ? 'open' : 'done';
   try {
-    currentTodos = await copilot.todos.update(activeSessionId, todoId, { status: newStatus }) || currentTodos;
+    currentTodos = await copilot.todos.update(todosCwd, todoId, { status: newStatus }) || currentTodos;
   } catch (e) {
     console.warn('[todos] Aktualisieren fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht aktualisiert werden', 'error');
@@ -173,9 +179,9 @@ async function toggleTodo(todoId) {
  * @returns {Promise<void>}
  */
 async function deleteTodo(todoId) {
-  if (!activeSessionId) return;
+  if (!todosCwd) return;
   try {
-    currentTodos = await copilot.todos.delete(activeSessionId, todoId) || currentTodos;
+    currentTodos = await copilot.todos.delete(todosCwd, todoId) || currentTodos;
   } catch (e) {
     console.warn('[todos] Löschen fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht gelöscht werden', 'error');

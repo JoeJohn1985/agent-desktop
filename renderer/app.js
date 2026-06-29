@@ -210,7 +210,7 @@ async function restoreOpenTabs() {
           }
         }
         activeSessionId = t.sessionId;
-        loadTodos(t.sessionId);
+        loadTodos(tab.cwd);
         renderSessionTools();
         // Display session context for restored tabs
         if (t.sessionId) displaySessionContext(tab, t.sessionId);
@@ -636,13 +636,11 @@ function switchTab(tabId) {
   activeTabId = tabId;
   const activeTab = tabs.get(tabId);
 
-  // Load todos and context for this tab's session
+  // Load context for this tab's session; todos are project-scoped (by cwd).
   if (activeTab && activeTab.sessionId) {
     activeSessionId = activeTab.sessionId;
-    loadTodos(activeTab.sessionId);
-  } else {
-    loadTodos(null);
   }
+  loadTodos(activeTab ? activeTab.cwd : null);
 
   renderTabs();
 
@@ -1552,7 +1550,11 @@ function initCopilotIPC() {
         if (cwdMatch) {
           const cwd = cwdMatch[1].trim();
           tab.context.cwd = cwd;
-          if (!tab.cwd) tab.cwd = cwd;
+          if (!tab.cwd) {
+            tab.cwd = cwd;
+            // First time we learn this tab's project dir → load its todos.
+            if (tabId === activeTabId) loadTodos(tab.cwd);
+          }
         }
         break;
       }
@@ -1566,10 +1568,10 @@ function initCopilotIPC() {
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           saveOpenTabs();
-          // Show todos panel for this session
+          // Show todos panel (project-scoped by cwd) for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
-            loadTodos(event.sessionId);
+            loadTodos(tab.cwd);
           }
         }
         break;
@@ -2372,6 +2374,7 @@ async function pickSessionCwd(sessionId) {
       tab.cwd = selected;
       if (tabId === activeTabId) {
         loadProjectSkillsAndAgents(selected);
+        loadTodos(selected); // todos are project-scoped → follow the new cwd
       }
     }
   }
@@ -2418,10 +2421,12 @@ async function resumeSession(sessionId) {
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // Restore the project directory so project-scoped todos load correctly.
+  if (!tab.cwd) tab.cwd = getSessionCwd(sessionId) || null;
   // Update lastUsed timestamp
   touchSession(sessionId);
   activeSessionId = sessionId;
-  loadTodos(sessionId);
+  loadTodos(tab.cwd);
   saveOpenTabs();
   renderSessions(filterSessions());
 
@@ -3985,9 +3990,9 @@ function initSlashButtons() {
     const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
     try {
       for (const todo of openTodos) {
-        await copilot.todos.update(tab.sessionId, todo.id, { status: 'done' });
+        await copilot.todos.update(tab.cwd, todo.id, { status: 'done' });
       }
-      await loadTodos(tab.sessionId);
+      await loadTodos(tab.cwd);
     } catch (err) {
       showNotification(`Fehler: ${err.message}`, 'error');
       return;

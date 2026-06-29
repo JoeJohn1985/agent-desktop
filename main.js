@@ -10,7 +10,8 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', 'copilot-desktop');
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
-const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
+const { readCheckpoints, readPlan, readRecentMessages } = require('./src/sessions');
+const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
@@ -650,74 +651,74 @@ ipcMain.handle('sessions:create', async (_event, name) => {
   return id;
 });
 
-/** @ipc todos:list @returns {Promise<Array<Object>>} All todos for the session */
-// Todos (per session)
-ipcMain.handle('todos:list', async (_event, sessionId) => {
-  return readTodos(safeSessionPath(sessionId));
+/** @ipc todos:list @param {string} cwd @returns {Promise<Array<Object>>} All todos for the project (cwd) */
+// Todos (per project / cwd) — stored as <cwd>/todo/todos.md so they survive
+// session deletion and are shared across sessions in the same directory.
+ipcMain.handle('todos:list', async (_event, cwd) => {
+  return readTodos(cwd);
 });
 
 /**
- * @ipc todos:add — Adds a new todo to a session.
- * @param {string} sessionId
+ * @ipc todos:add — Adds a new todo to a project (cwd).
+ * @param {string} cwd
  * @param {Object} todo - Must contain `text` string property
  * @returns {Promise<Array<Object>>} Updated todo list
  */
-ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
-  if (!todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
+ipcMain.handle('todos:add', async (_event, cwd, todo) => {
+  if (!cwd || !todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(safeSessionPath(sessionId));
+  const todos = readTodos(cwd);
   todo.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   todo.status = todo.status || 'open';
-  todo.createdAt = new Date().toISOString();
   todos.push(todo);
-  writeTodos(safeSessionPath(sessionId), todos);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /**
  * @ipc todos:update — Merges updates into an existing todo.
- * @param {string} sessionId
+ * @param {string} cwd
  * @param {string} todoId
  * @param {Object} updates - Fields to merge
  * @returns {Promise<Array<Object>>} Updated todo list
  */
-ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
+ipcMain.handle('todos:update', async (_event, cwd, todoId, updates) => {
   if (typeof todoId !== 'string' || typeof updates !== 'object') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(safeSessionPath(sessionId));
+  const todos = readTodos(cwd);
   const idx = todos.findIndex(t => t.id === todoId);
   if (idx === -1) return todos;
-  Object.assign(todos[idx], updates, { updatedAt: new Date().toISOString() });
-  writeTodos(safeSessionPath(sessionId), todos);
+  Object.assign(todos[idx], updates);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /** @ipc todos:delete — Removes a todo by ID. @returns {Promise<Array<Object>>} */
-ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
-  let todos = readTodos(safeSessionPath(sessionId));
+ipcMain.handle('todos:delete', async (_event, cwd, todoId) => {
+  let todos = readTodos(cwd);
   todos = todos.filter(t => t.id !== todoId);
-  writeTodos(safeSessionPath(sessionId), todos);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /**
  * @ipc todos:reorder — Reorders todos according to the given ID sequence.
  * Todos not in the list are appended at the end (safety fallback).
- * @param {string} sessionId
+ * @param {string} cwd
  * @param {string[]} orderedIds
  * @returns {Promise<Array<Object>>} Reordered todo list
  */
-ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
-  const todos = readTodos(safeSessionPath(sessionId));
+ipcMain.handle('todos:reorder', async (_event, cwd, orderedIds) => {
+  const todos = readTodos(cwd);
   const byId = new Map(todos.map(t => [t.id, t]));
   const reordered = orderedIds.map(id => byId.get(id)).filter(Boolean);
   // Append any todos not in the ordered list (safety)
   for (const t of todos) {
     if (!orderedIds.includes(t.id)) reordered.push(t);
   }
-  writeTodos(safeSessionPath(sessionId), reordered);
+  writeTodos(cwd, reordered);
   return reordered;
 });
 

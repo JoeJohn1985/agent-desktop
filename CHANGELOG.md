@@ -9,6 +9,7 @@
 - **Auth-Hinweis mit Login + Neustart**: Bei „Anmeldung erforderlich" öffnet ein Button ein sichtbares Terminal mit `copilot login`; danach „App neu starten"-Button (nötig, da die Auth beim Main-Prozess-Start übernommen wird)
 
 ### Changed
+- **Todos sind jetzt projekt- statt session-gebunden**: Sie werden als Markdown-Checkliste unter `<cwd>/todo/todos.md` gespeichert (mit unsichtbaren ID-Kommentaren für verlustfreie Round-Trips) statt in `<session>/todos.json`. Dadurch überlebt die Todo-Liste das Löschen einer Session und wird von allen Sessions im selben Verzeichnis geteilt. (`src/todos.js`, IPC `todos:*` nun cwd-basiert)
 - **Gemini: Live-Suche und Datei-Tools per Tab umschaltbar** statt kombiniert — Gemini 2.5 verbietet beides im selben Request (400 `INVALID_ARGUMENT`). Modus „🔍 Recherche" (Default) bzw. „📁 Dateien" ist jederzeit pro Tab wechselbar
 - **Session-Löschung in den Papierkorb** (`shell.trashItem`) statt unwiderruflichem `fs.rmSync`; zusätzlich wird eine nicht-leere `todos.json` vor dem Löschen nach `~/.copilot-desktop/deleted-todos/` gesichert
 - **Mehrzeilige Tooltips**: `.js-tooltip` nutzt jetzt `white-space: pre-line` (Zeilenumbrüche werden dargestellt)
