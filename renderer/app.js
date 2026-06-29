@@ -4892,6 +4892,10 @@ function initDragDrop() {
 
 /** True while an update check or apply is in flight (prevents double-clicks). */
 let _updateBusy = false;
+/** Version the user dismissed — suppresses re-nagging for the same version on silent checks. */
+let _dismissedUpdateVersion = null;
+/** Interval between background update checks while the app runs (6 h). */
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Check for a newer release. On startup this runs silently (only surfaces a
@@ -4908,8 +4912,15 @@ async function checkForUpdates({ silent = true } = {}) {
   try {
     const res = await copilot.updates.check();
     if (res.updateAvailable) {
-      showUpdateBanner(res.currentVersion, res.latestVersion);
-      if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+      // On silent (background) checks, don't re-show a banner the user already
+      // dismissed for this exact version; the settings button (silent=false)
+      // always shows it again.
+      if (silent && res.latestVersion === _dismissedUpdateVersion) {
+        if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+      } else {
+        showUpdateBanner(res.currentVersion, res.latestVersion);
+        if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+      }
     } else if (!silent) {
       if (res.ok) {
         if (statusEl) statusEl.textContent = `Aktuell (v${res.currentVersion}).`;
@@ -4950,7 +4961,10 @@ function showUpdateBanner(currentVersion, latestVersion) {
     <button class="update-banner__btn" id="btnApplyUpdate">Herunterladen & Neustarten</button>
     <button class="update-banner__close" id="btnDismissUpdate" aria-label="Schließen">✕</button>`;
   document.body.appendChild(bar);
-  document.getElementById('btnDismissUpdate').addEventListener('click', () => bar.remove());
+  document.getElementById('btnDismissUpdate').addEventListener('click', () => {
+    _dismissedUpdateVersion = latestVersion; // don't re-nag on background checks
+    bar.remove();
+  });
   document.getElementById('btnApplyUpdate').addEventListener('click', () => applyUpdate(bar));
 }
 
@@ -4982,8 +4996,10 @@ async function applyUpdate(bar) {
 /** Wire the settings "check for updates" button and run the silent startup check. */
 function initUpdateChecker() {
   document.getElementById('btnCheckUpdates')?.addEventListener('click', () => checkForUpdates({ silent: false }));
-  // Silent check shortly after startup so it never blocks the UI.
+  // Silent check shortly after startup so it never blocks the UI, then
+  // periodically while the app stays open.
   setTimeout(() => checkForUpdates({ silent: true }), 3000);
+  setInterval(() => checkForUpdates({ silent: true }), UPDATE_CHECK_INTERVAL_MS);
 }
 
 function initTooltips() {

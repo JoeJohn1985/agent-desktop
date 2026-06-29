@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Git-basiertes Self-Update**: Die App prüft beim Start, periodisch (alle 6 h) und per Button in *Einstellungen → UI* über `git ls-remote --tags origin`, ob ein neuerer Release-Tag (`vX.Y.Z`) existiert (Vergleich mit lokaler `package.json`-Version, nur stabile Tags). Bei verfügbarem Update erscheint ein Banner „Neue Version verfügbar" mit „Herunterladen & Neustarten": sauberer Working Tree vorausgesetzt → `git pull --ff-only origin main`, bei geänderten Abhängigkeiten automatisch `npm install`, danach Neustart. Kein eingebettetes Token — nutzt die Git-Credentials des Nutzers (funktioniert auch beim privaten Repo). (`src/updater.js`, IPC `updates:check`/`updates:apply`)
+- **Gemini 3.5 Flash** zur Modellauswahl hinzugefügt (Preise vorläufig wie 2.5 Flash, bis offiziell bestätigt)
+- **Info-Tooltip je Provider** in den API-Provider-Einstellungen (ⓘ): listet verfügbare Tools und Besonderheiten pro Provider beim Hover
+- **Auth-Hinweis mit Login + Neustart**: Bei „Anmeldung erforderlich" öffnet ein Button ein sichtbares Terminal mit `copilot login`; danach „App neu starten"-Button (nötig, da die Auth beim Main-Prozess-Start übernommen wird)
+
+### Changed
+- **Gemini: Live-Suche und Datei-Tools per Tab umschaltbar** statt kombiniert — Gemini 2.5 verbietet beides im selben Request (400 `INVALID_ARGUMENT`). Modus „🔍 Recherche" (Default) bzw. „📁 Dateien" ist jederzeit pro Tab wechselbar
+- **Session-Löschung in den Papierkorb** (`shell.trashItem`) statt unwiderruflichem `fs.rmSync`; zusätzlich wird eine nicht-leere `todos.json` vor dem Löschen nach `~/.copilot-desktop/deleted-todos/` gesichert
+- **Mehrzeilige Tooltips**: `.js-tooltip` nutzt jetzt `white-space: pre-line` (Zeilenumbrüche werden dargestellt)
+
 ## [0.32.0] - 2026-06-24
 
 ### Added
