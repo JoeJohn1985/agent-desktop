@@ -5413,7 +5413,7 @@ function showOnboardingStep(step) {
   if (step === 1) {
     renderCwdStep(body, btnNext);
   } else if (step === 2) {
-    renderLoginStep(body, btnNext);
+    renderProviderStep(body, btnNext);
   } else if (step === 3) {
     renderFolderStep(body, btnNext);
   } else if (step === 4) {
@@ -5469,43 +5469,96 @@ async function renderCwdStep(body, btnNext) {
 }
 
 /**
- * Render the GitHub Copilot login check/prompt step.
- * @param {HTMLElement} body - Container element for step content.
- * @param {HTMLButtonElement} btnNext - The "Next" button to enable when authenticated.
- * @returns {Promise<void>}
+ * Render the provider-choice step: the user picks which provider to start with
+ * (Copilot OR an API provider OR Ollama). Copilot is no longer mandatory — any
+ * choice lets the user continue. The choice sets settings.defaultProvider.
+ * @param {HTMLElement} body
+ * @param {HTMLButtonElement} btnNext
  */
-async function renderLoginStep(body, btnNext) {
+function renderProviderStep(body, btnNext) {
+  const choices = [
+    { id: 'copilot', label: '🔌 GitHub Copilot', sub: 'CLI-Login, MCP-Unterstützung' },
+    { id: 'anthropic', label: '🟣 Anthropic', sub: 'API-Key (Claude)' },
+    { id: 'gemini', label: '🔷 Google Gemini', sub: 'API-Key, Live-Suche' },
+    { id: 'openai', label: '🟢 OpenAI', sub: 'API-Key (GPT)' },
+    { id: 'glm', label: '🟡 GLM (Zhipu)', sub: 'API-Key' },
+    { id: 'ollama', label: '💻 Ollama', sub: 'lokal, kein Key' },
+  ];
+  const current = getDefaultProvider();
   body.innerHTML = `
     <div class="onboarding-login">
-      <h2 class="onboarding-login__title">🔐 GitHub Copilot Login</h2>
-      <p class="onboarding-login__desc">Für die Nutzung von GitHub Copilot benötigst du einen aktiven GitHub Copilot Account. Der Login erfolgt über die Copilot CLI. (Optional — du kannst stattdessen auch einen API-Provider nutzen.)</p>
-      <div class="onboarding-login__status" id="onboarding-login-status">
-        <span class="onboarding-login__spinner"></span> Prüfe Login-Status…
+      <h2 class="onboarding-login__title">🧩 Provider wählen</h2>
+      <p class="onboarding-login__desc">Womit möchtest du starten? Du kannst das später jederzeit in den Einstellungen ändern und weitere Provider hinzufügen.</p>
+      <div class="onboarding-provider-grid">
+        ${choices.map(c => `
+          <button class="onboarding-provider-card${c.id === current ? ' onboarding-provider-card--active' : ''}" data-provider="${c.id}">
+            <span class="onboarding-provider-card__label">${escapeHtml(c.label)}</span>
+            <span class="onboarding-provider-card__sub">${escapeHtml(c.sub)}</span>
+          </button>`).join('')}
       </div>
+      <div class="onboarding-provider-detail" id="onboarding-provider-detail"></div>
     </div>`;
 
-  try {
-    const result = await copilot.auth.check();
-    const statusEl = document.getElementById('onboarding-login-status');
-    if (!statusEl) return;
+  const detail = document.getElementById('onboarding-provider-detail');
+  const select = (provider) => {
+    saveSetting('defaultProvider', provider);
+    body.querySelectorAll('.onboarding-provider-card').forEach(el =>
+      el.classList.toggle('onboarding-provider-card--active', el.dataset.provider === provider));
+    // A provider is chosen → the user may continue (login/key are optional and
+    // can be completed here or later in settings).
+    btnNext.disabled = false;
+    renderProviderDetail(detail, provider);
+  };
 
-    if (result.authenticated) {
-      const user = result.user ? escapeHtml(result.user) : '';
-      statusEl.className = 'onboarding-login__status onboarding-login__status--ok';
-      statusEl.innerHTML = `✅ Eingeloggt${user ? ' als <strong>' + user + '</strong>' : ''}`;
-      btnNext.disabled = false;
+  body.querySelectorAll('.onboarding-provider-card').forEach(card => {
+    card.addEventListener('click', () => select(card.dataset.provider));
+  });
+
+  // Pre-select the current default so "Weiter" is reachable immediately.
+  select(current);
+}
+
+/** Render the provider-specific sub-area (Copilot login / API key / Ollama info). */
+async function renderProviderDetail(container, provider) {
+  if (provider === 'copilot') {
+    container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Prüfe Copilot-Status…</div>';
+    let status = { cliInstalled: false, authenticated: false, user: null };
+    try { status = await window.copilot.auth.status(); } catch (_) { /* ignore */ }
+    if (!status.cliInstalled) {
+      container.innerHTML = '<div class="onboarding-login__status onboarding-login__status--warn">⚠️ Copilot-CLI nicht gefunden. Installiere die „copilot"-CLI oder wähle einen API-Provider. Du kannst trotzdem fortfahren.</div>';
+    } else if (status.authenticated) {
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--ok">✅ Eingeloggt${status.user ? ' als <strong>' + escapeHtml(status.user) + '</strong>' : ''}</div>`;
     } else {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
-      statusEl.innerHTML = `⚠️ Nicht eingeloggt. <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button> <button class="action-btn onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
-      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
-      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
+      container.innerHTML = '<div class="onboarding-login__status onboarding-login__status--warn">⚠️ Nicht eingeloggt. <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button> <button class="action-btn onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button></div>';
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderProviderDetail(container, 'copilot'));
     }
-  } catch (e) {
-    const statusEl = document.getElementById('onboarding-login-status');
-    if (statusEl) {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-      statusEl.innerHTML = `❌ Prüfung fehlgeschlagen: ${escapeHtml(e.message)}`;
-    }
+  } else if (provider === 'ollama') {
+    container.innerHTML = '<div class="onboarding-login__status">💻 Ollama läuft lokal — kein API-Key nötig. Stelle sicher, dass der Ollama-Server läuft (Standard: localhost:11434).</div>';
+  } else {
+    // API providers: inline key entry (reuses the secure store).
+    const label = PROVIDER_LABELS[provider] || provider;
+    const stored = Boolean(_providerStatus.keyed && _providerStatus.keyed[provider]);
+    container.innerHTML = `
+      <div class="onboarding-login__status">
+        🔑 ${escapeHtml(label)}: ${stored ? 'Key bereits hinterlegt.' : 'API-Key eingeben (optional — auch später in den Einstellungen möglich).'}
+      </div>
+      <div class="onboarding-provider-key">
+        <input type="password" id="onboardingProviderKey" class="onboarding-role__input" placeholder="API-Key" autocomplete="off" />
+        <button class="action-btn action-btn--primary" id="btnOnboardingSaveKey">Speichern</button>
+      </div>`;
+    document.getElementById('btnOnboardingSaveKey').addEventListener('click', async () => {
+      const key = document.getElementById('onboardingProviderKey').value.trim();
+      if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
+      const res = await window.copilot.providers.setKey(provider, key);
+      if (res.success) {
+        await refreshProviderStatus();
+        showNotification(`${label}-Key gespeichert.`, 'success');
+        renderProviderDetail(container, provider);
+      } else {
+        showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+      }
+    });
   }
 }
 
@@ -5515,27 +5568,23 @@ async function renderLoginStep(body, btnNext) {
  * @param {HTMLButtonElement} btnNext - The "Next" button to enable on success.
  * @returns {Promise<void>}
  */
-async function handleOnboardingLogin(btnNext) {
-  const statusEl = document.getElementById('onboarding-login-status');
-  if (!statusEl) return;
-  statusEl.className = 'onboarding-login__status';
-  statusEl.innerHTML = '<span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.';
+async function handleOnboardingLogin() {
+  const container = document.getElementById('onboarding-provider-detail');
+  if (!container) return;
+  container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.</div>';
 
   try {
     const result = await copilot.auth.login();
     if (result.success) {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
-      statusEl.innerHTML = `ℹ️ Login-Fenster geöffnet. Bitte melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
-      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--warn">ℹ️ Login-Fenster geöffnet. Melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button></div>`;
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderProviderDetail(container, 'copilot'));
     } else {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-      statusEl.innerHTML = `❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
-      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--error">❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button></div>`;
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
     }
   } catch (e) {
-    statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-    statusEl.innerHTML = `❌ Fehler: ${escapeHtml(e.message)} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
-    document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+    container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--error">❌ Fehler: ${escapeHtml(e.message)} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button></div>`;
+    document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
   }
 }
 

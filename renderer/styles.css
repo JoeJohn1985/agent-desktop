@@ -3941,6 +3941,39 @@ mark.chat-search-highlight--active {
   border: 1px solid var(--border-subtle);
 }
 
+/* ── Onboarding: Provider-Auswahl ─────────────────────────── */
+.onboarding-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 12px 0;
+}
+.onboarding-provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.onboarding-provider-card:hover { border-color: var(--accent); }
+.onboarding-provider-card--active {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.onboarding-provider-card__label { font-weight: 600; font-size: 13px; }
+.onboarding-provider-card__sub { font-size: 11px; color: var(--text-muted); }
+.onboarding-provider-detail { margin-top: 8px; }
+.onboarding-provider-key { display: flex; gap: 8px; margin-top: 10px; }
+.onboarding-provider-key .onboarding-role__input { flex: 1; }
+
 .onboarding-login__status--ok {
   background: var(--badge-active-bg);
   color: var(--green);
