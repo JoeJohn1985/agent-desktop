@@ -662,6 +662,9 @@ function switchTab(tabId) {
   // Update model select button for this tab
   updateModelSelectBtn();
 
+  // Reflect the active tab's stored context-% in the button.
+  updateContextButtonPct(activeTab ? (activeTab._contextPercent ?? null) : null);
+
   // Restore input state for the newly activated tab
   const chatInput = document.getElementById('chatInput');
   const chatInputRich = document.getElementById('chatInputRich');
@@ -1666,9 +1669,13 @@ function initCopilotIPC() {
       // Always refresh so cost tracking works for background tabs too.
       // updateUsageDisplay() inside only updates the visible bar for the active tab.
       refreshUsageDisplay(tabId);
-      // Direct-API tabs: refresh the context % and auto-compact if it's high.
+      // Refresh the context-% button after every message (/context is free for
+      // all providers). Direct-API tabs additionally auto-compact when high;
+      // Copilot manages its own context, so we only read & display it there.
       if (getTabProvider(tab) !== 'copilot') {
         refreshApiContext(tabId);
+      } else {
+        refreshContextDisplay(tabId);
       }
     }
   });
@@ -2089,11 +2096,30 @@ function parseContextPercent(text) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-function updateContextButton(text) {
+/** Set the context button to a given percentage (null → default label). */
+function updateContextButtonPct(pct) {
   const btn = document.getElementById('btnContextInfo');
   if (!btn) return;
-  const pct = parseContextPercent(text);
   btn.textContent = pct != null ? `📊 ${pct}%` : '📊 Kontext';
+}
+
+/**
+ * Store a tab's context-% (parsed from a /context response) and, if the tab is
+ * active, reflect it in the button. Persisting per tab keeps the button correct
+ * across tab switches.
+ * @param {number} tabId
+ * @param {string} text - Raw /context response.
+ */
+function setTabContext(tabId, text) {
+  const tab = tabs.get(tabId);
+  const pct = parseContextPercent(text);
+  if (tab) tab._contextPercent = pct;
+  if (tabId === activeTabId) updateContextButtonPct(pct);
+}
+
+/** Manual/active-tab convenience wrapper. */
+function updateContextButton(text) {
+  setTabContext(activeTabId, text);
 }
 
 async function runContextAction(actionId) {
@@ -2255,6 +2281,20 @@ async function refreshUsageDisplay(tabId) {
   }
 }
 
+/**
+ * Read & display the context-% for a tab without auto-compacting. Used for
+ * Copilot tabs (the CLI manages its own context window). /context is free.
+ * @param {number} tabId
+ */
+async function refreshContextDisplay(tabId) {
+  try {
+    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    if (res.success) setTabContext(tabId, res.text);
+  } catch (e) {
+    console.warn('[context] refreshContextDisplay fehlgeschlagen:', e?.message);
+  }
+}
+
 /** Context utilisation (%) at which a direct-API tab auto-compacts. */
 const AUTO_COMPACT_PERCENT = 80;
 
@@ -2268,14 +2308,14 @@ async function refreshApiContext(tabId) {
   try {
     const res = await window.copilot.chat.silentCommand(tabId, '/context');
     if (!res.success) return;
-    if (tabId === activeTabId) updateContextButton(res.text);
+    setTabContext(tabId, res.text);
 
     const pct = parseContextPercent(res.text);
     if (pct != null && pct >= AUTO_COMPACT_PERCENT) {
       showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
       await window.copilot.chat.silentCommand(tabId, '/compact');
       const after = await window.copilot.chat.silentCommand(tabId, '/context');
-      if (after.success && tabId === activeTabId) updateContextButton(after.text);
+      if (after.success) setTabContext(tabId, after.text);
     }
   } catch (e) {
     console.warn('[context] refreshApiContext fehlgeschlagen:', e?.message);
