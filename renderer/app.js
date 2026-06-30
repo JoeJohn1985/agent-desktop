@@ -2872,7 +2872,18 @@ function renderMcpServers() {
   if (!container) return;
   const countEl = document.getElementById('mcpCount');
   const section = container.closest('.sidebar__section');
-  
+
+  // MCP servers are only wired to the Copilot CLI. Direct-API providers
+  // (Anthropic/Gemini/OpenAI/Ollama/GLM) have no MCP connection by design
+  // (internal/sensitive servers must not reach external APIs) — hide the
+  // section entirely for those tabs.
+  const activeTab = tabs.get(activeTabId);
+  if (activeTab && getTabProvider(activeTab) !== 'copilot') {
+    if (section) section.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
   if (mcpServers.length === 0) {
     if (section) section.style.display = 'none';
     if (countEl) countEl.textContent = '';
