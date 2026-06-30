@@ -1666,17 +1666,18 @@ function initCopilotIPC() {
     }
 
     if (code === 0) {
-      // Always refresh so cost tracking works for background tabs too.
-      // updateUsageDisplay() inside only updates the visible bar for the active tab.
-      refreshUsageDisplay(tabId);
-      // Refresh the context-% button after every message (/context is free for
-      // all providers). Direct-API tabs additionally auto-compact when high;
-      // Copilot manages its own context, so we only read & display it there.
-      if (getTabProvider(tab) !== 'copilot') {
-        refreshApiContext(tabId);
-      } else {
-        refreshContextDisplay(tabId);
-      }
+      // Run /usage first, then /context — the backend handles only one silent
+      // command at a time ("Cannot run command while busy" otherwise). Refresh
+      // runs for background tabs too so cost tracking stays accurate.
+      refreshUsageDisplay(tabId).finally(() => {
+        // /context is free for all providers. Direct-API tabs additionally
+        // auto-compact when high; Copilot manages its own context window.
+        if (getTabProvider(tab) !== 'copilot') {
+          refreshApiContext(tabId);
+        } else {
+          refreshContextDisplay(tabId);
+        }
+      });
     }
   });
 }

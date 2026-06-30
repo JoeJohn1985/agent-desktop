@@ -35,13 +35,14 @@ function clearCostLog() {
 // One-time migration: earlier entries stored `credits` in MIXED units (Copilot
 // in AI Credits, direct-API in USD), which can't be reconciled to a single
 // currency. Reset the log once so all displayed costs are clean USD.
+// NOTE: must run AFTER app.js defines getPref/setPref, so it is invoked from
+// initCostsPanel() — not at module load (costs.js is parsed before app.js).
 function migrateCostLogToUsd() {
   if (getPref('costLogUsdMigrated', false)) return;
   const log = getCostLog();
   if (log.some(e => typeof e.usd !== 'number')) setPref(COST_LOG_KEY, []);
   setPref('costLogUsdMigrated', true);
 }
-migrateCostLogToUsd();
 
 // ── Cost Settings Panel ──────────────────────────────────────
 
@@ -53,6 +54,7 @@ const CHART_COLORS = [
 ];
 
 function initCostsPanel() {
+  migrateCostLogToUsd(); // safe here — app.js (getPref/setPref) is loaded
   document.querySelectorAll('.costs-view__toggle-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.costs-view__toggle-btn').forEach(b => b.classList.remove('costs-view__toggle-btn--active'));
