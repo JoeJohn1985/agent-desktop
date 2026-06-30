@@ -21,9 +21,9 @@ function getCostLog() {
   return getPref(COST_LOG_KEY, []);
 }
 
-function recordCostEntry(sessionId, sessionName, credits) {
+function recordCostEntry(sessionId, sessionName, usd, provider) {
   const log = getCostLog();
-  log.push({ ts: Date.now(), sessionId, sessionName, credits });
+  log.push({ ts: Date.now(), sessionId, sessionName, usd, provider: provider || null });
   trimCostLog(log, COST_LOG_MAX_ENTRIES);
   setPref(COST_LOG_KEY, log);
 }
@@ -31,6 +31,17 @@ function recordCostEntry(sessionId, sessionName, credits) {
 function clearCostLog() {
   setPref(COST_LOG_KEY, []);
 }
+
+// One-time migration: earlier entries stored `credits` in MIXED units (Copilot
+// in AI Credits, direct-API in USD), which can't be reconciled to a single
+// currency. Reset the log once so all displayed costs are clean USD.
+function migrateCostLogToUsd() {
+  if (getPref('costLogUsdMigrated', false)) return;
+  const log = getCostLog();
+  if (log.some(e => typeof e.usd !== 'number')) setPref(COST_LOG_KEY, []);
+  setPref('costLogUsdMigrated', true);
+}
+migrateCostLogToUsd();
 
 // ── Cost Settings Panel ──────────────────────────────────────
 
@@ -129,7 +140,7 @@ function drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucke
     ctx.fillStyle = colorMuted;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(val.toFixed(val < 10 ? 1 : 0) + 'C', padL - 4, y + 3.5);
+    ctx.fillText('$' + val.toFixed(val < 1 ? 2 : val < 10 ? 1 : 0), padL - 4, y + 3.5);
   }
 
   // Bars (stacked)
@@ -194,14 +205,14 @@ function renderCostsBreakdown(entries, sessionMap) {
     return `<div class="costs-breakdown__row">
       <div class="costs-breakdown__dot" style="background:${color}"></div>
       <span class="costs-breakdown__name">${escapeHtml(name)}</span>
-      <span class="costs-breakdown__value">${val.toFixed(1)}C</span>
+      <span class="costs-breakdown__value">$${val.toFixed(2)}</span>
     </div>`;
   }).join('');
 
   html += `<div class="costs-breakdown__row" style="margin-top:4px;">
     <div class="costs-breakdown__dot"></div>
     <span class="costs-breakdown__name costs-breakdown__name--total">Gesamt</span>
-    <span class="costs-breakdown__value">${grand.toFixed(1)}C</span>
+    <span class="costs-breakdown__value">$${grand.toFixed(2)}</span>
   </div>`;
 
   el.innerHTML = html;

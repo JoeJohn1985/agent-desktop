@@ -590,7 +590,7 @@ async function createTab(label, initialModel) {
     _lastUsageParsed: null,
     _lastUsageText: null,
     _lastUsageTokens: null,
-    _creditTotal: 0,
+    _costUsd: 0,
     _sessionName: null,
     selectedModel: initialModel || getDefaultModelId(),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
@@ -2247,8 +2247,15 @@ const {
   MODEL_PRICING,
   parseUsageTokens,
   parseUsageRequests,
-  estimateCreditsDelta,
+  estimateCostUsdDelta,
 } = window.RendererLogic;
+
+/** Format a USD amount for display (more precision for tiny amounts). */
+function formatUsd(v) {
+  const n = Number(v) || 0;
+  if (n > 0 && n < 0.01) return '$' + n.toFixed(4);
+  return '$' + n.toFixed(2);
+}
 // Other RendererLogic helpers (parseTokenK, estimateCredits, buildCostBuckets,
 // aggregateCostBySession, trimCostLog) are used internally by the above or
 // consumed directly by modules/costs.js via window.RendererLogic.
@@ -2264,12 +2271,11 @@ async function refreshUsageDisplay(tabId) {
       const modelId = tab.selectedModel || '';
       // Bill only the *new* tokens since the last reading, at the current
       // model's price — so a mid-session model switch never re-prices the
-      // tokens consumed under the previous model.
-      const deltaCredits = estimateCreditsDelta(tokens, tab._lastUsageTokens, modelId);
-      if (deltaCredits && deltaCredits > 0) {
-        tab._creditTotal = (tab._creditTotal || 0) + deltaCredits;
-        tab._creditTotal = Math.round(tab._creditTotal * 10) / 10;
-        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaCredits);
+      // tokens consumed under the previous model. Costs are tracked in USD.
+      const deltaUsd = estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
+      if (deltaUsd && deltaUsd > 0) {
+        tab._costUsd = (tab._costUsd || 0) + deltaUsd;
+        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, getTabProvider(tab));
       }
       tab._lastUsageParsed = parsed;
       tab._lastUsageText = result.text;
@@ -2331,10 +2337,9 @@ function updateUsageDisplay(parsed, tokens, fullText) {
 
   let display;
   if (MODEL_PRICING[modelId]) {
-    // Known pricing → show the running per-prompt credit total (always ≥ 0,
-    // defaulting to ~0C before the first prompt).
-    const total = tab?._creditTotal || 0;
-    display = `~${total}C`;
+    // Known pricing → show the running per-prompt cost in USD (≥ 0, $0.00
+    // before the first prompt).
+    display = '~' + formatUsd(tab?._costUsd || 0);
   } else if (parsed) {
     // Unknown model → fall back to the raw /usage figure.
     const short = parsed.unit?.toLowerCase().includes('credit') ? 'AIC'
@@ -2342,7 +2347,7 @@ function updateUsageDisplay(parsed, tokens, fullText) {
       : 'Req';
     display = `${parsed.value} ${short}`;
   } else {
-    display = '~0C';
+    display = '~$0.00';
   }
   el.textContent = display;
   el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';

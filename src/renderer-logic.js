@@ -266,7 +266,35 @@ function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
   return estimateCredits(deltaTokens, modelId);
 }
 
+// Copilot bills in AI Credits (100 AIC = 1 USD); direct APIs already in USD.
+const AIC_PER_USD = 100;
+
+/**
+ * Estimate cost in US dollars for the given tokens under a model. Copilot
+ * (credit-priced) models are converted from AIC to USD; direct-API models are
+ * already USD.
+ * @returns {number|null}
+ */
+function estimateCostUsd(tokens, modelId) {
+  const v = estimateCredits(tokens, modelId);
+  if (v == null) return null;
+  return getModelProvider(modelId) === 'copilot' ? v / AIC_PER_USD : v;
+}
+
+/** USD cost for the *new* tokens since the last reading (see estimateCreditsDelta). */
+function estimateCostUsdDelta(currentTokens, previousTokens, modelId) {
+  const v = estimateCreditsDelta(currentTokens, previousTokens, modelId);
+  if (v == null) return null;
+  return getModelProvider(modelId) === 'copilot' ? v / AIC_PER_USD : v;
+}
+
 // ── Cost Log Helpers ─────────────────────────────────────────
+
+// Entry amount in USD. New entries store `usd`; older entries stored `credits`
+// (mixed units) — those are reset on migration, so `usd` is authoritative.
+function entryUsd(e) {
+  return typeof e.usd === 'number' ? e.usd : 0;
+}
 
 function buildCostBuckets(entries, startMs, bucketMs, bucketCount) {
   const buckets = Array.from({ length: bucketCount }, () => new Map());
@@ -274,7 +302,7 @@ function buildCostBuckets(entries, startMs, bucketMs, bucketCount) {
     const idx = Math.floor((e.ts - startMs) / bucketMs);
     if (idx < 0 || idx >= bucketCount) continue;
     const key = e.sessionId || '__unnamed';
-    buckets[idx].set(key, (buckets[idx].get(key) || 0) + e.credits);
+    buckets[idx].set(key, (buckets[idx].get(key) || 0) + entryUsd(e));
   }
   return buckets;
 }
@@ -284,8 +312,9 @@ function aggregateCostBySession(entries) {
   let grand = 0;
   for (const e of entries) {
     const key = e.sessionId || '__unnamed';
-    totals.set(key, (totals.get(key) || 0) + e.credits);
-    grand += e.credits;
+    const v = entryUsd(e);
+    totals.set(key, (totals.get(key) || 0) + v);
+    grand += v;
   }
   return { totals, grand };
 }
@@ -371,6 +400,8 @@ const _api = {
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,
+  estimateCostUsd,
+  estimateCostUsdDelta,
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,

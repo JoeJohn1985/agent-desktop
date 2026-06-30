@@ -19,6 +19,8 @@ const {
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,
+  estimateCostUsd,
+  estimateCostUsdDelta,
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
@@ -518,6 +520,30 @@ describe('estimateCreditsDelta', () => {
   });
 });
 
+// ── estimateCostUsd ──────────────────────────────────────────
+describe('estimateCostUsd', () => {
+  it('rechnet Copilot-Credits in USD um (100 AIC = 1$)', () => {
+    // 1M input @ 300 AIC + 1k output ≈ 300 AIC → /100 = ~3 $
+    const usd = estimateCostUsd({ input: 1_000_000, output: 0, cache: 0 }, 'claude-sonnet-4.6');
+    expect(usd).toBeCloseTo(3, 5);
+  });
+  it('lässt Direkt-API-Preise als USD unverändert', () => {
+    // 1M input @ $5 + 1M output @ $25 = $30 (Opus API)
+    const usd = estimateCostUsd({ input: 1_000_000, output: 1_000_000, cache: 0 }, 'claude-opus-4-8');
+    expect(usd).toBe(30);
+  });
+  it('null ohne Pricing', () => {
+    expect(estimateCostUsd({ input: 1 }, 'unbekannt')).toBeNull();
+  });
+});
+
+describe('estimateCostUsdDelta', () => {
+  it('USD-Delta für neue Tokens (Copilot → /100)', () => {
+    const usd = estimateCostUsdDelta({ input: 1_000_000 }, { input: 0 }, 'claude-sonnet-4.6');
+    expect(usd).toBeCloseTo(3, 5);
+  });
+});
+
 // ── buildCostBuckets ─────────────────────────────────────────
 describe('buildCostBuckets', () => {
   const startMs = 1_000_000_000_000;
@@ -526,8 +552,8 @@ describe('buildCostBuckets', () => {
 
   it('ordnet Einträge dem richtigen Bucket zu', () => {
     const entries = [
-      { ts: startMs + 0, sessionId: 's1', credits: 1.0 },
-      { ts: startMs + bucketMs, sessionId: 's1', credits: 2.0 },
+      { ts: startMs + 0, sessionId: 's1', usd: 1.0 },
+      { ts: startMs + bucketMs, sessionId: 's1', usd: 2.0 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('s1')).toBe(1.0);
@@ -536,8 +562,8 @@ describe('buildCostBuckets', () => {
 
   it('summiert mehrere Einträge im selben Bucket', () => {
     const entries = [
-      { ts: startMs + 100, sessionId: 's1', credits: 1.5 },
-      { ts: startMs + 200, sessionId: 's1', credits: 0.5 },
+      { ts: startMs + 100, sessionId: 's1', usd: 1.5 },
+      { ts: startMs + 200, sessionId: 's1', usd: 0.5 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('s1')).toBeCloseTo(2.0);
@@ -545,8 +571,8 @@ describe('buildCostBuckets', () => {
 
   it('ignoriert Einträge außerhalb des Zeitfensters', () => {
     const entries = [
-      { ts: startMs - 1, sessionId: 's1', credits: 99 },
-      { ts: startMs + bucketMs * bucketCount, sessionId: 's1', credits: 99 },
+      { ts: startMs - 1, sessionId: 's1', usd: 99 },
+      { ts: startMs + bucketMs * bucketCount, sessionId: 's1', usd: 99 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     const total = buckets.reduce((s, b) => s + (b.get('s1') || 0), 0);
@@ -554,7 +580,7 @@ describe('buildCostBuckets', () => {
   });
 
   it('behandelt null-sessionId als __unnamed', () => {
-    const entries = [{ ts: startMs, sessionId: null, credits: 5 }];
+    const entries = [{ ts: startMs, sessionId: null, usd: 5 }];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('__unnamed')).toBe(5);
   });
@@ -564,9 +590,9 @@ describe('buildCostBuckets', () => {
 describe('aggregateCostBySession', () => {
   it('summiert Credits pro Session', () => {
     const entries = [
-      { sessionId: 'a', credits: 1.0 },
-      { sessionId: 'a', credits: 2.0 },
-      { sessionId: 'b', credits: 3.0 },
+      { sessionId: 'a', usd: 1.0 },
+      { sessionId: 'a', usd: 2.0 },
+      { sessionId: 'b', usd: 3.0 },
     ];
     const { totals, grand } = aggregateCostBySession(entries);
     expect(totals.get('a')).toBeCloseTo(3.0);
@@ -575,7 +601,7 @@ describe('aggregateCostBySession', () => {
   });
 
   it('behandelt null-sessionId als __unnamed', () => {
-    const entries = [{ sessionId: null, credits: 2.5 }];
+    const entries = [{ sessionId: null, usd: 2.5 }];
     const { totals } = aggregateCostBySession(entries);
     expect(totals.get('__unnamed')).toBe(2.5);
   });
@@ -590,14 +616,14 @@ describe('aggregateCostBySession', () => {
 // ── trimCostLog ──────────────────────────────────────────────
 describe('trimCostLog', () => {
   it('kürzt Log auf maxEntries', () => {
-    const log = Array.from({ length: 10 }, (_, i) => ({ ts: i, credits: 1 }));
+    const log = Array.from({ length: 10 }, (_, i) => ({ ts: i, usd: 1 }));
     trimCostLog(log, 5);
     expect(log).toHaveLength(5);
     expect(log[0].ts).toBe(5); // älteste entfernt
   });
 
   it('ändert nichts wenn Log kürzer als maxEntries', () => {
-    const log = [{ ts: 1, credits: 1 }, { ts: 2, credits: 2 }];
+    const log = [{ ts: 1, usd: 1 }, { ts: 2, usd: 2 }];
     trimCostLog(log, 100);
     expect(log).toHaveLength(2);
   });
