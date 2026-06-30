@@ -1781,15 +1781,28 @@ function getDefaultProvider() {
   return getProvidersWithModels().includes(p) ? p : 'copilot';
 }
 
+// Sensible out-of-box default model per provider (used when the user hasn't
+// chosen one in settings). Copilot intentionally defaults to Sonnet, NOT the
+// first list entry (Haiku) — see DEFAULT_MODEL_ID.
+const PROVIDER_DEFAULT_MODEL = {
+  copilot: DEFAULT_MODEL_ID,        // claude-sonnet-4.6
+  anthropic: 'claude-opus-4-8',
+  gemini: 'gemini-2.5-flash',
+  openai: 'gpt-5.1',
+  glm: 'glm-4.6',
+  ollama: 'llama3.1',
+};
+
 /**
- * Default model for a provider: the user-configured choice if valid, else the
- * first model of that provider. Used by the "+" menu and new-tab creation.
+ * Default model for a provider: the user-configured choice if valid, else a
+ * sensible per-provider default, else the first model of that provider. Used by
+ * the "+" menu and new-tab creation.
  */
 function getDefaultModelForProvider(provider) {
+  const valid = (id) => id && DEFAULT_MODELS.some(m => m.id === id && (m.provider || 'copilot') === provider);
   const configured = (getSettings().defaultModels || {})[provider];
-  if (configured && DEFAULT_MODELS.some(m => m.id === configured && (m.provider || 'copilot') === provider)) {
-    return configured;
-  }
+  if (valid(configured)) return configured;
+  if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
   return m ? m.id : DEFAULT_MODEL_ID;
 }

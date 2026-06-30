@@ -88,6 +88,12 @@ class OpenAICompatibleProvider extends ApiAgentClient {
   _contextWindow() { return 128_000; }
   /** Human label for error messages. */
   _providerName() { return 'OpenAI-kompatibel'; }
+  /**
+   * Name of the output-token-limit request field. OpenAI's newer models
+   * (gpt-5.x / o-series) reject `max_tokens` and require `max_completion_tokens`;
+   * GLM/Ollama use `max_tokens`. Override per provider.
+   */
+  _tokenLimitParam() { return 'max_tokens'; }
 
   #baseURL() {
     return (this.options.baseURL || this._defaultBaseURL()).replace(/\/$/, '');
@@ -123,7 +129,7 @@ class OpenAICompatibleProvider extends ApiAgentClient {
         tools: this.#tools,
         stream: true,
         stream_options: { include_usage: true },
-        max_tokens: MAX_OUTPUT_TOKENS,
+        [this._tokenLimitParam()]: MAX_OUTPUT_TOKENS,
       }),
     });
 

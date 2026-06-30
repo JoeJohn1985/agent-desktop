@@ -250,18 +250,36 @@ function parseUsageRequests(text) {
   return { value: parseFloat(m[1]), unit: m[2] };
 }
 
-function estimateCredits(tokens, modelId) {
+// Raw, UNROUNDED cost in the model's native unit (Copilot → AI Credits,
+// direct API → USD) per the pricing table. Keep this unrounded so small USD
+// amounts aren't lost; rounding happens only at display time.
+function computeRawCost(tokens, modelId) {
   const pricing = MODEL_PRICING[modelId];
   if (!pricing || !tokens) return null;
   // Cache-write tokens (first time a prefix is cached) bill at 1.25x input.
   const cacheWritePrice = pricing.cacheWrite != null ? pricing.cacheWrite : pricing.input * 1.25;
-  const c = (
+  return (
     (tokens.input || 0) * pricing.input +
     (tokens.cache || 0) * pricing.cache +
     (tokens.cacheWrite || 0) * cacheWritePrice +
     (tokens.output || 0) * pricing.output
   ) / 1_000_000;
-  return Math.round(c * 10) / 10;
+}
+
+// Positive per-field delta vs. the previous cumulative reading (clamped ≥ 0).
+function deltaTokens(currentTokens, previousTokens) {
+  const prev = previousTokens || {};
+  return {
+    input:      Math.max(0, (currentTokens.input      || 0) - (prev.input      || 0)),
+    output:     Math.max(0, (currentTokens.output     || 0) - (prev.output     || 0)),
+    cache:      Math.max(0, (currentTokens.cache      || 0) - (prev.cache      || 0)),
+    cacheWrite: Math.max(0, (currentTokens.cacheWrite || 0) - (prev.cacheWrite || 0)),
+  };
+}
+
+function estimateCredits(tokens, modelId) {
+  const c = computeRawCost(tokens, modelId);
+  return c == null ? null : Math.round(c * 10) / 10;
 }
 
 /**
@@ -277,14 +295,7 @@ function estimateCredits(tokens, modelId) {
  */
 function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
   if (!MODEL_PRICING[modelId] || !currentTokens) return null;
-  const prev = previousTokens || {};
-  const deltaTokens = {
-    input:      Math.max(0, (currentTokens.input      || 0) - (prev.input      || 0)),
-    output:     Math.max(0, (currentTokens.output     || 0) - (prev.output     || 0)),
-    cache:      Math.max(0, (currentTokens.cache      || 0) - (prev.cache      || 0)),
-    cacheWrite: Math.max(0, (currentTokens.cacheWrite || 0) - (prev.cacheWrite || 0)),
-  };
-  return estimateCredits(deltaTokens, modelId);
+  return estimateCredits(deltaTokens(currentTokens, previousTokens), modelId);
 }
 
 // Copilot bills in AI Credits (100 AIC = 1 USD); direct APIs already in USD.
@@ -297,16 +308,15 @@ const AIC_PER_USD = 100;
  * @returns {number|null}
  */
 function estimateCostUsd(tokens, modelId) {
-  const v = estimateCredits(tokens, modelId);
+  const v = computeRawCost(tokens, modelId); // unrounded — don't lose cents
   if (v == null) return null;
   return getModelProvider(modelId) === 'copilot' ? v / AIC_PER_USD : v;
 }
 
 /** USD cost for the *new* tokens since the last reading (see estimateCreditsDelta). */
 function estimateCostUsdDelta(currentTokens, previousTokens, modelId) {
-  const v = estimateCreditsDelta(currentTokens, previousTokens, modelId);
-  if (v == null) return null;
-  return getModelProvider(modelId) === 'copilot' ? v / AIC_PER_USD : v;
+  if (!MODEL_PRICING[modelId] || !currentTokens) return null;
+  return estimateCostUsd(deltaTokens(currentTokens, previousTokens), modelId);
 }
 
 // ── Cost Log Helpers ─────────────────────────────────────────

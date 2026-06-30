@@ -13,6 +13,7 @@ const CONTEXT_WINDOWS = {
 class OpenAIProvider extends OpenAICompatibleProvider {
   _defaultBaseURL() { return 'https://api.openai.com/v1'; }
   _providerName() { return 'OpenAI'; }
+  _tokenLimitParam() { return 'max_completion_tokens'; } // gpt-5.x/o-series reject max_tokens
   _contextWindow() { return CONTEXT_WINDOWS[this.options.model] || 128_000; }
 }
 

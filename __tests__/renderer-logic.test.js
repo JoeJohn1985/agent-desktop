@@ -532,6 +532,13 @@ describe('estimateCostUsd', () => {
     const usd = estimateCostUsd({ input: 1_000_000, output: 1_000_000, cache: 0 }, 'claude-opus-4-8');
     expect(usd).toBe(30);
   });
+  it('verliert kleine USD-Beträge NICHT durch Rundung (Regressionstest)', () => {
+    // 10k Output-Tokens @ $2.5/1M = $0.025 — vor dem Fix rundete estimateCredits
+    // das auf 0.0; jetzt ungerundet.
+    const usd = estimateCostUsd({ output: 10_000 }, 'gemini-2.5-flash');
+    expect(usd).toBeCloseTo(0.025, 6);
+  });
+
   it('null ohne Pricing', () => {
     expect(estimateCostUsd({ input: 1 }, 'unbekannt')).toBeNull();
   });
