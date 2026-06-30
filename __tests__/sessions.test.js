@@ -6,7 +6,7 @@ jest.mock('fs');
 
 const fs = require('fs');
 const path = require('path');
-const { readCheckpoints, readPlan } = require('../src/sessions');
+const { readCheckpoints, readPlan, readAllMessages } = require('../src/sessions');
 
 const SESSION_DIR = path.join('C:', 'test', 'sessions', 'abc-123');
 
@@ -115,3 +115,48 @@ describe('readPlan', () => {
 });
 
 // Todos sind nicht mehr Teil von sessions.js (projekt-/cwd-gebunden in src/todos.js).
+
+// ── readAllMessages ──────────────────────────────────────────
+describe('readAllMessages', () => {
+  const eventsPath = path.join(SESSION_DIR, 'events.jsonl');
+
+  test('gibt leeres Array zurück wenn events.jsonl fehlt', () => {
+    fs.existsSync.mockReturnValue(false);
+    expect(readAllMessages(SESSION_DIR)).toEqual([]);
+    expect(fs.existsSync).toHaveBeenCalledWith(eventsPath);
+  });
+
+  test('liest ALLE user/assistant-Nachrichten chronologisch', () => {
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue([
+      JSON.stringify({ type: 'session.start', data: {} }),
+      JSON.stringify({ type: 'user.message', data: { content: 'Hallo' }, timestamp: 't1' }),
+      JSON.stringify({ type: 'assistant.message', data: { content: [{ type: 'text', text: 'Hi!' }] }, timestamp: 't2' }),
+      JSON.stringify({ type: 'tool.execution_start', data: {} }),
+      JSON.stringify({ type: 'user.message', data: { content: 'Wie gehts?' }, timestamp: 't3' }),
+      '',
+    ].join('\n'));
+    expect(readAllMessages(SESSION_DIR)).toEqual([
+      { role: 'user', content: 'Hallo', timestamp: 't1' },
+      { role: 'assistant', content: 'Hi!', timestamp: 't2' },
+      { role: 'user', content: 'Wie gehts?', timestamp: 't3' },
+    ]);
+  });
+
+  test('begrenzt auf die jüngsten `limit` Nachrichten', () => {
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue([
+      JSON.stringify({ type: 'user.message', data: { content: 'a' } }),
+      JSON.stringify({ type: 'user.message', data: { content: 'b' } }),
+      JSON.stringify({ type: 'user.message', data: { content: 'c' } }),
+    ].join('\n'));
+    const out = readAllMessages(SESSION_DIR, 2);
+    expect(out.map(m => m.content)).toEqual(['b', 'c']);
+  });
+
+  test('überspringt fehlerhafte Zeilen', () => {
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue('kein json\n' + JSON.stringify({ type: 'user.message', data: { content: 'ok' } }));
+    expect(readAllMessages(SESSION_DIR)).toEqual([{ role: 'user', content: 'ok', timestamp: '' }]);
+  });
+});

@@ -2660,7 +2660,9 @@ async function displaySessionContext(tab, sessionId) {
       const history = await window.copilot.providers.loadSessionHistory(sessionId);
       renderApiHistory(history, insertBefore);
     } else {
-      const messages = await copilot.sessions.readRecentMessages(sessionId);
+      // Full conversation history (not just the last few) so reopening a
+      // Copilot session restores the whole verlauf in the tab.
+      const messages = await copilot.sessions.readAllMessages(sessionId);
       if (messages && messages.length > 0) {
         for (const msg of messages) {
           const el = document.createElement('div');

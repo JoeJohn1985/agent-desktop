@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld('copilot', {
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
     /** @ipc sessions:readRecentMessages @param {string} id - Session ID @returns {Promise<Array>} Last 5 messages */
     readRecentMessages: (id) => ipcRenderer.invoke('sessions:readRecentMessages', id),
+    /** @ipc sessions:readAllMessages — Full chronological history. @param {string} id @returns {Promise<Array>} */
+    readAllMessages: (id) => ipcRenderer.invoke('sessions:readAllMessages', id),
     /** @ipc sessions:create @param {string} name - Session display name @returns {Promise<string>} New session UUID */
     create: (name) => ipcRenderer.invoke('sessions:create', name),
     /** @ipc sessions:delete @param {string} id - Session ID @returns {Promise<boolean>} */

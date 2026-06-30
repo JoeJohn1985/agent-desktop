@@ -130,4 +130,52 @@ function readRecentMessages(sessionDir, limit = 5) {
   }
 }
 
-module.exports = { readCheckpoints, readPlan, readRecentMessages };
+/** Extract plain text from a user/assistant message event's `data.content`. */
+function extractMessageContent(rawContent) {
+  if (typeof rawContent === 'string') return rawContent;
+  if (Array.isArray(rawContent)) {
+    return rawContent
+      .filter(p => typeof p === 'string' || (p && p.type === 'text'))
+      .map(p => typeof p === 'string' ? p : p.text || '')
+      .join('');
+  }
+  return '';
+}
+
+/**
+ * Liest den GESAMTEN Nachrichtenverlauf (user/assistant) aus events.jsonl in
+ * chronologischer Reihenfolge. Für das Wiederherstellen des kompletten
+ * Session-Verlaufs beim erneuten Öffnen einer Copilot-Session.
+ * @param {string} sessionDir - Absoluter Pfad zum Session-Verzeichnis
+ * @param {number} [limit=1000] - Obergrenze (jüngste behalten), 0 = unbegrenzt
+ * @returns {Array<{role: string, content: string, timestamp: string}>}
+ */
+function readAllMessages(sessionDir, limit = 1000) {
+  const eventsPath = path.join(sessionDir, 'events.jsonl');
+  if (!fs.existsSync(eventsPath)) return [];
+  try {
+    const content = fs.readFileSync(eventsPath, 'utf-8');
+    const messages = [];
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        if (event.type === 'user.message' || event.type === 'assistant.message') {
+          const role = event.type === 'user.message' ? 'user' : 'assistant';
+          messages.push({
+            role,
+            content: extractMessageContent(event.data && event.data.content),
+            timestamp: event.timestamp || '',
+          });
+        }
+      } catch (_) { /* skip malformed lines */ }
+    }
+    return limit > 0 && messages.length > limit ? messages.slice(-limit) : messages;
+  } catch (e) {
+    console.warn('[sessions:readAllMessages] Fehler:', e.message || e);
+    return [];
+  }
+}
+
+module.exports = { readCheckpoints, readPlan, readRecentMessages, readAllMessages };

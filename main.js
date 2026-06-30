@@ -10,7 +10,7 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', 'copilot-desktop');
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
-const { readCheckpoints, readPlan, readRecentMessages } = require('./src/sessions');
+const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
 const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
@@ -586,6 +586,11 @@ ipcMain.handle('sessions:readPlan', async (_event, sessionId) => {
 /** @ipc sessions:readRecentMessages @param {string} sessionId @returns {Promise<Array>} Last 5 messages */
 ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
   return readRecentMessages(safeSessionPath(sessionId), 5);
+});
+
+/** @ipc sessions:readAllMessages — Full chronological message history of a session. @param {string} sessionId @returns {Promise<Array>} */
+ipcMain.handle('sessions:readAllMessages', async (_event, sessionId) => {
+  return readAllMessages(safeSessionPath(sessionId));
 });
 
 /**
