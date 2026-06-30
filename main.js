@@ -1595,6 +1595,31 @@ ipcMain.handle('auth:check', async () => {
 });
 
 /**
+ * @ipc copilot:status — Combined Copilot provider status for the settings UI:
+ * whether the CLI is installed (+version) and whether a user is logged in.
+ * @returns {Promise<{cliInstalled: boolean, version: string|null, authenticated: boolean, user: string|null}>}
+ */
+ipcMain.handle('copilot:status', async () => {
+  let cliInstalled = false;
+  let version = null;
+  try {
+    const { execSync } = require('child_process');
+    version = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS, env: buildEnv() }).toString().trim();
+    cliInstalled = true;
+  } catch {
+    /* CLI not installed / not on PATH */
+  }
+  const config = readCopilotConfig();
+  const user = config.lastLoggedInUser;
+  return {
+    cliInstalled,
+    version,
+    authenticated: Boolean(user && user.login),
+    user: (user && user.login) || null,
+  };
+});
+
+/**
  * @ipc auth:login — Opens a VISIBLE terminal window running `copilot login`
  * so the user can complete the device-code flow.
  * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: string|null}>}

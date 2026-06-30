@@ -2058,6 +2058,7 @@ mark.chat-search-highlight--active {
   outline: none;
 }
 .providers-row__baseurl:focus { border-color: var(--accent); }
+.providers-row__hint { font-size: 12px; color: var(--text-muted); align-self: center; }
 /* Mode dropdown: stack label + description vertically */
 .mode-dropdown .model-dropdown__item,
 .context-dropdown .model-dropdown__item {

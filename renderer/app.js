@@ -4483,6 +4483,16 @@ function initTestRunner() {
 /** Providers shown in the settings panel. `active` ones have a working backend. */
 const PROVIDER_SETTINGS = [
   {
+    id: 'copilot', active: true, cli: true,
+    info: [
+      'GitHub Copilot – voll agentisch über die Copilot CLI.',
+      '',
+      'Als einziger Provider mit MCP-Server-Unterstützung.',
+      'Anmeldung über die CLI (Terminal), kein API-Key.',
+      'Benötigt die installierte „copilot"-CLI.',
+    ].join('\n'),
+  },
+  {
     id: 'anthropic', active: true, placeholder: 'sk-ant-…',
     info: [
       'Claude – voll agentisch (direkte API).',
@@ -4555,6 +4565,7 @@ async function renderProvidersSettings() {
 
   list.innerHTML = '';
   for (const p of PROVIDER_SETTINGS) {
+    if (p.cli) { renderCopilotProviderRow(list, p); continue; }
     const hasKey = Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
     const status = p.keyless ? 'kein Key nötig' : (hasKey ? '● hinterlegt' : '○ leer');
     const row = document.createElement('div');
@@ -4622,6 +4633,57 @@ function saveProviderBaseUrl(provider, url) {
   const map = { ...(getSettings().providerBaseUrls || {}) };
   if (url) map[provider] = url; else delete map[provider];
   saveSetting('providerBaseUrls', map);
+}
+
+/**
+ * Render the Copilot row in the provider settings — presented like the other
+ * providers, but driven by the CLI status (installed? logged in?) instead of an
+ * API key. Shows an install hint, "Anmelden" (terminal login) and re-check.
+ */
+async function renderCopilotProviderRow(list, p) {
+  const row = document.createElement('div');
+  row.className = 'providers-row';
+  row.innerHTML = `
+    <div class="providers-row__head">
+      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS.copilot)}</span>
+      ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+      <span class="providers-row__status">… wird geprüft</span>
+    </div>
+    <div class="providers-row__controls"></div>`;
+  list.appendChild(row);
+
+  const statusEl = row.querySelector('.providers-row__status');
+  const controls = row.querySelector('.providers-row__controls');
+
+  let status = { cliInstalled: false, authenticated: false, user: null };
+  try { status = await window.copilot.auth.status(); } catch (_) { /* old build / offline */ }
+
+  const addBtn = (label, primary, onClick) => {
+    const b = document.createElement('button');
+    b.className = 'action-btn' + (primary ? ' action-btn--primary' : '');
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    controls.appendChild(b);
+  };
+
+  if (!status.cliInstalled) {
+    statusEl.textContent = '⚠ CLI nicht gefunden';
+    const hint = document.createElement('span');
+    hint.className = 'providers-row__hint';
+    hint.textContent = 'Bitte die „copilot"-CLI installieren und die App neu starten.';
+    controls.appendChild(hint);
+  } else if (status.authenticated) {
+    statusEl.textContent = '● eingeloggt' + (status.user ? ' als ' + status.user : '');
+    statusEl.classList.add('is-set');
+    addBtn('Neu anmelden', false, () => window.copilot.auth.login());
+  } else {
+    statusEl.textContent = '○ CLI installiert, nicht eingeloggt';
+    addBtn('Anmelden', true, async () => {
+      await window.copilot.auth.login();
+      showNotification('Login im Terminal abschließen, danach „Status prüfen".', 'info');
+    });
+    addBtn('Status prüfen', false, () => renderProvidersSettings());
+  }
 }
 
 /**

@@ -522,6 +522,8 @@ contextBridge.exposeInMainWorld('copilot', {
     check: () => ipcRenderer.invoke('auth:check'),
     /** @ipc auth:login — Opens a new terminal window for `copilot login`. @returns {Promise<{success: boolean, pendingInTerminal: boolean}>} */
     login: () => ipcRenderer.invoke('auth:login'),
+    /** @ipc copilot:status — Copilot CLI install + login status. @returns {Promise<{cliInstalled:boolean, version:string|null, authenticated:boolean, user:string|null}>} */
+    status: () => ipcRenderer.invoke('copilot:status'),
   },
 
   /**
