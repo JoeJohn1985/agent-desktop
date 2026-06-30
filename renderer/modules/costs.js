@@ -47,6 +47,17 @@ function migrateCostLogToUsd() {
 // ── Cost Settings Panel ──────────────────────────────────────
 
 let _costsRange = 'week'; // 'week' | 'day'
+let _costsGroupBy = 'provider'; // 'provider' | 'session'
+
+// Display names for provider grouping (#5).
+const PROVIDER_DISPLAY = {
+  copilot: 'GitHub Copilot', anthropic: 'Anthropic', gemini: 'Gemini',
+  openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM',
+};
+function groupDisplayName(key, fallbackName) {
+  if (_costsGroupBy === 'provider') return PROVIDER_DISPLAY[key] || key || 'Unbekannt';
+  return fallbackName || 'Unbenannte Sessions';
+}
 
 const CHART_COLORS = [
   '#4e8ef7', '#f7a44e', '#5cd45c', '#e05c5c', '#a07cf0',
@@ -60,6 +71,14 @@ function initCostsPanel() {
       document.querySelectorAll('.costs-view__toggle-btn').forEach(b => b.classList.remove('costs-view__toggle-btn--active'));
       btn.classList.add('costs-view__toggle-btn--active');
       _costsRange = btn.dataset.range;
+      renderCostsPanel();
+    });
+  });
+  document.querySelectorAll('.costs-view__group-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.costs-view__group-btn').forEach(b => b.classList.remove('costs-view__group-btn--active'));
+      btn.classList.add('costs-view__group-btn--active');
+      _costsGroupBy = btn.dataset.group;
       renderCostsPanel();
     });
   });
@@ -86,17 +105,17 @@ function renderCostsPanel() {
 
   const filtered = log.filter(e => e.ts >= startMs);
 
-  // Collect unique sessions
-  const sessionMap = new Map(); // sessionId|'__unnamed' → { name, colorIdx }
+  // Collect unique groups (by provider or by session, depending on the toggle).
+  const sessionMap = new Map(); // key → { name, colorIdx }
   let colorIdx = 0;
   for (const e of filtered) {
-    const key = e.sessionId || '__unnamed';
+    const key = _costsGroupBy === 'provider' ? (e.provider || 'copilot') : (e.sessionId || '__unnamed');
     if (!sessionMap.has(key)) {
-      sessionMap.set(key, { name: e.sessionName || 'Unbenannte Sessions', colorIdx: colorIdx++ });
+      sessionMap.set(key, { name: groupDisplayName(key, e.sessionName), colorIdx: colorIdx++ });
     }
   }
 
-  const buckets = buildCostBuckets(filtered, startMs, bucketMs, bucketCount);
+  const buckets = buildCostBuckets(filtered, startMs, bucketMs, bucketCount, _costsGroupBy);
 
   drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucketMs);
   renderCostsBreakdown(filtered, sessionMap);
@@ -192,7 +211,7 @@ function renderCostsBreakdown(entries, sessionMap) {
   const el = document.getElementById('costsBreakdown');
   if (!el) return;
 
-  const { totals, grand } = aggregateCostBySession(entries);
+  const { totals, grand } = aggregateCostBySession(entries, _costsGroupBy);
 
   if (totals.size === 0) {
     el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Noch keine Kostendaten erfasst.</div>';

@@ -317,22 +317,28 @@ function entryUsd(e) {
   return typeof e.usd === 'number' ? e.usd : 0;
 }
 
-function buildCostBuckets(entries, startMs, bucketMs, bucketCount) {
+// Grouping key for a cost entry: by provider (#5) or by session.
+function costEntryKey(e, groupBy) {
+  if (groupBy === 'provider') return e.provider || 'copilot';
+  return e.sessionId || '__unnamed';
+}
+
+function buildCostBuckets(entries, startMs, bucketMs, bucketCount, groupBy = 'session') {
   const buckets = Array.from({ length: bucketCount }, () => new Map());
   for (const e of entries) {
     const idx = Math.floor((e.ts - startMs) / bucketMs);
     if (idx < 0 || idx >= bucketCount) continue;
-    const key = e.sessionId || '__unnamed';
+    const key = costEntryKey(e, groupBy);
     buckets[idx].set(key, (buckets[idx].get(key) || 0) + entryUsd(e));
   }
   return buckets;
 }
 
-function aggregateCostBySession(entries) {
+function aggregateCostBySession(entries, groupBy = 'session') {
   const totals = new Map();
   let grand = 0;
   for (const e of entries) {
-    const key = e.sessionId || '__unnamed';
+    const key = costEntryKey(e, groupBy);
     const v = entryUsd(e);
     totals.set(key, (totals.get(key) || 0) + v);
     grand += v;

@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- **Drei neue Provider: OpenAI, Ollama, GLM (Zhipu)** — voll agentisch über einen gemeinsamen OpenAI-kompatiblen Kern (Chat Completions + Function Calling, SSE-Streaming, dependency-frei). Ollama ist lokal & keyless; Base-URL pro Provider in den Einstellungen überschreibbar. (`src/providers/openai-compatible-provider.js` + `openai/ollama/glm-provider.js`)
+- **Standard-Provider + Standard-Modell pro Provider** in den Einstellungen; behebt zugleich den Bug, dass Copilot immer mit Haiku statt dem gewählten Modell startete
+- **Modell-Kennzeichnung** im Dropdown: 💲 kostenpflichtig / 🆓 kostenlos / AIC (Copilot-Abo)
+- **Kontext-Auslastung** aktualisiert sich nach jeder Nachricht automatisch (alle Provider)
+- **Kontingent-/Rate-Limit-Fehler** werden als verständliche Info statt rohem JSON angezeigt (Gemini/Anthropic/OpenAI)
+
+### Changed
+- **Kosten in echtem USD** statt gemischter AI-Credits (Copilot 100 AIC = 1 $); **Kosten-Window nach Provider gruppierbar** (Umschalter Provider/Session)
 - **Git-basiertes Self-Update**: Die App prüft beim Start, periodisch (alle 6 h) und per Button in *Einstellungen → UI* über `git ls-remote --tags origin`, ob ein neuerer Release-Tag (`vX.Y.Z`) existiert (Vergleich mit lokaler `package.json`-Version, nur stabile Tags). Bei verfügbarem Update erscheint ein Banner „Neue Version verfügbar" mit „Herunterladen & Neustarten": sauberer Working Tree vorausgesetzt → `git pull --ff-only origin main`, bei geänderten Abhängigkeiten automatisch `npm install`, danach Neustart. Kein eingebettetes Token — nutzt die Git-Credentials des Nutzers (funktioniert auch beim privaten Repo). (`src/updater.js`, IPC `updates:check`/`updates:apply`)
 - **Gemini 3.5 Flash** zur Modellauswahl hinzugefügt (Preise vorläufig wie 2.5 Flash, bis offiziell bestätigt)
 - **Info-Tooltip je Provider** in den API-Provider-Einstellungen (ⓘ): listet verfügbare Tools und Besonderheiten pro Provider beim Hover

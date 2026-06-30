@@ -600,6 +600,19 @@ describe('aggregateCostBySession', () => {
     expect(grand).toBeCloseTo(6.0);
   });
 
+  it('gruppiert nach Provider (#5)', () => {
+    const entries = [
+      { sessionId: 'a', provider: 'copilot', usd: 1 },
+      { sessionId: 'b', provider: 'anthropic', usd: 2 },
+      { sessionId: 'c', provider: 'anthropic', usd: 3 },
+      { sessionId: 'd', usd: 0.5 }, // ohne provider → copilot
+    ];
+    const { totals, grand } = aggregateCostBySession(entries, 'provider');
+    expect(totals.get('copilot')).toBeCloseTo(1.5);
+    expect(totals.get('anthropic')).toBeCloseTo(5);
+    expect(grand).toBeCloseTo(6.5);
+  });
+
   it('behandelt null-sessionId als __unnamed', () => {
     const entries = [{ sessionId: null, usd: 2.5 }];
     const { totals } = aggregateCostBySession(entries);
