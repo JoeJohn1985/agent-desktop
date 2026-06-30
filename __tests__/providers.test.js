@@ -81,7 +81,7 @@ describe('provider registry', () => {
 
   it('createApiBackend liefert für copilot/unknown null', () => {
     expect(createApiBackend('copilot', 1, () => {}, {})).toBeNull();
-    expect(createApiBackend('openai', 1, () => {}, {})).toBeNull();
+    expect(createApiBackend('quatsch', 1, () => {}, {})).toBeNull();
   });
 
   it('createApiBackend baut ein Anthropic-Backend', () => {
@@ -89,6 +89,59 @@ describe('provider registry', () => {
     expect(b).not.toBeNull();
     expect(b.state).toBe('dead');
     expect(b.tabId).toBe(1);
+  });
+});
+
+describe('OpenAI-kompatible Provider (OpenAI / Ollama / GLM)', () => {
+  const { toOpenAITools, consumeSSEStream } = require('../src/providers/openai-compatible-provider');
+  const { getToolDefs } = require('../src/providers/agent-tools');
+
+  it('löst die Modelle auf ihre Provider auf', () => {
+    expect(getModelProvider('gpt-5.1')).toBe('openai');
+    expect(getModelProvider('glm-4.6')).toBe('glm');
+    expect(getModelProvider('llama3.1')).toBe('ollama');
+  });
+
+  it('baut die jeweiligen Backends', () => {
+    expect(createApiBackend('openai', 1, () => {}, { model: 'gpt-5.1', apiKey: 'x' }).constructor.name).toBe('OpenAIProvider');
+    expect(createApiBackend('glm', 1, () => {}, { model: 'glm-4.6', apiKey: 'x' }).constructor.name).toBe('GlmProvider');
+    expect(createApiBackend('ollama', 1, () => {}, { model: 'llama3.1' }).constructor.name).toBe('OllamaProvider');
+  });
+
+  it('Ollama ist keyless, OpenAI/GLM brauchen einen Key', () => {
+    expect(() => createApiBackend('ollama', 1, () => {}, { model: 'llama3.1' })._ensureClient()).not.toThrow();
+    expect(() => createApiBackend('openai', 1, () => {}, { model: 'gpt-5.1' })._ensureClient()).toThrow();
+  });
+
+  it('Kontextfenster je Modell', () => {
+    expect(createApiBackend('openai', 1, () => {}, { model: 'gpt-4.1' })._contextWindow()).toBe(1_047_576);
+    expect(createApiBackend('ollama', 1, () => {}, { model: 'llama3.1' })._contextWindow()).toBe(32_768);
+  });
+
+  it('toOpenAITools mappt name/description/parameters', () => {
+    const tools = toOpenAITools(getToolDefs().filter(d => d.name === 'write_file'));
+    expect(tools).toHaveLength(1);
+    expect(tools[0].type).toBe('function');
+    expect(tools[0].function.name).toBe('write_file');
+    expect(tools[0].function.parameters).toBeDefined();
+  });
+
+  it('consumeSSEStream sammelt Text, Tool-Calls und Usage', async () => {
+    const lines = [
+      'data: {"choices":[{"delta":{"content":"Hallo "}}]}',
+      'data: {"choices":[{"delta":{"content":"Welt"}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_file","arguments":"{\\"path\\""}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"x.txt\\"}"}}]}}]}',
+      'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":2}}}',
+      'data: [DONE]',
+    ].join('\n') + '\n';
+    async function* body() { yield new TextEncoder().encode(lines); }
+    const texts = [];
+    const out = await consumeSSEStream(body(), (s) => texts.push(s));
+    expect(texts.join('')).toBe('Hallo Welt');
+    expect(out.content).toBe('Hallo Welt');
+    expect(out.toolCalls[0]).toEqual({ id: 'c1', name: 'read_file', args: '{"path":"x.txt"}' });
+    expect(out.usage.prompt_tokens).toBe(10);
   });
 });
 

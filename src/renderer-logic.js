@@ -183,6 +183,18 @@ const MODEL_PRICING = {
   'gemini-2.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
   // TODO: Preise bestätigen — vorläufig wie 2.5 Flash übernommen.
   'gemini-3.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
+  // OpenAI API (USD pro 1M) — TODO: bei Preisänderungen aktualisieren.
+  'gpt-5.1':           { input: 1.25, cache: 0.125, output: 10 },
+  'gpt-5.1-mini':      { input: 0.25, cache: 0.025, output: 2  },
+  'gpt-4.1':           { input: 2,    cache: 0.5,   output: 8  },
+  // GLM / Zhipu (USD pro 1M, ca.) — TODO: bestätigen.
+  'glm-4.6':           { input: 0.6,  cache: 0.11,  output: 2.2 },
+  'glm-4.5':           { input: 0.6,  cache: 0.11,  output: 2.2 },
+  'glm-4.5-air':       { input: 0.2,  cache: 0.03,  output: 1.1 },
+  // Ollama (lokal, kostenlos)
+  'llama3.1':          { input: 0, cache: 0, output: 0 },
+  'qwen2.5-coder':     { input: 0, cache: 0, output: 0 },
+  'gpt-oss:20b':       { input: 0, cache: 0, output: 0 },
 };
 
 // Maps a model ID to its backend provider. Unknown IDs default to 'copilot'
@@ -196,6 +208,15 @@ const MODEL_PROVIDERS = {
   'gemini-2.5-pro':    'gemini',
   'gemini-2.5-flash':  'gemini',
   'gemini-3.5-flash':  'gemini',
+  'gpt-5.1':           'openai',
+  'gpt-5.1-mini':      'openai',
+  'gpt-4.1':           'openai',
+  'glm-4.6':           'glm',
+  'glm-4.5':           'glm',
+  'glm-4.5-air':       'glm',
+  'llama3.1':          'ollama',
+  'qwen2.5-coder':     'ollama',
+  'gpt-oss:20b':       'ollama',
 };
 
 function getModelProvider(modelId) {

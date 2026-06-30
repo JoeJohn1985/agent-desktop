@@ -8,6 +8,9 @@
 const { getModelProvider } = require('../renderer-logic');
 const { AnthropicProvider } = require('./anthropic-provider');
 const { GeminiProvider } = require('./gemini-provider');
+const { OpenAIProvider } = require('./openai-provider');
+const { OllamaProvider } = require('./ollama-provider');
+const { GlmProvider } = require('./glm-provider');
 
 /**
  * Creates a direct-API backend for the given provider, or returns null if the
@@ -24,7 +27,12 @@ function createApiBackend(provider, tabId, sendToRenderer, options) {
       return new AnthropicProvider(tabId, sendToRenderer, options);
     case 'gemini':
       return new GeminiProvider(tabId, sendToRenderer, options);
-    // 'openai' is added in a later phase.
+    case 'openai':
+      return new OpenAIProvider(tabId, sendToRenderer, options);
+    case 'ollama':
+      return new OllamaProvider(tabId, sendToRenderer, options);
+    case 'glm':
+      return new GlmProvider(tabId, sendToRenderer, options);
     default:
       return null;
   }

@@ -265,8 +265,10 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
  */
 async function sendApiPrompt(tabId, prompt, options) {
   const { provider, cwd } = options;
+  // Ollama runs locally and needs no API key.
+  const KEYLESS_PROVIDERS = new Set(['ollama']);
   const apiKey = secureStore.getKey(provider);
-  if (!apiKey) {
+  if (!apiKey && !KEYLESS_PROVIDERS.has(provider)) {
     throw new Error(`Kein API-Key für ${provider} hinterlegt. Bitte in den Einstellungen unter „API-Provider" eintragen.`);
   }
 
@@ -276,7 +278,10 @@ async function sendApiPrompt(tabId, prompt, options) {
   let systemContext = '';
   try {
     const { composeSystemContext } = require('./src/providers/system-context');
-    if (provider === 'anthropic') systemContext = composeSystemContext({
+    // Full-agentic providers get the project context (instructions/agents/skills);
+    // Gemini is intentionally kept context-light.
+    const CONTEXT_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+    if (CONTEXT_PROVIDERS.has(provider)) systemContext = composeSystemContext({
       cwd,
       skillsDir: folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
       agentsDir: folderConfig.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),

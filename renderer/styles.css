@@ -2046,6 +2046,18 @@ mark.chat-search-highlight--active {
   outline: none;
 }
 .providers-row__input:focus { border-color: var(--accent); }
+.providers-row__baseurl {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.providers-row__baseurl:focus { border-color: var(--accent); }
 /* Mode dropdown: stack label + description vertically */
 .mode-dropdown .model-dropdown__item,
 .context-dropdown .model-dropdown__item {

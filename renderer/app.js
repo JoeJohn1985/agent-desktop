@@ -1182,6 +1182,7 @@ function sendMessage() {
     activeSkills: activeSkillDirs,
     activeAgents: activeAgentSlugs,
     geminiMode: tab.geminiMode || 'search',
+    baseURL: getProviderBaseUrl(getTabProvider(tab)) || undefined,
   })
     .then((res) => handleSendResult(sendTabId, res))
     .catch((err) => handleSendResult(sendTabId, { success: false, error: err?.message || String(err) }));
@@ -1713,6 +1714,18 @@ const DEFAULT_MODELS = [
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini', tier: 'paid' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini', tier: 'free' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini', tier: 'paid' },
+  // OpenAI API (provider: 'openai') — benötigt API-Key
+  { id: 'gpt-5.1', label: 'GPT-5.1', short: 'GPT-5.1', provider: 'openai', tier: 'paid' },
+  { id: 'gpt-5.1-mini', label: 'GPT-5.1 mini', short: 'GPT-5.1 mini', provider: 'openai', tier: 'paid' },
+  { id: 'gpt-4.1', label: 'GPT-4.1', short: 'GPT-4.1', provider: 'openai', tier: 'paid' },
+  // GLM / Zhipu (provider: 'glm') — benötigt API-Key
+  { id: 'glm-4.6', label: 'GLM-4.6', short: 'GLM-4.6', provider: 'glm', tier: 'paid' },
+  { id: 'glm-4.5', label: 'GLM-4.5', short: 'GLM-4.5', provider: 'glm', tier: 'paid' },
+  { id: 'glm-4.5-air', label: 'GLM-4.5 Air', short: 'GLM-4.5 Air', provider: 'glm', tier: 'paid' },
+  // Ollama (provider: 'ollama') — lokal, kein Key, kostenlos
+  { id: 'llama3.1', label: 'Llama 3.1 (Ollama)', short: 'Llama 3.1', provider: 'ollama', tier: 'free' },
+  { id: 'qwen2.5-coder', label: 'Qwen2.5 Coder (Ollama)', short: 'Qwen2.5 Coder', provider: 'ollama', tier: 'free' },
+  { id: 'gpt-oss:20b', label: 'gpt-oss 20B (Ollama)', short: 'gpt-oss 20B', provider: 'ollama', tier: 'free' },
 ];
 
 // Badge-Markup für die Modell-Kennzeichnung (kostenpflichtig / kostenlos / AIC).
@@ -1729,7 +1742,9 @@ const PROVIDER_LABELS = {
   copilot: 'GitHub Copilot',
   anthropic: 'Anthropic API',
   gemini: 'Google Gemini',
-  openai: 'OpenAI-kompatibel',
+  openai: 'OpenAI',
+  ollama: 'Ollama (lokal)',
+  glm: 'GLM (Zhipu)',
 };
 
 const PROVIDER_ICON = '🔌';
@@ -1742,11 +1757,13 @@ const PROVIDERS = [
   { id: 'copilot', active: true },
   { id: 'gemini', active: true },
   { id: 'anthropic', active: true },
-  { id: 'openai', active: false },
+  { id: 'openai', active: true },
+  { id: 'glm', active: true },
+  { id: 'ollama', active: true },
 ];
 
 // Providers still in beta (not yet extensively tested) — shown with a Beta badge.
-const BETA_PROVIDERS = new Set(['anthropic', 'gemini']);
+const BETA_PROVIDERS = new Set(['anthropic', 'gemini', 'openai', 'glm', 'ollama']);
 
 /** Providers that have selectable models (in display order). */
 function getProvidersWithModels() {
@@ -1832,7 +1849,7 @@ function getTabProvider(tab) {
   return window.RendererLogic.getModelProvider(tab?.selectedModel || '') || 'copilot';
 }
 
-const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI' };
+const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
 
 /** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {
@@ -2708,6 +2725,12 @@ function renderApiHistory(messages, insertBefore) {
       if (text) assistantBubble(text);
       for (const b of blocks) {
         if (b.type === 'tool_use') toolLine(b.name, b.input);
+      }
+      // OpenAI-compatible shape: tool calls live on msg.tool_calls.
+      for (const tc of msg.tool_calls || []) {
+        let input = {};
+        try { input = JSON.parse(tc.function?.arguments || '{}'); } catch (_) { /* ignore */ }
+        toolLine(tc.function?.name || 'tool', input);
       }
     }
   }
@@ -4467,8 +4490,30 @@ const PROVIDER_SETTINGS = [
     ].join('\n'),
   },
   {
-    id: 'openai', active: false, placeholder: 'sk-…',
-    info: 'OpenAI-kompatibel – noch in Vorbereitung (inkl. konfigurierbarer Base-URL für OpenRouter/Ollama).',
+    id: 'openai', active: true, placeholder: 'sk-…', baseUrl: true, defaultBaseUrl: 'https://api.openai.com/v1',
+    info: [
+      'OpenAI – voll agentisch (Chat Completions + Function Calling).',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+      'Base-URL überschreibbar (z.B. für OpenRouter).',
+    ].join('\n'),
+  },
+  {
+    id: 'glm', active: true, placeholder: 'xxxx.xxxx (Zhipu API-Key)', baseUrl: true, defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    info: [
+      'GLM (Zhipu) – voll agentisch über OpenAI-kompatible API.',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+    ].join('\n'),
+  },
+  {
+    id: 'ollama', active: true, placeholder: '(kein Key nötig)', keyless: true, baseUrl: true, defaultBaseUrl: 'http://localhost:11434/v1',
+    info: [
+      'Ollama – lokale Modelle, kein API-Key, kostenlos.',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+      'Base-URL = Adresse deines Ollama-Servers (Standard localhost:11434).',
+    ].join('\n'),
   },
 ];
 
@@ -4487,43 +4532,72 @@ async function renderProvidersSettings() {
   list.innerHTML = '';
   for (const p of PROVIDER_SETTINGS) {
     const hasKey = Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const status = p.keyless ? 'kein Key nötig' : (hasKey ? '● hinterlegt' : '○ leer');
     const row = document.createElement('div');
     row.className = 'providers-row';
-    row.innerHTML = `
-      <div class="providers-row__head">
-        <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
-        ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
-        ${BETA_PROVIDERS.has(p.id) ? '<span class="beta-badge">Beta</span>' : ''}
-        <span class="providers-row__status ${hasKey ? 'is-set' : ''}">${hasKey ? '● hinterlegt' : '○ leer'}</span>
-        ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
-      </div>
+    const keyControls = p.keyless ? '' : `
       <div class="providers-row__controls">
         <input type="password" class="providers-row__input" placeholder="${escapeAttr(p.placeholder)}" autocomplete="off" />
         <button class="action-btn providers-row__save">Speichern</button>
         <button class="action-btn providers-row__delete" ${hasKey ? '' : 'disabled'}>Löschen</button>
       </div>`;
+    const baseUrlControls = p.baseUrl ? `
+      <div class="providers-row__controls">
+        <input type="text" class="providers-row__baseurl" placeholder="${escapeAttr(p.defaultBaseUrl || '')}" autocomplete="off" value="${escapeAttr(getProviderBaseUrl(p.id))}" />
+        <button class="action-btn providers-row__save-url">Base-URL speichern</button>
+      </div>` : '';
+    row.innerHTML = `
+      <div class="providers-row__head">
+        <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+        ${BETA_PROVIDERS.has(p.id) ? '<span class="beta-badge">Beta</span>' : ''}
+        <span class="providers-row__status ${hasKey || p.keyless ? 'is-set' : ''}">${status}</span>
+        ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
+      </div>
+      ${keyControls}
+      ${baseUrlControls}`;
 
-    const input = row.querySelector('.providers-row__input');
-    row.querySelector('.providers-row__save').addEventListener('click', async () => {
-      const key = input.value.trim();
-      if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
-      const res = await window.copilot.providers.setKey(p.id, key);
-      if (res.success) {
-        input.value = '';
-        showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
+    if (!p.keyless) {
+      const input = row.querySelector('.providers-row__input');
+      row.querySelector('.providers-row__save').addEventListener('click', async () => {
+        const key = input.value.trim();
+        if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
+        const res = await window.copilot.providers.setKey(p.id, key);
+        if (res.success) {
+          input.value = '';
+          showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
+          renderProvidersSettings();
+        } else {
+          showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+        }
+      });
+      row.querySelector('.providers-row__delete').addEventListener('click', async () => {
+        await window.copilot.providers.deleteKey(p.id);
+        showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
         renderProvidersSettings();
-      } else {
-        showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
-      }
-    });
-    row.querySelector('.providers-row__delete').addEventListener('click', async () => {
-      await window.copilot.providers.deleteKey(p.id);
-      showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
-      renderProvidersSettings();
-    });
+      });
+    }
+
+    if (p.baseUrl) {
+      const urlInput = row.querySelector('.providers-row__baseurl');
+      row.querySelector('.providers-row__save-url').addEventListener('click', () => {
+        saveProviderBaseUrl(p.id, urlInput.value.trim());
+        showNotification(`${PROVIDER_LABELS[p.id]} Base-URL gespeichert.`, 'success');
+      });
+    }
 
     list.appendChild(row);
   }
+}
+
+/** Per-provider base URL override (empty → provider default). */
+function getProviderBaseUrl(provider) {
+  return (getSettings().providerBaseUrls || {})[provider] || '';
+}
+function saveProviderBaseUrl(provider, url) {
+  const map = { ...(getSettings().providerBaseUrls || {}) };
+  if (url) map[provider] = url; else delete map[provider];
+  saveSetting('providerBaseUrls', map);
 }
 
 /**
