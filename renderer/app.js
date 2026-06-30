@@ -5369,7 +5369,7 @@ async function renderCwdStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-cwd">
       <h2 class="onboarding-cwd__title">📂 Arbeitsverzeichnis</h2>
-      <p class="onboarding-cwd__desc">Wähle das Verzeichnis, in dem Copilot Desktop arbeiten soll. Dort werden deine Sessions und Dateien gespeichert.</p>
+      <p class="onboarding-cwd__desc">Wähle das Verzeichnis, in dem Agent Desktop arbeiten soll. Dort werden deine Sessions und Dateien gespeichert.</p>
       <div id="onboarding-cwd-status" class="onboarding-cwd__status">
         <span class="onboarding-login__spinner"></span> Lade aktuelles Verzeichnis…
       </div>
@@ -5416,7 +5416,7 @@ async function renderLoginStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-login">
       <h2 class="onboarding-login__title">🔐 GitHub Copilot Login</h2>
-      <p class="onboarding-login__desc">Für die Nutzung von Copilot Desktop benötigst du einen aktiven GitHub Copilot Account. Der Login erfolgt über die Copilot CLI.</p>
+      <p class="onboarding-login__desc">Für die Nutzung von GitHub Copilot benötigst du einen aktiven GitHub Copilot Account. Der Login erfolgt über die Copilot CLI. (Optional — du kannst stattdessen auch einen API-Provider nutzen.)</p>
       <div class="onboarding-login__status" id="onboarding-login-status">
         <span class="onboarding-login__spinner"></span> Prüfe Login-Status…
       </div>
@@ -5488,7 +5488,7 @@ async function renderFolderStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-folders">
       <h2 class="onboarding-folders__title">📁 Ordner einrichten</h2>
-      <p class="onboarding-folders__desc">Copilot Desktop benötigt einige Ordner für Skills, Agents, Sessions und Instructions. Diese werden in deinem Home-Verzeichnis angelegt.</p>
+      <p class="onboarding-folders__desc">Agent Desktop benötigt einige Ordner für Skills, Agents, Sessions und Instructions. Diese werden in deinem Home-Verzeichnis angelegt.</p>
       <ul class="onboarding-folder-list" id="onboarding-folder-list">
         <li class="onboarding-folder-item"><span class="onboarding-login__spinner"></span> Prüfe…</li>
       </ul>

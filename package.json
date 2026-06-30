@@ -1,7 +1,7 @@
 {
   "name": "copilot-desktop",
   "version": "0.32.0",
-  "description": "Desktop-App für GitHub Copilot CLI mit JSON-basierter Kommunikation",
+  "description": "Agent Desktop — lokale Agent-Anwendung für mehrere LLM-Provider (GitHub Copilot CLI, Anthropic, Gemini, OpenAI, Ollama, GLM)",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

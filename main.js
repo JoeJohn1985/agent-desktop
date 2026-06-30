@@ -134,7 +134,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 500,
-    title: 'Copilot Desktop',
+    title: 'Agent Desktop',
     icon: appIcon,
     backgroundColor: '#f5f3ef',
     frame: false,
@@ -1736,7 +1736,7 @@ function scanAgents() {
 
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
-  console.log(`[app] Copilot Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
+  console.log(`[app] Agent Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
   }
