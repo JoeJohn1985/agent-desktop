@@ -2336,20 +2336,16 @@ mark.chat-search-highlight--active {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
-.costs-view__toggle--group { margin-left: 8px; }
-.costs-view__group-btn {
-  background: none;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.costs-view__group-btn--active {
+.costs-view__provider-filter {
+  margin-left: 8px;
   background: var(--bg-surface);
   color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
 }
 .costs-view__clear-btn {
   font-size: 11px;

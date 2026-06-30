@@ -46,17 +46,21 @@ function migrateCostLogToUsd() {
 
 // ── Cost Settings Panel ──────────────────────────────────────
 
-let _costsRange = 'week'; // 'week' | 'day'
-let _costsGroupBy = 'provider'; // 'provider' | 'session'
+let _costsRange = 'week';     // 'week' | 'day'
+let _costsProvider = 'all';   // 'all' → je Provider; sonst Provider-ID → dessen Sessions
 
-// Display names for provider grouping (#5).
+// Display names for provider grouping.
 const PROVIDER_DISPLAY = {
   copilot: 'GitHub Copilot', anthropic: 'Anthropic', gemini: 'Gemini',
   openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM',
 };
-function groupDisplayName(key, fallbackName) {
-  if (_costsGroupBy === 'provider') return PROVIDER_DISPLAY[key] || key || 'Unbekannt';
-  return fallbackName || 'Unbenannte Sessions';
+
+// Session display name: prefer the app's session naming (namedSessions),
+// fall back to the short id — so sessions aren't all shown as "Unbenannt".
+function sessionDisplayName(sessionId) {
+  if (!sessionId || sessionId === '__unnamed') return 'Unbenannte Sessions';
+  const named = (typeof getSessionName === 'function') ? getSessionName(sessionId) : null;
+  return named || sessionId.slice(0, 8);
 }
 
 const CHART_COLORS = [
@@ -74,13 +78,9 @@ function initCostsPanel() {
       renderCostsPanel();
     });
   });
-  document.querySelectorAll('.costs-view__group-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.costs-view__group-btn').forEach(b => b.classList.remove('costs-view__group-btn--active'));
-      btn.classList.add('costs-view__group-btn--active');
-      _costsGroupBy = btn.dataset.group;
-      renderCostsPanel();
-    });
+  document.getElementById('costsProviderFilter')?.addEventListener('change', (e) => {
+    _costsProvider = e.target.value;
+    renderCostsPanel();
   });
   document.getElementById('btnClearCostLog')?.addEventListener('click', () => {
     if (confirm('Kostenverlauf wirklich löschen?')) {
@@ -103,22 +103,45 @@ function renderCostsPanel() {
   const windowMs = bucketCount * bucketMs;
   const startMs = now - windowMs;
 
-  const filtered = log.filter(e => e.ts >= startMs);
+  // Keep the provider dropdown in sync with the providers present in the log.
+  populateProviderFilter(log);
 
-  // Collect unique groups (by provider or by session, depending on the toggle).
+  const inWindow = log.filter(e => e.ts >= startMs);
+
+  // "Alle Provider" → ein Balken/Eintrag je Provider. Ein konkreter Provider →
+  // nur dessen Einträge, aufgeschlüsselt nach Session (#1).
+  const byProvider = _costsProvider === 'all';
+  const entries = byProvider ? inWindow : inWindow.filter(e => (e.provider || 'copilot') === _costsProvider);
+  const groupBy = byProvider ? 'provider' : 'session';
+
   const sessionMap = new Map(); // key → { name, colorIdx }
   let colorIdx = 0;
-  for (const e of filtered) {
-    const key = _costsGroupBy === 'provider' ? (e.provider || 'copilot') : (e.sessionId || '__unnamed');
+  for (const e of entries) {
+    const key = byProvider ? (e.provider || 'copilot') : (e.sessionId || '__unnamed');
     if (!sessionMap.has(key)) {
-      sessionMap.set(key, { name: groupDisplayName(key, e.sessionName), colorIdx: colorIdx++ });
+      const name = byProvider ? (PROVIDER_DISPLAY[key] || key) : sessionDisplayName(key);
+      sessionMap.set(key, { name, colorIdx: colorIdx++ });
     }
   }
 
-  const buckets = buildCostBuckets(filtered, startMs, bucketMs, bucketCount, _costsGroupBy);
+  const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount, groupBy);
 
   drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucketMs);
-  renderCostsBreakdown(filtered, sessionMap);
+  renderCostsBreakdown(entries, sessionMap, groupBy);
+}
+
+/** Fill the provider filter dropdown with "Alle" + the providers present in the log. */
+function populateProviderFilter(log) {
+  const sel = document.getElementById('costsProviderFilter');
+  if (!sel) return;
+  const present = [...new Set(log.map(e => e.provider || 'copilot'))];
+  const opts = ['all', ...present];
+  // Drop the selected provider if it no longer has data.
+  if (!opts.includes(_costsProvider)) _costsProvider = 'all';
+  sel.innerHTML = opts
+    .map(p => `<option value="${p}">${p === 'all' ? 'Alle Provider' : (PROVIDER_DISPLAY[p] || p)}</option>`)
+    .join('');
+  sel.value = _costsProvider;
 }
 
 function drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucketMs) {
@@ -207,11 +230,11 @@ function niceStep(max) {
   return mag * 10;
 }
 
-function renderCostsBreakdown(entries, sessionMap) {
+function renderCostsBreakdown(entries, sessionMap, groupBy) {
   const el = document.getElementById('costsBreakdown');
   if (!el) return;
 
-  const { totals, grand } = aggregateCostBySession(entries, _costsGroupBy);
+  const { totals, grand } = aggregateCostBySession(entries, groupBy);
 
   if (totals.size === 0) {
     el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Noch keine Kostendaten erfasst.</div>';
