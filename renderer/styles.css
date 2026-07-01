@@ -1533,6 +1533,7 @@ mark.chat-search-highlight--active {
   font-style: normal;
   color: var(--text-secondary);
 }
+.stream-thinking__content { white-space: pre-wrap; }
 
 /* ── Stream Tool Calls ───────────────────────────────── */
 .stream-tool-call {

@@ -1368,7 +1368,20 @@ function initCopilotIPC() {
           tab._thinkingEl = content;
           tab._thinkingDetails = details;
         }
-        tab._thinkingEl.textContent += event.data.deltaContent || '';
+        {
+          // A tool call (incl. report_intent) interrupted the reasoning stream.
+          // Insert a break so the resumed thought doesn't glue onto the previous
+          // one ("…protocol.Now I'm…"). Only when both sides lack whitespace.
+          const delta = event.data.deltaContent || '';
+          if (tab._pendingThinkBreak) {
+            tab._pendingThinkBreak = false;
+            const cur = tab._thinkingEl.textContent;
+            if (cur && !/\s$/.test(cur) && delta && !/^\s/.test(delta)) {
+              tab._thinkingEl.textContent += '\n\n';
+            }
+          }
+          tab._thinkingEl.textContent += delta;
+        }
         scrollToBottom(tab.streamEl);
         break;
       }
@@ -1400,7 +1413,19 @@ function initCopilotIPC() {
           tab.streamEl.insertBefore(tab._responseEl, tab.statusEl);
           tab._responseRaw = '';
         }
-        tab._responseRaw += event.data.deltaContent || '';
+        {
+          // A report_intent (or other tool) interrupted the text without ending
+          // the bubble → insert a paragraph break so sentences before/after don't
+          // glue together (".mdDas Protokoll…"). Only when both sides lack whitespace.
+          const delta = event.data.deltaContent || '';
+          if (tab._pendingTextBreak) {
+            tab._pendingTextBreak = false;
+            if (tab._responseRaw && !/\s$/.test(tab._responseRaw) && delta && !/^\s/.test(delta)) {
+              tab._responseRaw += '\n\n';
+            }
+          }
+          tab._responseRaw += delta;
+        }
         // Throttled markdown render
         if (!tab._mdTimer) {
           tab._mdTimer = setTimeout(() => {
@@ -1454,6 +1479,11 @@ function initCopilotIPC() {
       // ── Tool execution ────────────────────────────────────
       case 'tool.execution_start': {
         tab.lastActivityAt = Date.now();
+        // A tool call interrupts the assistant's text/reasoning stream. Mark a
+        // pending break so the next delta doesn't glue onto the previous text —
+        // report_intent keeps the same bubble, so without this the sentences merge.
+        tab._pendingTextBreak = true;
+        tab._pendingThinkBreak = true;
         // Track tool call info for denied messages
         if (event.data.toolCallId) {
           pendingToolCalls.set(event.data.toolCallId, {
