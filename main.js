@@ -397,6 +397,26 @@ ipcMain.handle('providers:deleteKey', (_event, provider) => {
   return { success: true };
 });
 
+/**
+ * @ipc providers:listModels — Discover a provider's currently-offered models from
+ * its API. Best-effort: returns {ok:false} on missing key / network error instead
+ * of throwing, so the renderer can silently fall back to the hardcoded list.
+ */
+ipcMain.handle('providers:listModels', async (_event, provider, baseURL) => {
+  try {
+    const modelDiscovery = require('./src/model-discovery');
+    const KEYLESS_PROVIDERS = new Set(['ollama']);
+    const apiKey = secureStore.getKey(provider);
+    if (!apiKey && !KEYLESS_PROVIDERS.has(provider)) {
+      return { ok: false, reason: 'no-key', models: [] };
+    }
+    const models = await modelDiscovery.listModels(provider, { apiKey, baseURL });
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, reason: 'error', error: e?.message || String(e), models: [] };
+  }
+});
+
 /** @ipc providers:loadSessionHistory — Persisted direct-API conversation history for a session. */
 ipcMain.handle('providers:loadSessionHistory', (_event, sessionId) => {
   try {

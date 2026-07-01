@@ -1894,47 +1894,117 @@ function renderDefaultModelSettings() {
 }
 
 /**
- * Copilot models as reported by the CLI (via ACP), or null before the first
- * session tells us. When set, these replace the hardcoded Copilot list so the
- * dropdown reflects the account's actually-available models.
- * @type {Array<{id:string,label:string,short:string,provider:string,tier:string}>|null}
+ * Dynamically discovered models per provider. Copilot models arrive via ACP; the
+ * direct-API providers are polled via providers:listModels. When a provider has
+ * an entry here it replaces that provider's hardcoded list, so the dropdown
+ * reflects the account's actually-available models.
+ * @type {Object<string, Array<{id:string,label:string,short:string,provider:string,tier:string}>>}
  */
-let _copilotModels = null;
+const _dynamicModels = {};
 
-/** Merge the CLI-reported Copilot models into the selectable list and persist them. */
-function updateCopilotModels(models) {
+/** Default cost tier for freshly-discovered models, by provider. */
+const PROVIDER_DEFAULT_TIER = {
+  copilot: 'aic', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
+};
+
+/**
+ * Merge a freshly discovered model list for a provider: normalize to the internal
+ * shape, announce models we've never seen before, persist, and refresh the UI.
+ * @param {string} provider
+ * @param {Array<{id:string,name?:string}>} models - raw {id,name} pairs
+ */
+function applyDynamicModels(provider, models) {
   if (!Array.isArray(models) || !models.length) return;
-  _copilotModels = models.map(m => ({
-    id: m.id, label: m.name || m.id, short: m.name || m.id, provider: 'copilot', tier: 'aic',
-  }));
-  // Persist so the discovered models are available immediately on next launch —
-  // without waiting for a session to re-report them. This is the authoritative
-  // list; models no longer reported drop out (and become invalid on send).
-  setPref('copilotModels', _copilotModels);
-  // Refresh anything that lists Copilot models.
+  const tier = PROVIDER_DEFAULT_TIER[provider] || 'paid';
+  const mapped = models
+    .filter(m => m && m.id)
+    .map(m => ({ id: m.id, label: m.name || m.id, short: m.name || m.id, provider, tier }));
+  if (!mapped.length) return;
+
+  // "New" = neither in the hardcoded list nor in the previously-known dynamic
+  // list. The very first discovery for a provider is treated as initial
+  // population (no notification); only genuinely new arrivals later are announced.
+  const hadPrevious = Array.isArray(_dynamicModels[provider]) && _dynamicModels[provider].length > 0;
+  const known = new Set([
+    ...DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider).map(m => m.id),
+    ...((_dynamicModels[provider] || []).map(m => m.id)),
+  ]);
+  const fresh = mapped.filter(m => !known.has(m.id));
+
+  _dynamicModels[provider] = mapped;
+  setPref('dynamicModels', _dynamicModels);
+
+  if (hadPrevious && fresh.length) {
+    const names = fresh.map(m => m.short).slice(0, 4).join(', ');
+    const more = fresh.length > 4 ? ` +${fresh.length - 4}` : '';
+    showNotification(`🆕 Neues Modell bei ${PROVIDER_SHORT[provider] || provider}: ${names}${more}`, 'info');
+  }
+
   updateModelSelectBtn(activeTabId);
   if (document.getElementById('settDefaultProvider')) renderDefaultModelSettings();
 }
 
-/** Load the persisted Copilot model list (from a prior session) at startup. */
+/** Merge the CLI-reported Copilot models into the selectable list (via ACP). */
+function updateCopilotModels(models) {
+  applyDynamicModels('copilot', models);
+}
+
+/** Load persisted dynamic models (incl. the legacy Copilot-only list) at startup. */
 function initCopilotModels() {
-  const stored = getPref('copilotModels', null);
-  if (Array.isArray(stored) && stored.length) _copilotModels = stored;
+  const stored = getPref('dynamicModels', null);
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [prov, list] of Object.entries(stored)) {
+      if (Array.isArray(list) && list.length) _dynamicModels[prov] = list;
+    }
+  }
+  // Back-compat: older builds stored only the Copilot list under 'copilotModels'.
+  if (!_dynamicModels.copilot) {
+    const legacy = getPref('copilotModels', null);
+    if (Array.isArray(legacy) && legacy.length) _dynamicModels.copilot = legacy;
+  }
 }
 
 /**
- * Whether a Copilot model is currently offered by the CLI. Returns true when we
- * have no dynamic list yet (permissive — the static fallback list is in use).
+ * Fetch a direct-API provider's current models and merge them in. Best-effort:
+ * failures (no key, offline, unsupported endpoint) leave the hardcoded list intact.
+ * @param {string} provider
+ */
+async function refreshProviderModels(provider) {
+  if (provider === 'copilot') return; // Copilot models arrive via ACP, not here.
+  try {
+    const res = await copilot.providers.listModels(provider);
+    if (res && res.ok && Array.isArray(res.models) && res.models.length) {
+      applyDynamicModels(provider, res.models);
+    }
+  } catch (_) { /* discovery is best-effort */ }
+}
+
+/** Discover models for every direct-API provider that has a key (or is keyless). */
+async function refreshAllProviderModels() {
+  const KEYLESS = new Set(['ollama']);
+  let status = null;
+  try { status = await copilot.providers.status(); } catch (_) { /* ignore */ }
+  const keyed = (status && status.keyed) || {};
+  for (const p of ['anthropic', 'gemini', 'openai', 'glm', 'ollama']) {
+    if (KEYLESS.has(p) || keyed[p]) refreshProviderModels(p);
+  }
+}
+
+/**
+ * Whether a Copilot model is currently offered by the CLI. Permissive when we
+ * have no dynamic list yet (the static fallback list is in use).
  * @param {string} modelId
  */
 function isCopilotModelAvailable(modelId) {
-  if (!_copilotModels || !_copilotModels.length) return true;
-  return _copilotModels.some(m => m.id === modelId);
+  const list = _dynamicModels.copilot;
+  if (!list || !list.length) return true;
+  return list.some(m => m.id === modelId);
 }
 
-/** Models belonging to a given provider (Copilot uses the CLI list when known). */
+/** Models belonging to a given provider (the dynamic list wins when known). */
 function getModelsForProvider(provider) {
-  if (provider === 'copilot' && _copilotModels && _copilotModels.length) return _copilotModels;
+  const dyn = _dynamicModels[provider];
+  if (dyn && dyn.length) return dyn;
   return DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
 }
 
@@ -2062,7 +2132,7 @@ function updateModelSelectBtn(tabId) {
   // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
   const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
   const found = DEFAULT_MODELS.find(m => m.id === modelId)
-    || (_copilotModels && _copilotModels.find(m => m.id === modelId));
+    || Object.values(_dynamicModels).flat().find(m => m.id === modelId);
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
@@ -4708,6 +4778,7 @@ async function renderProvidersSettings() {
           input.value = '';
           showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
           renderProvidersSettings();
+          refreshProviderModels(p.id); // discover this provider's models now that it has a key
         } else {
           showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
         }
@@ -6160,7 +6231,8 @@ async function finishOnboarding() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
-  initCopilotModels(); // seed the Copilot model list before tabs/dropdowns render
+  initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
+  refreshAllProviderModels(); // discover direct-API provider models in the background
   applyTheme(getCurrentTheme());
   initCopilotIPC();
   initResize();
