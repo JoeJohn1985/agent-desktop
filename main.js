@@ -441,6 +441,22 @@ ipcMain.handle('copilot:getVersions', async () => {
   return { app: appVersion, cli: cliVersion };
 });
 
+// ── Preis-Fallback-Quelle (LiteLLM) ──────────────────────────
+const pricingSource = require('./src/pricing-source');
+/**
+ * @ipc pricing:getMap — Public price fallback (USD/1M) for models without a
+ * hardcoded price. Cached weekly under ~/.copilot-desktop/. Never throws.
+ * @returns {Promise<Object<string,{input:number,cache:number,output:number}>>}
+ */
+ipcMain.handle('pricing:getMap', async () => {
+  try {
+    return await pricingSource.getPricingMap();
+  } catch (e) {
+    console.warn('[pricing:getMap]', e.message || e);
+    return {};
+  }
+});
+
 // ── Self-Update (git-basiert) ────────────────────────────────
 const updater = require('./src/updater');
 /** Repo root = directory containing this main.js. */

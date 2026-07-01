@@ -540,6 +540,16 @@ contextBridge.exposeInMainWorld('copilot', {
     apply: () => ipcRenderer.invoke('updates:apply'),
   },
 
+  /**
+   * Public pricing fallback source (LiteLLM) for models without a hardcoded price.
+   *
+   * @namespace copilot.pricing
+   */
+  pricing: {
+    /** @ipc pricing:getMap @returns {Promise<Object<string,{input:number,cache:number,output:number}>>} normalized model key → USD/1M */
+    getMap: () => ipcRenderer.invoke('pricing:getMap'),
+  },
+
   // ── Window ────────────────────────────────────────────────
 
   /**

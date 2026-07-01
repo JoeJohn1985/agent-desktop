@@ -2303,11 +2303,30 @@ function initContextInfo() {
 // renderer-logic.js is loaded as a classic <script> before app.js and
 // exposes its API on window.RendererLogic (the renderer has no require()).
 const {
-  MODEL_PRICING,
   parseUsageTokens,
   parseUsageRequests,
   estimateCostUsdDelta,
+  getModelPricing,
+  setDynamicPricing,
 } = window.RendererLogic;
+
+/**
+ * Load the public pricing fallback (LiteLLM) so models without a hardcoded
+ * price still show costs. Runs in the background at startup; failures are silent.
+ */
+async function initDynamicPricing() {
+  try {
+    const map = await window.copilot.pricing.getMap();
+    if (map && Object.keys(map).length) {
+      setDynamicPricing(map);
+      // Recompute the visible cost display now that more prices are known.
+      const tab = tabs.get(activeTabId);
+      if (tab) refreshUsageDisplay(activeTabId);
+    }
+  } catch (e) {
+    console.warn('[pricing] init failed:', e?.message);
+  }
+}
 
 /** Format a USD amount for display (more precision for tiny amounts). */
 function formatUsd(v) {
@@ -2395,9 +2414,9 @@ function updateUsageDisplay(parsed, tokens, fullText) {
   const modelId = tab?.selectedModel || '';
 
   let display;
-  if (MODEL_PRICING[modelId]) {
-    // Known pricing → show the running per-prompt cost in USD (≥ 0, $0.00
-    // before the first prompt).
+  if (getModelPricing(modelId)) {
+    // Known pricing (hardcoded or from the dynamic source) → show the running
+    // per-prompt cost in USD (≥ 0, $0.00 before the first prompt).
     display = '~' + formatUsd(tab?._costUsd || 0);
   } else if (parsed) {
     // Unknown model → fall back to the raw /usage figure.
@@ -6124,4 +6143,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   initOnboarding();
   refreshProviderStatus();
   initUpdateChecker();
+  initDynamicPricing();
 });

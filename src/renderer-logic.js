@@ -250,11 +250,47 @@ function parseUsageRequests(text) {
   return { value: parseFloat(m[1]), unit: m[2] };
 }
 
+// ── Dynamic pricing fallback ─────────────────────────────────
+// When a model has no hardcoded MODEL_PRICING entry (e.g. a Copilot model the
+// CLI reports dynamically), fall back to a public pricing source (LiteLLM),
+// injected at runtime as a normalized-key → {input,cache,output} (USD per 1M) map.
+let _dynamicPricing = {};
+
+/** Normalize a model id for pricing lookup: lowercase, strip provider prefix. */
+function normalizeModelKey(id) {
+  return String(id || '').toLowerCase().split('/').pop().trim();
+}
+
+/** Inject the dynamic pricing map (from the main process / LiteLLM snapshot). */
+function setDynamicPricing(map) {
+  _dynamicPricing = (map && typeof map === 'object') ? map : {};
+}
+
+/**
+ * Look up dynamic pricing for a model, scaled into the model's NATIVE unit:
+ * Copilot → AI Credits (USD × 100), direct-API → USD. Returns null if unknown.
+ */
+function lookupDynamicPrice(modelId) {
+  const entry = _dynamicPricing[normalizeModelKey(modelId)];
+  if (!entry || typeof entry.input !== 'number' || typeof entry.output !== 'number') return null;
+  const scale = getModelProvider(modelId) === 'copilot' ? AIC_PER_USD : 1;
+  return {
+    input: entry.input * scale,
+    cache: (entry.cache != null ? entry.cache : entry.input * 0.1) * scale,
+    output: entry.output * scale,
+  };
+}
+
+/** Pricing for a model: hardcoded table first, then the dynamic source. */
+function getModelPricing(modelId) {
+  return MODEL_PRICING[modelId] || lookupDynamicPrice(modelId) || null;
+}
+
 // Raw, UNROUNDED cost in the model's native unit (Copilot → AI Credits,
 // direct API → USD) per the pricing table. Keep this unrounded so small USD
 // amounts aren't lost; rounding happens only at display time.
 function computeRawCost(tokens, modelId) {
-  const pricing = MODEL_PRICING[modelId];
+  const pricing = getModelPricing(modelId);
   if (!pricing || !tokens) return null;
   // Cache-write tokens (first time a prefix is cached) bill at 1.25x input.
   const cacheWritePrice = pricing.cacheWrite != null ? pricing.cacheWrite : pricing.input * 1.25;
@@ -294,7 +330,7 @@ function estimateCredits(tokens, modelId) {
  * @returns {number|null} delta credits, or null if model has no pricing / no data
  */
 function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
-  if (!MODEL_PRICING[modelId] || !currentTokens) return null;
+  if (!getModelPricing(modelId) || !currentTokens) return null;
   return estimateCredits(deltaTokens(currentTokens, previousTokens), modelId);
 }
 
@@ -315,7 +351,7 @@ function estimateCostUsd(tokens, modelId) {
 
 /** USD cost for the *new* tokens since the last reading (see estimateCreditsDelta). */
 function estimateCostUsdDelta(currentTokens, previousTokens, modelId) {
-  if (!MODEL_PRICING[modelId] || !currentTokens) return null;
+  if (!getModelPricing(modelId) || !currentTokens) return null;
   return estimateCostUsd(deltaTokens(currentTokens, previousTokens), modelId);
 }
 
@@ -439,6 +475,9 @@ const _api = {
   estimateCreditsDelta,
   estimateCostUsd,
   estimateCostUsdDelta,
+  getModelPricing,
+  setDynamicPricing,
+  normalizeModelKey,
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
