@@ -199,6 +199,7 @@ class AcpClient extends EventEmitter {
     }
     this.#captureModes(result);
     this.#emitCurrentModel(result);
+    this.#emitAvailableModels(result);
     return result;
   }
 
@@ -227,6 +228,7 @@ class AcpClient extends EventEmitter {
       this.#emitToRenderer({ type: 'result', sessionId });
       this.#captureModes(result);
       this.#emitCurrentModel(result);
+      this.#emitAvailableModels(result);
       return result;
     } catch (err) {
       console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
@@ -726,6 +728,25 @@ class AcpClient extends EventEmitter {
     const match = (models?.availableModels || []).find((m) => m.modelId === modelId);
     const name = match?.name || modelId;
     this.#emitToRenderer({ type: 'session.tools_updated', data: { model: name } });
+  }
+
+  /**
+   * Emit the models the Copilot CLI reports as available for this account, so
+   * the renderer can offer the real model list instead of a hardcoded one.
+   * @param {Object} result - session/new|load result
+   */
+  #emitAvailableModels(result) {
+    const list = result?.models?.availableModels;
+    if (!Array.isArray(list) || !list.length) return;
+    const models = list
+      .filter((m) => m && m.modelId)
+      .map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+    if (models.length) {
+      this.#emitToRenderer({
+        type: 'copilot.models_available',
+        data: { models, currentModelId: result?.models?.currentModelId || null },
+      });
+    }
   }
 
   // ── Private: Emit to Renderer ────────────────────────────────

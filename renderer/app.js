@@ -1558,6 +1558,13 @@ function initCopilotIPC() {
         break;
       }
 
+      case 'copilot.models_available': {
+        // The CLI reported which models this account can use → use them for the
+        // Copilot model dropdown instead of the hardcoded fallback list.
+        updateCopilotModels(event.data.models);
+        break;
+      }
+
       case 'session.tools_updated': {
         const modelName = event.data.model || '?';
         // Only set the model on first update — sub-agents send their own model
@@ -1849,8 +1856,28 @@ function renderDefaultModelSettings() {
   }
 }
 
-/** Models belonging to a given provider. */
+/**
+ * Copilot models as reported by the CLI (via ACP), or null before the first
+ * session tells us. When set, these replace the hardcoded Copilot list so the
+ * dropdown reflects the account's actually-available models.
+ * @type {Array<{id:string,label:string,short:string,provider:string,tier:string}>|null}
+ */
+let _copilotModels = null;
+
+/** Merge the CLI-reported Copilot models into the selectable list. */
+function updateCopilotModels(models) {
+  if (!Array.isArray(models) || !models.length) return;
+  _copilotModels = models.map(m => ({
+    id: m.id, label: m.name || m.id, short: m.name || m.id, provider: 'copilot', tier: 'aic',
+  }));
+  // Refresh anything that lists Copilot models.
+  updateModelSelectBtn(activeTabId);
+  if (document.getElementById('settDefaultProvider')) renderDefaultModelSettings();
+}
+
+/** Models belonging to a given provider (Copilot uses the CLI list when known). */
 function getModelsForProvider(provider) {
+  if (provider === 'copilot' && _copilotModels && _copilotModels.length) return _copilotModels;
   return DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
 }
 
@@ -1977,7 +2004,8 @@ function updateModelSelectBtn(tabId) {
   // Explicit selection takes priority, fallback to actual model from session,
   // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
   const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
-  const found = DEFAULT_MODELS.find(m => m.id === modelId);
+  const found = DEFAULT_MODELS.find(m => m.id === modelId)
+    || (_copilotModels && _copilotModels.find(m => m.id === modelId));
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
