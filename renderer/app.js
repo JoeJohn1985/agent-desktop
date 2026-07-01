@@ -1176,6 +1176,10 @@ function sendMessage() {
   const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
 
   const sendTabId = activeTabId;
+  // Freeze the model this prompt actually runs on. The token delta measured after
+  // completion must be priced at THIS model — not tab.selectedModel, which the
+  // user may switch (for the next prompt) before /usage is read.
+  tab._billingModel = tab.selectedModel || DEFAULT_MODEL_ID;
   copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
@@ -2473,10 +2477,11 @@ async function refreshUsageDisplay(tabId) {
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
     if (tab) {
-      const modelId = tab.selectedModel || '';
-      // Bill only the *new* tokens since the last reading, at the current
-      // model's price — so a mid-session model switch never re-prices the
-      // tokens consumed under the previous model. Costs are tracked in USD.
+      // Price the new tokens at the model that actually PRODUCED them — the one
+      // frozen when this prompt was sent (_billingModel) — not tab.selectedModel,
+      // which may already point at a different model chosen for the next prompt.
+      // This keeps a mid-session model switch from mis-pricing prior tokens.
+      const modelId = tab._billingModel || tab.selectedModel || '';
       const deltaUsd = estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
       if (deltaUsd && deltaUsd > 0) {
         tab._costUsd = (tab._costUsd || 0) + deltaUsd;
