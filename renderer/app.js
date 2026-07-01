@@ -2877,6 +2877,11 @@ async function displaySessionContext(tab, sessionId) {
   footerEl.className = 'stream-session-context';
   footerEl.innerHTML = '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
   insertBefore(footerEl);
+
+  // Jump to the latest message — otherwise a long restored history leaves the
+  // view pinned at the very top and the user has to scroll all the way down.
+  // rAF so the browser has laid out the freshly-inserted bubbles first.
+  requestAnimationFrame(() => scrollToBottom(tab.streamEl));
 }
 
 /**
