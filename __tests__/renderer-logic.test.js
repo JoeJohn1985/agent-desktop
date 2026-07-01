@@ -557,6 +557,14 @@ describe('Dynamischer Preis-Fallback (setDynamicPricing / getModelPricing)', () 
     expect(getModelPricing('brandneu-x')).not.toBeNull();
   });
 
+  it('zeitabhängiger Preis: Einführungspreis vor, regulärer Preis nach dem Stichtag', () => {
+    const before = Date.parse('2026-07-01T12:00:00Z');
+    const after = Date.parse('2026-09-01T12:00:00Z');
+    // claude-sonnet-5 (Copilot): 200/20/1000 bis 31.08.2026, danach 300/30/1500
+    expect(getModelPricing('claude-sonnet-5', before)).toEqual({ input: 200, cache: 20, output: 1000 });
+    expect(getModelPricing('claude-sonnet-5', after)).toEqual({ input: 300, cache: 30, output: 1500 });
+  });
+
   it('fester Preis hat Vorrang vor der dynamischen Quelle', () => {
     setDynamicPricing({ 'claude-opus-4-8': { input: 999, cache: 999, output: 999 } });
     // Hardcoded: opus-4-8 = input 5

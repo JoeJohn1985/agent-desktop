@@ -1086,6 +1086,13 @@ function sendMessage() {
 
   if (tab.isProcessing) return;
 
+  // Guard: a Copilot model that the CLI no longer offers (removed from the
+  // dynamic list) can't be used — tell the user instead of failing opaquely.
+  if (getTabProvider(tab) === 'copilot' && tab.selectedModel && !isCopilotModelAvailable(tab.selectedModel)) {
+    showNotification(`Modell „${tab.selectedModel}" ist bei Copilot nicht mehr verfügbar. Bitte im 🧠-Menü ein anderes wählen.`, 'error');
+    return;
+  }
+
   // Show user message in stream
   const inputEl = document.createElement('div');
   inputEl.className = 'stream-input';
@@ -1864,15 +1871,35 @@ function renderDefaultModelSettings() {
  */
 let _copilotModels = null;
 
-/** Merge the CLI-reported Copilot models into the selectable list. */
+/** Merge the CLI-reported Copilot models into the selectable list and persist them. */
 function updateCopilotModels(models) {
   if (!Array.isArray(models) || !models.length) return;
   _copilotModels = models.map(m => ({
     id: m.id, label: m.name || m.id, short: m.name || m.id, provider: 'copilot', tier: 'aic',
   }));
+  // Persist so the discovered models are available immediately on next launch —
+  // without waiting for a session to re-report them. This is the authoritative
+  // list; models no longer reported drop out (and become invalid on send).
+  setPref('copilotModels', _copilotModels);
   // Refresh anything that lists Copilot models.
   updateModelSelectBtn(activeTabId);
   if (document.getElementById('settDefaultProvider')) renderDefaultModelSettings();
+}
+
+/** Load the persisted Copilot model list (from a prior session) at startup. */
+function initCopilotModels() {
+  const stored = getPref('copilotModels', null);
+  if (Array.isArray(stored) && stored.length) _copilotModels = stored;
+}
+
+/**
+ * Whether a Copilot model is currently offered by the CLI. Returns true when we
+ * have no dynamic list yet (permissive — the static fallback list is in use).
+ * @param {string} modelId
+ */
+function isCopilotModelAvailable(modelId) {
+  if (!_copilotModels || !_copilotModels.length) return true;
+  return _copilotModels.some(m => m.id === modelId);
 }
 
 /** Models belonging to a given provider (Copilot uses the CLI list when known). */
@@ -6103,6 +6130,7 @@ async function finishOnboarding() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
+  initCopilotModels(); // seed the Copilot model list before tabs/dropdowns render
   applyTheme(getCurrentTheme());
   initCopilotIPC();
   initResize();

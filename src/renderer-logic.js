@@ -173,6 +173,8 @@ const MODEL_PRICING = {
   'claude-sonnet-4.6': { input: 300, cache: 30, output: 1500 },
   'claude-opus-4.6':   { input: 500, cache: 50, output: 2500 },
   'claude-opus-4.8':   { input: 500, cache: 50, output: 2500 },
+  // Sonnet 5: Einführungspreis (200/20/1000) bis 31.08.2026, danach regulär (300/30/1500).
+  'claude-sonnet-5':   { input: 200, cache: 20, output: 1000, until: '2026-08-31', then: { input: 300, cache: 30, output: 1500 } },
   // Anthropic API (USD pro 1M)
   'claude-haiku-4-5':  { input: 1,   cache: 0.1, output: 5  },
   'claude-sonnet-4-6': { input: 3,   cache: 0.3, output: 15 },
@@ -281,9 +283,25 @@ function lookupDynamicPrice(modelId) {
   };
 }
 
-/** Pricing for a model: hardcoded table first, then the dynamic source. */
-function getModelPricing(modelId) {
-  return MODEL_PRICING[modelId] || lookupDynamicPrice(modelId) || null;
+/**
+ * Resolve a possibly time-boxed pricing entry. An entry may carry an intro price
+ * plus `until` (YYYY-MM-DD, inclusive) and `then` (the price after that date):
+ *   { input, cache, output, until: '2026-08-31', then: { input, cache, output } }
+ * Before/at `until` the intro price applies; afterwards `then`.
+ */
+function resolveTimedPricing(entry, now) {
+  if (!entry || !entry.until || !entry.then) return entry;
+  const cutoff = Date.parse(entry.until + 'T23:59:59Z');
+  if (!Number.isNaN(cutoff) && now > cutoff) return entry.then;
+  const { until, then, ...intro } = entry; // eslint-disable-line no-unused-vars
+  return intro;
+}
+
+/** Pricing for a model: hardcoded table (time-resolved) first, then the dynamic source. */
+function getModelPricing(modelId, now = Date.now()) {
+  const hard = MODEL_PRICING[modelId];
+  if (hard) return resolveTimedPricing(hard, now);
+  return lookupDynamicPrice(modelId) || null;
 }
 
 // Raw, UNROUNDED cost in the model's native unit (Copilot → AI Credits,
