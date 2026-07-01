@@ -1447,6 +1447,8 @@ function initCopilotIPC() {
         tab.lastActivityAt = Date.now();
         tab.statusEl.textContent = '● Thinking…';
         tab.statusEl.style.display = 'block';
+        // Fresh turn → forget prior tool-result elements (dedup is per turn).
+        tab._toolResultEls = new Map();
         break;
 
       case 'assistant.turn_end':
@@ -1543,22 +1545,34 @@ function initCopilotIPC() {
         // hiding the result (previously all Playwright MCP results were suppressed).
         const icon = toolIcon(toolName) || '🔧';
 
-        const toolEl = document.createElement('details');
-        toolEl.className = 'stream-tool-result';
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
-        const preview = (event.data.result.content || '').replace(/\n/g, ' ');
+        const resultContent = event.data.result.content || '';
+        const preview = resultContent.replace(/\n/g, ' ');
+        const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
 
-        const summary = document.createElement('summary');
-        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
-        toolEl.appendChild(summary);
-
-        const content = document.createElement('pre');
-        content.className = 'stream-tool-result__content';
-        content.textContent = event.data.result.content || '';
-        toolEl.appendChild(content);
-
-        tab.streamEl.insertBefore(toolEl, tab.statusEl);
+        // ACP emits multiple tool_call_update events per call (pending →
+        // in_progress → completed). Keyed by toolCallId, update the SAME result
+        // element in place instead of appending a duplicate for every status.
+        if (!tab._toolResultEls) tab._toolResultEls = new Map();
+        const callId = event.data.toolCallId || '';
+        let toolEl = callId ? tab._toolResultEls.get(callId) : null;
+        if (toolEl) {
+          toolEl.querySelector('summary').innerHTML = summaryHtml;
+          toolEl.querySelector('.stream-tool-result__content').textContent = resultContent;
+        } else {
+          toolEl = document.createElement('details');
+          toolEl.className = 'stream-tool-result';
+          const summary = document.createElement('summary');
+          summary.innerHTML = summaryHtml;
+          toolEl.appendChild(summary);
+          const content = document.createElement('pre');
+          content.className = 'stream-tool-result__content';
+          content.textContent = resultContent;
+          toolEl.appendChild(content);
+          tab.streamEl.insertBefore(toolEl, tab.statusEl);
+          if (callId) tab._toolResultEls.set(callId, toolEl);
+        }
         scrollToBottom(tab.streamEl);
         break;
       }
