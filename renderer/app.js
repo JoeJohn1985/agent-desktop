@@ -2487,6 +2487,9 @@ async function refreshUsageDisplay(tabId) {
   try {
     const result = await window.copilot.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
+    // DIAGNOSTIC: raw /usage output — to check whether it breaks down tokens by
+    // model/subagent or only reports a single session-wide aggregate.
+    console.log(`[usage-raw tab${tabId}]\n${result.text}`);
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);

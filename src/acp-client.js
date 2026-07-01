@@ -673,7 +673,12 @@ class AcpClient extends EventEmitter {
       }
 
       default: {
-        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType}`);
+        // DIAGNOSTIC: dump the FULL payload of unknown updates so we can spot any
+        // subagent-/usage-/model-tagged signal the CLI might emit (e.g. per-turn
+        // token usage or a delegated sub-agent). Truncated to keep logs sane.
+        let dump;
+        try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
+        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
         break;
       }
     }
