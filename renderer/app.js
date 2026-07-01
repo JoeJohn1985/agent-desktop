@@ -1463,8 +1463,9 @@ function initCopilotIPC() {
         if (event.data.toolRequests && event.data.toolRequests.length > 0) {
           for (const req of event.data.toolRequests) {
             if (req.name === 'report_intent') continue;
-            const icon = toolIcon(req.name);
-            if (!icon) continue; // hide unknown tools
+            // MCP/unknown tools have no built-in icon → show a generic one instead
+            // of hiding them, so e.g. Playwright MCP calls stay visible.
+            const icon = toolIcon(req.name) || '🔧';
             const el = document.createElement('div');
             el.className = 'stream-tool-call';
             const args = formatToolArgs(req.name, req.arguments);
@@ -1536,8 +1537,9 @@ function initCopilotIPC() {
         if (!event.data || !event.data.result) break;
         const toolName = event.data.toolName || '';
         if (toolName === 'report_intent') break;
-        const icon = toolIcon(toolName);
-        if (!icon) break; // hide unknown tools
+        // MCP/unknown tools have no built-in icon → show a generic one instead of
+        // hiding the result (previously all Playwright MCP results were suppressed).
+        const icon = toolIcon(toolName) || '🔧';
 
         const toolEl = document.createElement('details');
         toolEl.className = 'stream-tool-result';
