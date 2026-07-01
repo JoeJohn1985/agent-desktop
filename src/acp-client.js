@@ -46,6 +46,7 @@ class AcpClient extends EventEmitter {
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
+  #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
 
   // ── Recovery ─────────────────────────────────────────────────
   #restartTimestamps = [];
@@ -547,10 +548,14 @@ class AcpClient extends EventEmitter {
 
       case 'tool_call': {
         // ACP tool_call fields live directly on `update`, not in `content`.
+        const callId = update.toolCallId || update.id || '';
+        // Remember the kind so the follow-up tool_call_update (which frequently
+        // omits `kind`) still resolves to the right tool name/icon in the UI.
+        if (callId && update.kind) this.#toolKinds.set(callId, update.kind);
         this.#emitToRenderer({
           type: 'tool.execution_start',
           data: {
-            toolCallId: update.toolCallId || update.id || '',
+            toolCallId: callId,
             toolName: AcpClient.#mapToolKind(update.kind, update.title),
             arguments: update.rawInput || update.input || {},
           },
@@ -560,11 +565,14 @@ class AcpClient extends EventEmitter {
 
       case 'tool_call_update': {
         // → tool.execution_complete { toolCallId, toolName, success, result }
+        const callId = update.toolCallId || update.id || '';
+        // Fall back to the kind captured at tool_call time when this update omits it.
+        const kind = update.kind || this.#toolKinds.get(callId);
         this.#emitToRenderer({
           type: 'tool.execution_complete',
           data: {
-            toolCallId: update.toolCallId || update.id || '',
-            toolName: AcpClient.#mapToolKind(update.kind, update.title),
+            toolCallId: callId,
+            toolName: AcpClient.#mapToolKind(kind, update.title),
             success: update.error ? false : true,
             result: {
               content: AcpClient.#extractToolContent(update.content),

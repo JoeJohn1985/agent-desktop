@@ -1458,21 +1458,8 @@ function initCopilotIPC() {
         }
         tab._responseEl = null;
         tab._responseRaw = '';
-
-        // Show tool requests (what the assistant wants to call)
-        if (event.data.toolRequests && event.data.toolRequests.length > 0) {
-          for (const req of event.data.toolRequests) {
-            if (req.name === 'report_intent') continue;
-            // MCP/unknown tools have no built-in icon → show a generic one instead
-            // of hiding them, so e.g. Playwright MCP calls stay visible.
-            const icon = toolIcon(req.name) || '🔧';
-            const el = document.createElement('div');
-            el.className = 'stream-tool-call';
-            const args = formatToolArgs(req.name, req.arguments);
-            el.innerHTML = `<span class="stream-tool-call__icon">${icon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(req.name))}</span> <span class="stream-tool-call__args">${escapeHtml(args)}</span>`;
-            tab.streamEl.insertBefore(el, tab.statusEl);
-          }
-        }
+        // Tool calls are rendered centrally in tool.execution_start (single source
+        // of truth), so nothing to do here for toolRequests.
         scrollToBottom(tab.streamEl);
         break;
       }
@@ -1501,6 +1488,17 @@ function initCopilotIPC() {
         // A real tool call ends the current message — close its bubble so the
         // text after the tool renders as a separate message.
         finalizeResponseBubble(tab);
+        // Render the tool call itself so it's always visible — even if the
+        // matching completion carries no result content. MCP/unknown tools get a
+        // generic icon. (report_intent already returned above.)
+        {
+          const callIcon = toolIcon(event.data.toolName) || '🔧';
+          const callEl = document.createElement('div');
+          callEl.className = 'stream-tool-call';
+          const callArgs = formatToolArgs(event.data.toolName, event.data.arguments || {});
+          callEl.innerHTML = `<span class="stream-tool-call__icon">${callIcon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(event.data.toolName))}</span> <span class="stream-tool-call__args">${escapeHtml(callArgs)}</span>`;
+          tab.streamEl.insertBefore(callEl, tab.statusEl);
+        }
         if (event.data.toolName === 'ask_user') {
           setTabStatus(tabId, 'question');
         }
