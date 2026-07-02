@@ -62,5 +62,10 @@ function formatToolArgs(name, args) {
   if (args.command) return args.command;
   if (args.query) return args.query;
   if (args.prompt) return args.prompt;
+  // Common MCP tool argument keys (e.g. Playwright): show something useful.
+  if (args.url) return args.url;
+  if (args.selector) return args.selector;
+  if (args.element) return args.element;
+  if (args.text) return String(args.text);
   return '';
 }

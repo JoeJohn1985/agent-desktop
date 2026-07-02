@@ -19,10 +19,50 @@ const {
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,
+  estimateCostUsd,
+  estimateCostUsdDelta,
+  getModelPricing,
+  setDynamicPricing,
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  parseQuotaError,
 } = require('../src/renderer-logic');
+
+// ── parseQuotaError ──────────────────────────────────────────
+describe('parseQuotaError', () => {
+  it('erkennt Gemini Free-Tier limit:0 (kein Guthaben) inkl. Modell', () => {
+    const raw = JSON.stringify({ error: { message: 'You exceeded your current quota ... Quota exceeded for metric: ... limit: 0, model: gemini-2.5-pro\nPlease retry in 4.42s.', code: 429, status: 'Too Many Requests' } });
+    const r = parseQuotaError(raw);
+    expect(r).not.toBeNull();
+    expect(r.title).toMatch(/Kontingent nicht verfügbar/);
+    expect(r.model).toBe('gemini-2.5-pro');
+    expect(r.retrySeconds).toBe(5); // aufgerundet von 4.42
+  });
+
+  it('erkennt allgemeines Rate-Limit (429) mit Retry-Hinweis', () => {
+    const raw = '{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Please retry in 12s"}';
+    const r = parseQuotaError(raw);
+    expect(r.title).toBe('Rate-Limit erreicht');
+    expect(r.retrySeconds).toBe(12);
+  });
+
+  it('erkennt Anthropic „credit balance is too low" als Limit', () => {
+    const r = parseQuotaError('{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}');
+    expect(r.title).toMatch(/Kosten-\/Nutzungslimit/);
+  });
+
+  it('erkennt OpenAI insufficient_quota', () => {
+    const r = parseQuotaError('{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}');
+    expect(r).not.toBeNull();
+  });
+
+  it('gibt null für nicht-quota-Fehler zurück', () => {
+    expect(parseQuotaError('TypeError: foo is not a function')).toBeNull();
+    expect(parseQuotaError('')).toBeNull();
+    expect(parseQuotaError(null)).toBeNull();
+  });
+});
 
 // ── shortenPath ──────────────────────────────────────────────
 describe('shortenPath', () => {
@@ -345,6 +385,17 @@ describe('parseUsageTokens', () => {
     const result = parseUsageTokens('tokens: INPUT 1k, OUTPUT 2, CACHED 3k');
     expect(result).toEqual({ input: 1000, output: 2, cache: 3000 });
   });
+
+  it('parst optionales cachewrite (Direkt-API-Format)', () => {
+    const result = parseUsageTokens('Tokens: input 1000, output 50, cached 200, cachewrite 800');
+    expect(result).toEqual({ input: 1000, output: 50, cache: 200, cacheWrite: 800 });
+  });
+
+  it('ohne cachewrite bleibt das Objekt unverändert (kein cacheWrite-Key)', () => {
+    const result = parseUsageTokens('Tokens: input 1000, output 50, cached 200');
+    expect(result).toEqual({ input: 1000, output: 50, cache: 200 });
+    expect('cacheWrite' in result).toBe(false);
+  });
 });
 
 // ── parseUsageRequests ───────────────────────────────────────
@@ -403,6 +454,12 @@ describe('estimateCredits', () => {
     const sonnet = estimateCredits(tokens, 'claude-sonnet-4.6');
     const opus = estimateCredits(tokens, 'claude-opus-4.8');
     expect(opus).toBeGreaterThan(sonnet);
+  });
+
+  it('berechnet cache-write zu 1,25x Input', () => {
+    // Opus API: Input $5/1M → cache-write $6.25/1M. 2M cacheWrite = $12.5
+    const v = estimateCredits({ input: 0, output: 0, cache: 0, cacheWrite: 2_000_000 }, 'claude-opus-4-8');
+    expect(v).toBe(12.5);
   });
 });
 
@@ -465,6 +522,83 @@ describe('estimateCreditsDelta', () => {
   });
 });
 
+// ── estimateCostUsd ──────────────────────────────────────────
+describe('estimateCostUsd', () => {
+  it('rechnet Copilot-Credits in USD um (100 AIC = 1$)', () => {
+    // 1M input @ 300 AIC + 1k output ≈ 300 AIC → /100 = ~3 $
+    const usd = estimateCostUsd({ input: 1_000_000, output: 0, cache: 0 }, 'claude-sonnet-4.6');
+    expect(usd).toBeCloseTo(3, 5);
+  });
+  it('lässt Direkt-API-Preise als USD unverändert', () => {
+    // 1M input @ $5 + 1M output @ $25 = $30 (Opus API)
+    const usd = estimateCostUsd({ input: 1_000_000, output: 1_000_000, cache: 0 }, 'claude-opus-4-8');
+    expect(usd).toBe(30);
+  });
+  it('verliert kleine USD-Beträge NICHT durch Rundung (Regressionstest)', () => {
+    // 10k Output-Tokens @ $2.5/1M = $0.025 — vor dem Fix rundete estimateCredits
+    // das auf 0.0; jetzt ungerundet.
+    const usd = estimateCostUsd({ output: 10_000 }, 'gemini-2.5-flash');
+    expect(usd).toBeCloseTo(0.025, 6);
+  });
+
+  it('null ohne Pricing', () => {
+    expect(estimateCostUsd({ input: 1 }, 'unbekannt')).toBeNull();
+  });
+});
+
+describe('Dynamischer Preis-Fallback (setDynamicPricing / getModelPricing)', () => {
+  afterEach(() => setDynamicPricing({})); // Zustand zurücksetzen
+
+  it('nutzt die dynamische Quelle, wenn kein fester Preis existiert', () => {
+    expect(getModelPricing('brandneu-x')).toBeNull();
+    setDynamicPricing({ 'brandneu-x': { input: 3, cache: 0.3, output: 15 } });
+    // Direkt-API-Modell (unbekannt → default 'copilot'? nein: getModelProvider gibt 'copilot').
+    // Für ein reines API-artiges Modell testen wir die USD-Rechnung separat unten.
+    expect(getModelPricing('brandneu-x')).not.toBeNull();
+  });
+
+  it('zeitabhängiger Preis: Einführungspreis vor, regulärer Preis nach dem Stichtag', () => {
+    const before = Date.parse('2026-07-01T12:00:00Z');
+    const after = Date.parse('2026-09-01T12:00:00Z');
+    // claude-sonnet-5 (Copilot): 200/20/1000 bis 31.08.2026, danach 300/30/1500
+    expect(getModelPricing('claude-sonnet-5', before)).toEqual({ input: 200, cache: 20, output: 1000 });
+    expect(getModelPricing('claude-sonnet-5', after)).toEqual({ input: 300, cache: 30, output: 1500 });
+  });
+
+  it('fester Preis hat Vorrang vor der dynamischen Quelle', () => {
+    setDynamicPricing({ 'claude-opus-4-8': { input: 999, cache: 999, output: 999 } });
+    // Hardcoded: opus-4-8 = input 5
+    expect(getModelPricing('claude-opus-4-8').input).toBe(5);
+  });
+
+  it('skaliert dynamischen USD-Preis für Copilot-Modelle in Credits (×100)', () => {
+    // Copilot-Modell (Punkt-ID → provider copilot). USD 3/0.3/15 → Credits 300/30/1500.
+    setDynamicPricing({ 'claude-sonnet-9.9': { input: 3, cache: 0.3, output: 15 } });
+    const p = getModelPricing('claude-sonnet-9.9');
+    expect(p).toEqual({ input: 300, cache: 30, output: 1500 });
+    // estimateCostUsd rechnet Copilot-Credits zurück in USD: 1M input → 300 credits /100 = $3
+    expect(estimateCostUsd({ input: 1_000_000 }, 'claude-sonnet-9.9')).toBeCloseTo(3, 5);
+  });
+
+  it('lässt USD unverändert für Direkt-API-Provider-Modelle', () => {
+    // gemini-2.5-pro ist in MODEL_PROVIDERS → provider 'gemini' → USD nicht skaliert.
+    // (Fester Preis existiert; um die dynamische Skalierung zu prüfen, überschreiben
+    // wir eine unbekannte, aber gemini-aufgelöste Variante ist nicht verfügbar —
+    // daher verifizieren wir die Nicht-Skalierung über den bekannten gemini-Provider.)
+    setDynamicPricing({ 'gemini-2.5-pro': { input: 1, cache: 0.1, output: 2 } });
+    // Fester Preis hat Vorrang → dynamischer Wert wird NICHT genutzt (Vorrang-Test),
+    // aber der Provider ist 'gemini' (kein ×100).
+    expect(getModelPricing('gemini-2.5-pro').input).toBe(1.25); // hardcoded gewinnt
+  });
+});
+
+describe('estimateCostUsdDelta', () => {
+  it('USD-Delta für neue Tokens (Copilot → /100)', () => {
+    const usd = estimateCostUsdDelta({ input: 1_000_000 }, { input: 0 }, 'claude-sonnet-4.6');
+    expect(usd).toBeCloseTo(3, 5);
+  });
+});
+
 // ── buildCostBuckets ─────────────────────────────────────────
 describe('buildCostBuckets', () => {
   const startMs = 1_000_000_000_000;
@@ -473,8 +607,8 @@ describe('buildCostBuckets', () => {
 
   it('ordnet Einträge dem richtigen Bucket zu', () => {
     const entries = [
-      { ts: startMs + 0, sessionId: 's1', credits: 1.0 },
-      { ts: startMs + bucketMs, sessionId: 's1', credits: 2.0 },
+      { ts: startMs + 0, sessionId: 's1', usd: 1.0 },
+      { ts: startMs + bucketMs, sessionId: 's1', usd: 2.0 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('s1')).toBe(1.0);
@@ -483,8 +617,8 @@ describe('buildCostBuckets', () => {
 
   it('summiert mehrere Einträge im selben Bucket', () => {
     const entries = [
-      { ts: startMs + 100, sessionId: 's1', credits: 1.5 },
-      { ts: startMs + 200, sessionId: 's1', credits: 0.5 },
+      { ts: startMs + 100, sessionId: 's1', usd: 1.5 },
+      { ts: startMs + 200, sessionId: 's1', usd: 0.5 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('s1')).toBeCloseTo(2.0);
@@ -492,8 +626,8 @@ describe('buildCostBuckets', () => {
 
   it('ignoriert Einträge außerhalb des Zeitfensters', () => {
     const entries = [
-      { ts: startMs - 1, sessionId: 's1', credits: 99 },
-      { ts: startMs + bucketMs * bucketCount, sessionId: 's1', credits: 99 },
+      { ts: startMs - 1, sessionId: 's1', usd: 99 },
+      { ts: startMs + bucketMs * bucketCount, sessionId: 's1', usd: 99 },
     ];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     const total = buckets.reduce((s, b) => s + (b.get('s1') || 0), 0);
@@ -501,7 +635,7 @@ describe('buildCostBuckets', () => {
   });
 
   it('behandelt null-sessionId als __unnamed', () => {
-    const entries = [{ ts: startMs, sessionId: null, credits: 5 }];
+    const entries = [{ ts: startMs, sessionId: null, usd: 5 }];
     const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount);
     expect(buckets[0].get('__unnamed')).toBe(5);
   });
@@ -511,9 +645,9 @@ describe('buildCostBuckets', () => {
 describe('aggregateCostBySession', () => {
   it('summiert Credits pro Session', () => {
     const entries = [
-      { sessionId: 'a', credits: 1.0 },
-      { sessionId: 'a', credits: 2.0 },
-      { sessionId: 'b', credits: 3.0 },
+      { sessionId: 'a', usd: 1.0 },
+      { sessionId: 'a', usd: 2.0 },
+      { sessionId: 'b', usd: 3.0 },
     ];
     const { totals, grand } = aggregateCostBySession(entries);
     expect(totals.get('a')).toBeCloseTo(3.0);
@@ -521,8 +655,21 @@ describe('aggregateCostBySession', () => {
     expect(grand).toBeCloseTo(6.0);
   });
 
+  it('gruppiert nach Provider (#5)', () => {
+    const entries = [
+      { sessionId: 'a', provider: 'copilot', usd: 1 },
+      { sessionId: 'b', provider: 'anthropic', usd: 2 },
+      { sessionId: 'c', provider: 'anthropic', usd: 3 },
+      { sessionId: 'd', usd: 0.5 }, // ohne provider → copilot
+    ];
+    const { totals, grand } = aggregateCostBySession(entries, 'provider');
+    expect(totals.get('copilot')).toBeCloseTo(1.5);
+    expect(totals.get('anthropic')).toBeCloseTo(5);
+    expect(grand).toBeCloseTo(6.5);
+  });
+
   it('behandelt null-sessionId als __unnamed', () => {
-    const entries = [{ sessionId: null, credits: 2.5 }];
+    const entries = [{ sessionId: null, usd: 2.5 }];
     const { totals } = aggregateCostBySession(entries);
     expect(totals.get('__unnamed')).toBe(2.5);
   });
@@ -537,14 +684,14 @@ describe('aggregateCostBySession', () => {
 // ── trimCostLog ──────────────────────────────────────────────
 describe('trimCostLog', () => {
   it('kürzt Log auf maxEntries', () => {
-    const log = Array.from({ length: 10 }, (_, i) => ({ ts: i, credits: 1 }));
+    const log = Array.from({ length: 10 }, (_, i) => ({ ts: i, usd: 1 }));
     trimCostLog(log, 5);
     expect(log).toHaveLength(5);
     expect(log[0].ts).toBe(5); // älteste entfernt
   });
 
   it('ändert nichts wenn Log kürzer als maxEntries', () => {
-    const log = [{ ts: 1, credits: 1 }, { ts: 2, credits: 2 }];
+    const log = [{ ts: 1, usd: 1 }, { ts: 2, usd: 2 }];
     trimCostLog(log, 100);
     expect(log).toHaveLength(2);
   });

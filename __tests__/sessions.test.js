@@ -6,7 +6,7 @@ jest.mock('fs');
 
 const fs = require('fs');
 const path = require('path');
-const { readCheckpoints, readPlan, readTodos, writeTodos } = require('../src/sessions');
+const { readCheckpoints, readPlan, readAllMessages } = require('../src/sessions');
 
 const SESSION_DIR = path.join('C:', 'test', 'sessions', 'abc-123');
 
@@ -114,86 +114,49 @@ describe('readPlan', () => {
   });
 });
 
-// ── readTodos ────────────────────────────────────────────────
+// Todos sind nicht mehr Teil von sessions.js (projekt-/cwd-gebunden in src/todos.js).
 
-describe('readTodos', () => {
-  const todosPath = path.join(SESSION_DIR, 'todos.json');
+// ── readAllMessages ──────────────────────────────────────────
+describe('readAllMessages', () => {
+  const eventsPath = path.join(SESSION_DIR, 'events.jsonl');
 
-  test('gibt leeres Array zurück wenn todos.json nicht existiert', () => {
+  test('gibt leeres Array zurück wenn events.jsonl fehlt', () => {
     fs.existsSync.mockReturnValue(false);
-    expect(readTodos(SESSION_DIR)).toEqual([]);
-    expect(fs.existsSync).toHaveBeenCalledWith(todosPath);
+    expect(readAllMessages(SESSION_DIR)).toEqual([]);
+    expect(fs.existsSync).toHaveBeenCalledWith(eventsPath);
   });
 
-  test('parst gültiges JSON-Array korrekt', () => {
+  test('liest ALLE user/assistant-Nachrichten chronologisch', () => {
     fs.existsSync.mockReturnValue(true);
-    const todos = [
-      { id: '1', text: 'Aufgabe A', status: 'open' },
-      { id: '2', text: 'Aufgabe B', status: 'done' },
-    ];
-    fs.readFileSync.mockReturnValue(JSON.stringify(todos));
-    expect(readTodos(SESSION_DIR)).toEqual(todos);
+    fs.readFileSync.mockReturnValue([
+      JSON.stringify({ type: 'session.start', data: {} }),
+      JSON.stringify({ type: 'user.message', data: { content: 'Hallo' }, timestamp: 't1' }),
+      JSON.stringify({ type: 'assistant.message', data: { content: [{ type: 'text', text: 'Hi!' }] }, timestamp: 't2' }),
+      JSON.stringify({ type: 'tool.execution_start', data: {} }),
+      JSON.stringify({ type: 'user.message', data: { content: 'Wie gehts?' }, timestamp: 't3' }),
+      '',
+    ].join('\n'));
+    expect(readAllMessages(SESSION_DIR)).toEqual([
+      { role: 'user', content: 'Hallo', timestamp: 't1' },
+      { role: 'assistant', content: 'Hi!', timestamp: 't2' },
+      { role: 'user', content: 'Wie gehts?', timestamp: 't3' },
+    ]);
   });
 
-  test('gibt leeres Array bei JSON-Parse-Fehler zurück', () => {
+  test('begrenzt auf die jüngsten `limit` Nachrichten', () => {
     fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockReturnValue('nicht json');
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readTodos(SESSION_DIR)).toEqual([]);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+    fs.readFileSync.mockReturnValue([
+      JSON.stringify({ type: 'user.message', data: { content: 'a' } }),
+      JSON.stringify({ type: 'user.message', data: { content: 'b' } }),
+      JSON.stringify({ type: 'user.message', data: { content: 'c' } }),
+    ].join('\n'));
+    const out = readAllMessages(SESSION_DIR, 2);
+    expect(out.map(m => m.content)).toEqual(['b', 'c']);
   });
 
-  test('behandelt leeres Array korrekt', () => {
+  test('überspringt fehlerhafte Zeilen', () => {
     fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockReturnValue('[]');
-    expect(readTodos(SESSION_DIR)).toEqual([]);
-  });
-
-  test('gibt leeres Array bei Lesefehler zurück', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readFileSync.mockImplementation(() => { throw new Error('EPERM'); });
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readTodos(SESSION_DIR)).toEqual([]);
-    warnSpy.mockRestore();
-  });
-});
-
-// ── writeTodos ───────────────────────────────────────────────
-
-describe('writeTodos', () => {
-  test('schreibt JSON-Datei mit korrekter Formatierung', () => {
-    fs.existsSync.mockReturnValue(true);
-    const todos = [{ id: '1', text: 'Test', status: 'open' }];
-    writeTodos(SESSION_DIR, todos);
-    expect(fs.writeFileSync).toHaveBeenCalledWith(
-      path.join(SESSION_DIR, 'todos.json'),
-      JSON.stringify(todos, null, 2),
-      'utf-8'
-    );
-  });
-
-  test('tut nichts wenn Session-Verzeichnis nicht existiert', () => {
-    fs.existsSync.mockReturnValue(false);
-    writeTodos(SESSION_DIR, [{ id: '1' }]);
-    expect(fs.writeFileSync).not.toHaveBeenCalled();
-  });
-
-  test('schreibt mit 2-Leerzeichen-Einrückung', () => {
-    fs.existsSync.mockReturnValue(true);
-    const todos = [{ a: 1 }];
-    writeTodos(SESSION_DIR, todos);
-    const written = fs.writeFileSync.mock.calls[0][1];
-    expect(written).toBe('[\n  {\n    "a": 1\n  }\n]');
-  });
-
-  test('schreibt leeres Array korrekt', () => {
-    fs.existsSync.mockReturnValue(true);
-    writeTodos(SESSION_DIR, []);
-    expect(fs.writeFileSync).toHaveBeenCalledWith(
-      path.join(SESSION_DIR, 'todos.json'),
-      '[]',
-      'utf-8'
-    );
+    fs.readFileSync.mockReturnValue('kein json\n' + JSON.stringify({ type: 'user.message', data: { content: 'ok' } }));
+    expect(readAllMessages(SESSION_DIR)).toEqual([{ role: 'user', content: 'ok', timestamp: '' }]);
   });
 });

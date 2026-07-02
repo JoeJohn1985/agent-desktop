@@ -1,5 +1,48 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Drei neue Provider: OpenAI, Ollama, GLM (Zhipu)** — voll agentisch über einen gemeinsamen OpenAI-kompatiblen Kern (Chat Completions + Function Calling, SSE-Streaming, dependency-frei). Ollama ist lokal & keyless; Base-URL pro Provider in den Einstellungen überschreibbar. (`src/providers/openai-compatible-provider.js` + `openai/ollama/glm-provider.js`)
+- **Standard-Provider + Standard-Modell pro Provider** in den Einstellungen; behebt zugleich den Bug, dass Copilot immer mit Haiku statt dem gewählten Modell startete
+- **Modell-Kennzeichnung** im Dropdown: 💲 kostenpflichtig / 🆓 kostenlos / AIC (Copilot-Abo)
+- **Kontext-Auslastung** aktualisiert sich nach jeder Nachricht automatisch (alle Provider)
+- **Kontingent-/Rate-Limit-Fehler** werden als verständliche Info statt rohem JSON angezeigt (Gemini/Anthropic/OpenAI)
+
+### Changed
+- **Kosten in echtem USD** statt gemischter AI-Credits (Copilot 100 AIC = 1 $); **Kosten-Window nach Provider gruppierbar** (Umschalter Provider/Session)
+- **Git-basiertes Self-Update**: Die App prüft beim Start, periodisch (alle 6 h) und per Button in *Einstellungen → UI* über `git ls-remote --tags origin`, ob ein neuerer Release-Tag (`vX.Y.Z`) existiert (Vergleich mit lokaler `package.json`-Version, nur stabile Tags). Bei verfügbarem Update erscheint ein Banner „Neue Version verfügbar" mit „Herunterladen & Neustarten": sauberer Working Tree vorausgesetzt → `git pull --ff-only origin main`, bei geänderten Abhängigkeiten automatisch `npm install`, danach Neustart. Kein eingebettetes Token — nutzt die Git-Credentials des Nutzers (funktioniert auch beim privaten Repo). (`src/updater.js`, IPC `updates:check`/`updates:apply`)
+- **Gemini 3.5 Flash** zur Modellauswahl hinzugefügt (Preise vorläufig wie 2.5 Flash, bis offiziell bestätigt)
+- **Info-Tooltip je Provider** in den API-Provider-Einstellungen (ⓘ): listet verfügbare Tools und Besonderheiten pro Provider beim Hover
+- **Auth-Hinweis mit Login + Neustart**: Bei „Anmeldung erforderlich" öffnet ein Button ein sichtbares Terminal mit `copilot login`; danach „App neu starten"-Button (nötig, da die Auth beim Main-Prozess-Start übernommen wird)
+
+### Changed
+- **Todos sind jetzt projekt- statt session-gebunden**: Sie werden als Markdown-Checkliste unter `<cwd>/todo/todos.md` gespeichert (mit unsichtbaren ID-Kommentaren für verlustfreie Round-Trips) statt in `<session>/todos.json`. Dadurch überlebt die Todo-Liste das Löschen einer Session und wird von allen Sessions im selben Verzeichnis geteilt. (`src/todos.js`, IPC `todos:*` nun cwd-basiert)
+- **Gemini: Live-Suche und Datei-Tools per Tab umschaltbar** statt kombiniert — Gemini 2.5 verbietet beides im selben Request (400 `INVALID_ARGUMENT`). Modus „🔍 Recherche" (Default) bzw. „📁 Dateien" ist jederzeit pro Tab wechselbar
+- **Session-Löschung in den Papierkorb** (`shell.trashItem`) statt unwiderruflichem `fs.rmSync`; zusätzlich wird eine nicht-leere `todos.json` vor dem Löschen nach `~/.copilot-desktop/deleted-todos/` gesichert
+- **Mehrzeilige Tooltips**: `.js-tooltip` nutzt jetzt `white-space: pre-line` (Zeilenumbrüche werden dargestellt)
+
+## [0.32.0] - 2026-06-24
+
+### Added
+- **Multi-LLM-Provider: Anthropic API (voll agentisch)** — neben der Copilot CLI kann pro Tab jetzt die Anthropic-API direkt genutzt werden. Eigene Agent-Schleife mit lokaler Tool-Ausführung (`shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`), Streaming, adaptivem Thinking und Token-genauer Kostenabrechnung. (`src/providers/*`, `src/secure-store.js`)
+- **Multi-LLM-Provider: Google Gemini (recherche-orientiert)** — Gemini 2.5 Pro/Flash als Direkt-API. **Live-Google-Suche** (Grounding) mit automatischen Quellenangaben + Datei-Tools (lesen/schreiben/bearbeiten), aber ohne Shell und ohne Skills/Agents/Instructions. (`src/providers/gemini-provider.js`, `@google/genai`)
+- **Provider-Auswahl beim neuen Tab**: Klick auf „+" öffnet ein Provider-Dropdown (Copilot, Gemini, Anthropic, OpenAI); der Provider ist pro Tab fix. In der Session-Leiste wird der Provider als reine Anzeige neben den Kosten gezeigt
+- **Sichere API-Key-Speicherung** über den OS-Schlüsselbund (Electron `safeStorage`); neuer Einstellungen-Tab „API-Provider". Keys verlassen den Hauptprozess nicht
+- **Skills, Agents und `copilot-instructions.md`** werden für die Direkt-API als (gecachter) System-Prompt-Kontext injiziert
+- **Prompt-Caching** für die Anthropic-API (wachsender System-/Tool-/Historien-Präfix wird gecacht)
+- **Kontext-Management für Direkt-Provider**: `📊 %`-Anzeige + **automatisches Compact** ab 80 % Auslastung
+- **Session-Persistenz + Wiederanzeige** für Direkt-API-Sessions (Historie unter `~/.copilot-desktop/api-sessions/`)
+- **Cache-Write-Tokens** (1,25× Input) werden in der Kostenrechnung berücksichtigt
+
+### Changed
+- `shell`-Tool der Direkt-API läuft unter Windows über **PowerShell** statt cmd.exe (plattformabhängig via `spawn`)
+
+### Fixed
+- **ACP `session/prompt`-Timeout (kritisch)**: Längere Copilot-Turns (> 60 s) liefen in ein festes 60-Sekunden-Timeout → „[Prozess beendet mit Code 1]", während die CLI weiterlief und die Antwort endlos weiterstreamte (Anzeige blieb auf „Running" hängen). `session/prompt` hat jetzt kein Timeout mehr (begrenzt durch Cancel/Prozess-Ende); stille Slash-Commands nutzen 180 s
+- **Verschmolzene Nachrichten**: Aufeinanderfolgende Antwort-Segmente um Tool-Aufrufe herum („… aufrufen:Jetzt …") wurden in eine Blase gerendert. Ein Tool-Aufruf schließt jetzt die Antwort-Blase → getrennte, lesbare Nachrichten (Copilot und Direkt-API)
+- **Provider-Dropdown**: fehlender Panel-Hintergrund/falsche Position beim „+"-Provider-Menü behoben (eigene Panel-Klasse, fixe Positionierung)
+
 ## [0.31.0] - 2026-06-19
 
 ### Added

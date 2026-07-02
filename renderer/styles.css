@@ -135,8 +135,10 @@ body {
   font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
-  white-space: normal;
-  max-width: 280px;
+  white-space: pre-line;
+  text-align: left;
+  line-height: 1.5;
+  max-width: 320px;
   word-wrap: break-word;
   pointer-events: none;
   z-index: 9999;
@@ -827,25 +829,23 @@ body {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
+  gap: 4px;
+  padding: 0 6px 0 10px;
   font-size: 16px;
   color: var(--text-muted);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
+  /* Transparent side borders by default → no width shift when a collapsed tab
+     gets its separator borders (see below). */
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
   cursor: pointer;
-  max-width: 200px;
   min-width: 0;
+  max-width: 200px;
   white-space: nowrap;
   overflow: hidden;
   transition: all 0.15s ease;
-}
-.tab__icon {
-  width: 16px;
-  height: 16px;
-  object-fit: contain;
-  flex-shrink: 0;
 }
 .tab__label {
   overflow: hidden;
@@ -854,6 +854,7 @@ body {
   min-width: 0;
   flex: 1;
 }
+.tab__short { flex-shrink: 0; }
 .tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
 .tab--active {
   color: var(--text-primary);
@@ -861,6 +862,29 @@ body {
   border-bottom-color: var(--accent);
   background: var(--bg-base);
 }
+
+/* Collapsed tabs (not active, not hovered): show only the 3-char short label,
+   add separator borders, and hide the full label + edit/close controls. */
+.tab:not(.tab--active):not(:hover) {
+  border-left-color: var(--border);
+  border-right-color: var(--border);
+}
+.tab:not(.tab--active):not(:hover) .tab__label,
+.tab:not(.tab--active):not(:hover) .tab__edit,
+.tab:not(.tab--active):not(:hover) .tab__close {
+  display: none;
+}
+/* Active or hovered tab is "large": show full label, hide the short one. */
+.tab--active .tab__short,
+.tab:hover .tab__short {
+  display: none;
+}
+.tab--active .tab__label,
+.tab:hover .tab__label {
+  max-width: 160px;
+  text-overflow: ellipsis;
+}
+
 .tab__close {
   font-size: 18px;
   color: var(--text-muted);
@@ -1531,6 +1555,7 @@ mark.chat-search-highlight--active {
   font-style: normal;
   color: var(--text-secondary);
 }
+.stream-thinking__content { white-space: pre-wrap; }
 
 /* ── Stream Tool Calls ───────────────────────────────── */
 .stream-tool-call {
@@ -1599,6 +1624,108 @@ mark.chat-search-highlight--active {
   border-radius: var(--radius-sm);
   max-width: 80%;
 }
+/* ── Model tier badges (kostenpflichtig / kostenlos / AIC) ─── */
+.model-tier {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.model-tier--paid { background: rgba(209,56,61,0.14); color: var(--red, #d1383d); }
+.model-tier--free { background: rgba(64,160,43,0.16); color: var(--green, #40a02b); }
+.model-tier--aic  { background: rgba(137,180,250,0.16); color: var(--accent, #89b4fa); }
+
+/* ── Default-model-per-provider settings rows ─────────────── */
+.settings__provider-defaults { display: flex; flex-direction: column; gap: 8px; }
+.settings__provider-default-row { display: flex; align-items: center; gap: 10px; }
+.settings__provider-default-label {
+  flex: 0 0 110px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.settings__provider-default-row .settings__select { flex: 1; }
+
+/* Quota / rate-limit / billing info — calmer than a hard error. */
+.stream-error--quota {
+  color: var(--text-primary);
+  background: rgba(223,142,29,0.10);
+  border: 1px solid var(--yellow, #df8e1d);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Authentication-required banner ─────────────────────── */
+.stream-auth-required {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: rgba(223,142,29,0.10);
+  border: 1px solid var(--yellow, #df8e1d);
+  border-radius: var(--radius-sm);
+}
+.stream-auth-required span { flex: 1; }
+.stream-auth-required__btn {
+  flex-shrink: 0;
+  background: var(--yellow, #df8e1d);
+  color: #1e1e2e;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.stream-auth-required__btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Update Banner (oben, global) ─────────────────────── */
+.update-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 640px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-overlay, #1e1e2e);
+  border: 1px solid var(--accent, #89b4fa);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+}
+.update-banner__text { flex: 1; }
+.update-banner__btn {
+  flex-shrink: 0;
+  background: var(--accent, #89b4fa);
+  color: #1e1e2e;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.update-banner__btn:disabled { opacity: 0.6; cursor: default; }
+.update-banner__close {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.update-banner__close:hover { color: var(--text-primary); }
 
 /* ── Force Unlock Button & Info ───────────────────────── */
 .stream-unlock-btn {
@@ -1698,6 +1825,13 @@ mark.chat-search-highlight--active {
 .stream-response--history {
   opacity: 0.65;
 }
+.stream-tool--history {
+  opacity: 0.6;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-muted);
+  padding: 2px 0 2px 12px;
+}
 
 /* ── Session Info Bar (under tabs, session-specific) ──── */
 /* Session Actions (slash command buttons, under tabs) */
@@ -1743,6 +1877,60 @@ mark.chat-search-highlight--active {
 .session-actions__btn--loading {
   opacity: 0.6;
   pointer-events: none;
+}
+
+/* Provider label — read-only output next to the cost, not a button. */
+.session-actions__provider {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  cursor: default;
+}
+.session-actions__provider--api {
+  color: var(--accent);
+}
+
+/* "Beta" marker for not-yet-fully-tested providers. */
+.beta-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--yellow, #df8e1d);
+  border: 1px solid var(--yellow, #df8e1d);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+/* "Alpha" marker for untested providers — same shape, warning/red tone. */
+.alpha-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--red, #d20f39);
+  border: 1px solid var(--red, #d20f39);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+/* New-tab provider chooser (fixed, anchored under the "+" button). */
+.provider-add-dropdown {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  padding: 4px 0;
+  z-index: 2000;
+  animation: model-dropdown-in 0.12s ease-out;
 }
 
 .session-actions__btn--active {
@@ -1816,6 +2004,98 @@ mark.chat-search-highlight--active {
   font-size: 10px;
   color: var(--text-muted);
 }
+.model-dropdown__group {
+  padding: 6px 12px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.model-dropdown__item--disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.model-dropdown__item--disabled:hover {
+  background: transparent;
+}
+.model-dropdown__hint {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+/* ── API-Provider Settings ──────────────────────────────── */
+.providers-list { display: flex; flex-direction: column; gap: 14px; }
+.providers-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 12px;
+  background: var(--bg-surface);
+}
+.providers-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.providers-row__name { font-weight: 600; }
+.providers-row__info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: help;
+  user-select: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.providers-row__info:hover {
+  color: var(--accent, var(--text-primary));
+  border-color: var(--accent, var(--text-primary));
+}
+.providers-row__status { font-size: 11px; color: var(--text-muted); }
+.providers-row__status.is-set { color: var(--green, #40a02b); }
+.providers-row__soon {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.providers-row__controls { display: flex; gap: 6px; }
+.providers-row__input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+}
+.providers-row__input:focus { border-color: var(--accent); }
+.providers-row__baseurl {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.providers-row__baseurl:focus { border-color: var(--accent); }
+.providers-row__hint { font-size: 12px; color: var(--text-muted); align-self: center; }
 /* Mode dropdown: stack label + description vertically */
 .mode-dropdown .model-dropdown__item,
 .context-dropdown .model-dropdown__item {
@@ -2093,6 +2373,17 @@ mark.chat-search-highlight--active {
 .costs-view__toggle-btn--active {
   background: var(--bg-surface);
   color: var(--text-primary);
+}
+.costs-view__provider-filter {
+  margin-left: 8px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
 }
 .costs-view__clear-btn {
   font-size: 11px;
@@ -3686,6 +3977,39 @@ mark.chat-search-highlight--active {
   flex-wrap: wrap;
   border: 1px solid var(--border-subtle);
 }
+
+/* ── Onboarding: Provider-Auswahl ─────────────────────────── */
+.onboarding-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 12px 0;
+}
+.onboarding-provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.onboarding-provider-card:hover { border-color: var(--accent); }
+.onboarding-provider-card--active {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.onboarding-provider-card__label { font-weight: 600; font-size: 13px; }
+.onboarding-provider-card__sub { font-size: 11px; color: var(--text-muted); }
+.onboarding-provider-detail { margin-top: 8px; }
+.onboarding-provider-key { display: flex; gap: 8px; margin-top: 10px; }
+.onboarding-provider-key .onboarding-role__input { flex: 1; }
 
 .onboarding-login__status--ok {
   background: var(--badge-active-bg);

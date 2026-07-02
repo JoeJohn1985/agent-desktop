@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Copilot Desktop</title>
+  <title>Agent Desktop</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" />
@@ -15,7 +15,7 @@
   <header class="titlebar" id="titlebar">
     <div class="titlebar__left">
       <img class="titlebar__icon" src="../assets/icon.png" alt="App Icon">
-      <span class="titlebar__title">Copilot Desktop</span>
+      <span class="titlebar__title">Agent Desktop</span>
     </div>
     <div class="titlebar__center">
       <span id="sbVersion" data-tooltip="App / CLI Version">🏷️ –</span>
@@ -177,6 +177,9 @@
               <button class="costs-view__toggle-btn costs-view__toggle-btn--active" data-range="week">Woche</button>
               <button class="costs-view__toggle-btn" data-range="day">Tag</button>
             </div>
+            <select class="costs-view__provider-filter" id="costsProviderFilter" data-tooltip="Provider wählen – zeigt dessen Sessions">
+              <option value="all">Alle Provider</option>
+            </select>
           </div>
           <div class="plugins-view__actions">
             <button class="plugin-actions__btn" id="btnClearCostLog" data-tooltip="Kostenverlauf löschen">🗑️</button>
@@ -214,9 +217,13 @@
             <div class="session-tools-popup__list" id="sessionToolsList"></div>
           </div>
         </div>
+        <div class="model-select-wrapper" id="geminiModeWrapper" style="display:none;">
+          <button class="session-actions__btn" id="btnGeminiMode" data-tooltip="Gemini: Live-Suche oder Datei-Tools (nicht gleichzeitig möglich)">🔍 Recherche</button>
+        </div>
         <div class="session-actions__spacer"></div>
+        <span class="session-actions__provider" id="sessionProvider" data-tooltip="Provider dieses Tabs (wird beim Erstellen über „+" festgelegt)">🔌 Copilot</span>
         <button class="session-actions__cost-btn" id="btnOpenCosts" data-tooltip="Kostenauflistung öffnen">📈</button>
-        <span class="session-actions__usage" id="sessionUsage">~0C</span>
+        <span class="session-actions__usage" id="sessionUsage">~$0.00</span>
       </div>
       <div class="stream-area" id="streamArea">
         <!-- Search Bar -->
@@ -303,7 +310,8 @@
       <div class="overlay__title">⚙️ Einstellungen</div>
       <div class="settings__tabs">
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
-        <button class="settings__tab" data-tab="copilot">Copilot Konfiguration</button>
+        <button class="settings__tab" data-tab="copilot">Konfiguration</button>
+        <button class="settings__tab" data-tab="providers">API-Provider</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
       </div>
@@ -334,6 +342,15 @@
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
+            <label class="settings__label">🔄 Updates</label>
+            <div class="settings__hint">Prüft, ob eine neuere Version im Repository veröffentlicht wurde, und aktualisiert per <code>git pull</code>.</div>
+            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
+              <button class="action-btn" id="btnCheckUpdates">Nach Updates suchen</button>
+              <span id="updateCheckStatus" class="settings__hint" style="margin:0;"></span>
+            </div>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
             <div class="settings__row">
               <label class="settings__label">🛠️ Entwicklermodus</label>
               <label class="settings__toggle">
@@ -353,12 +370,17 @@
             </div>
           </div>
         </div>
-        <!-- Tab: Copilot Konfiguration -->
+        <!-- Tab: Konfiguration -->
         <div class="settings__panel" data-panel="copilot">
           <div class="settings__group">
-            <label class="settings__label">Standard-Modell</label>
-            <div class="settings__hint">Modell, mit dem neue Tabs starten. Pro Tab über das 🧠-Menü überschreibbar.</div>
-            <select class="settings__select" id="settDefaultModel"></select>
+            <label class="settings__label">Standard-Provider</label>
+            <div class="settings__hint">Provider, mit dem neue Tabs und das „+“ starten.</div>
+            <select class="settings__select" id="settDefaultProvider"></select>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">Standard-Modell pro Provider</label>
+            <div class="settings__hint">Modell, mit dem ein neuer Tab des jeweiligen Providers startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
+            <div id="settDefaultModelsPerProvider" class="settings__provider-defaults"></div>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
@@ -402,10 +424,23 @@
           </div>
 
         </div>
+        <!-- Tab: API-Provider -->
+        <div class="settings__panel" data-panel="providers">
+          <div class="settings__group">
+            <div class="settings__hint" style="margin-bottom:12px;">
+              API-Keys für direkte LLM-Provider. Die Keys werden über den OS-Schlüsselbund
+              verschlüsselt gespeichert und verlassen den Hauptprozess nicht.
+            </div>
+            <div id="providersKeyList" class="providers-list"></div>
+            <div class="settings__hint" id="providersUnavailable" style="display:none;color:var(--red,#e74c3c);">
+              ⚠️ OS-Verschlüsselung ist nicht verfügbar — Keys können nicht sicher gespeichert werden.
+            </div>
+          </div>
+        </div>
         <!-- Tab: Ordner -->
         <div class="settings__panel" data-panel="folders">
           <div class="settings__group">
-            <div class="settings__hint" style="margin-bottom:12px;">Konfiguriere die Verzeichnisse, die Copilot Desktop verwendet. Änderungen erfordern einen Neustart der App.</div>
+            <div class="settings__hint" style="margin-bottom:12px;">Konfiguriere die Verzeichnisse, die Agent Desktop verwendet. Änderungen erfordern einen Neustart der App.</div>
           </div>
           <div class="settings__group">
             <label class="settings__label">📂 Arbeitsverzeichnis (CWD)</label>
@@ -512,7 +547,7 @@
           <span class="onboarding-step__line"></span>
           <span class="onboarding-step" data-step="4">4</span>
         </div>
-        <span class="onboarding-wizard__title">Willkommen bei Copilot Desktop</span>
+        <span class="onboarding-wizard__title">Willkommen bei Agent Desktop</span>
       </div>
       <div class="onboarding-wizard__body" id="onboarding-body">
       </div>

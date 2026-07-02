@@ -9,6 +9,7 @@ const MAX_RESTARTS_PER_MINUTE = 3;
 const RESTART_WINDOW_MS = 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 60_000;
+const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /compact …)
 const STOP_GRACE_MS = 5_000;
 
 /**
@@ -45,6 +46,7 @@ class AcpClient extends EventEmitter {
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
+  #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
 
   // ── Recovery ─────────────────────────────────────────────────
   #restartTimestamps = [];
@@ -198,6 +200,7 @@ class AcpClient extends EventEmitter {
     }
     this.#captureModes(result);
     this.#emitCurrentModel(result);
+    this.#emitAvailableModels(result);
     return result;
   }
 
@@ -226,6 +229,7 @@ class AcpClient extends EventEmitter {
       this.#emitToRenderer({ type: 'result', sessionId });
       this.#captureModes(result);
       this.#emitCurrentModel(result);
+      this.#emitAvailableModels(result);
       return result;
     } catch (err) {
       console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
@@ -331,7 +335,7 @@ class AcpClient extends EventEmitter {
       const result = await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text }],
-      });
+      }, 0); // no timeout — an agentic turn can run for minutes (see #sendRequest)
       this.#state = 'ready';
       // A cancelled turn returns stopReason "cancelled" → report code -1 to the UI.
       const cancelled = this.#cancelRequested || result?.stopReason === 'cancelled';
@@ -392,7 +396,7 @@ class AcpClient extends EventEmitter {
       await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
-      });
+      }, SLASH_COMMAND_TIMEOUT_MS);
       return this.#contextQueryCollector.join('');
     } finally {
       this.#contextQueryCollector = null;
@@ -428,10 +432,15 @@ class AcpClient extends EventEmitter {
       const id = ++this.#requestId;
       const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-      const timer = setTimeout(() => {
+      // timeout <= 0 means "no timeout" — used for session/prompt, whose agentic
+      // turns can run for minutes. Such turns are bounded by user cancel and by
+      // the process lifecycle (a process exit rejects all pending requests), so
+      // a fixed timeout here would falsely abort a still-running turn while the
+      // CLI keeps streaming — leaving the UI stuck in a "running" state.
+      const timer = timeout > 0 ? setTimeout(() => {
         this.#pendingRequests.delete(id);
         reject(new Error(`Request ${method} (id=${id}) timed out after ${timeout}ms`));
-      }, timeout);
+      }, timeout) : null;
 
       this.#pendingRequests.set(id, { resolve, reject, timer });
 
@@ -539,10 +548,14 @@ class AcpClient extends EventEmitter {
 
       case 'tool_call': {
         // ACP tool_call fields live directly on `update`, not in `content`.
+        const callId = update.toolCallId || update.id || '';
+        // Remember the kind so the follow-up tool_call_update (which frequently
+        // omits `kind`) still resolves to the right tool name/icon in the UI.
+        if (callId && update.kind) this.#toolKinds.set(callId, update.kind);
         this.#emitToRenderer({
           type: 'tool.execution_start',
           data: {
-            toolCallId: update.toolCallId || update.id || '',
+            toolCallId: callId,
             toolName: AcpClient.#mapToolKind(update.kind, update.title),
             arguments: update.rawInput || update.input || {},
           },
@@ -552,11 +565,14 @@ class AcpClient extends EventEmitter {
 
       case 'tool_call_update': {
         // → tool.execution_complete { toolCallId, toolName, success, result }
+        const callId = update.toolCallId || update.id || '';
+        // Fall back to the kind captured at tool_call time when this update omits it.
+        const kind = update.kind || this.#toolKinds.get(callId);
         this.#emitToRenderer({
           type: 'tool.execution_complete',
           data: {
-            toolCallId: update.toolCallId || update.id || '',
-            toolName: AcpClient.#mapToolKind(update.kind, update.title),
+            toolCallId: callId,
+            toolName: AcpClient.#mapToolKind(kind, update.title),
             success: update.error ? false : true,
             result: {
               content: AcpClient.#extractToolContent(update.content),
@@ -657,7 +673,12 @@ class AcpClient extends EventEmitter {
       }
 
       default: {
-        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType}`);
+        // DIAGNOSTIC: dump the FULL payload of unknown updates so we can spot any
+        // subagent-/usage-/model-tagged signal the CLI might emit (e.g. per-turn
+        // token usage or a delegated sub-agent). Truncated to keep logs sane.
+        let dump;
+        try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
+        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
         break;
       }
     }
@@ -720,6 +741,25 @@ class AcpClient extends EventEmitter {
     const match = (models?.availableModels || []).find((m) => m.modelId === modelId);
     const name = match?.name || modelId;
     this.#emitToRenderer({ type: 'session.tools_updated', data: { model: name } });
+  }
+
+  /**
+   * Emit the models the Copilot CLI reports as available for this account, so
+   * the renderer can offer the real model list instead of a hardcoded one.
+   * @param {Object} result - session/new|load result
+   */
+  #emitAvailableModels(result) {
+    const list = result?.models?.availableModels;
+    if (!Array.isArray(list) || !list.length) return;
+    const models = list
+      .filter((m) => m && m.modelId)
+      .map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+    if (models.length) {
+      this.#emitToRenderer({
+        type: 'copilot.models_available',
+        data: { models, currentModelId: result?.models?.currentModelId || null },
+      });
+    }
   }
 
   // ── Private: Emit to Renderer ────────────────────────────────

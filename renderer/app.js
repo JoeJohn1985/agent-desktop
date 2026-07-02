@@ -171,11 +171,16 @@ function applyTheme(theme) {
  */
 function saveOpenTabs() {
   const openTabs = [];
-  tabs.forEach((tab, id) => {
+  tabs.forEach((tab) => {
+    // Persist the chosen model with every tab so the provider survives a
+    // restart even for tabs saved before their first message (no sessionId).
     if (tab.sessionId) {
-      openTabs.push({ sessionId: tab.sessionId, label: tab.label });
+      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null });
       // Persist denied tools in namedSessions
       saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
+    } else if (tab.selectedModel && tab.selectedModel !== getDefaultModelId()) {
+      // Unsent tab with a non-default (e.g. Gemini/Anthropic) provider chosen.
+      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel });
     }
   });
   setPref('openTabs', openTabs);
@@ -194,23 +199,19 @@ async function restoreOpenTabs() {
       // Use namedSessions as primary label source
       const customName = t.sessionId ? getSessionName(t.sessionId) : null;
       const label = customName ? '🤖 ' + customName : (t.label || '🤖 Copilot');
-      const tabId = await createTab(label);
+      // Resolve the model up front (entry first, then per-session map) so the
+      // provider is correct from creation — including unsent tabs without id.
+      const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
+      const tabId = await createTab(label, model);
       const tab = tabs.get(tabId);
       if (tab) {
-        tab.sessionId = t.sessionId;
+        tab.sessionId = t.sessionId || null;
         tab.cwd = t.sessionId ? getSessionCwd(t.sessionId) : null;
         // Load denied tools from namedSessions
         tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
-        // Restore persisted model for this session
-        if (t.sessionId) {
-          const sessionModel = getSessionModel(t.sessionId);
-          if (sessionModel) {
-            tab.selectedModel = sessionModel;
-            updateModelSelectBtn(tabId);
-          }
-        }
+        updateModelSelectBtn(tabId);
         activeSessionId = t.sessionId;
-        loadTodos(t.sessionId);
+        loadTodos(tab.cwd);
         renderSessionTools();
         // Display session context for restored tabs
         if (t.sessionId) displaySessionContext(tab, t.sessionId);
@@ -554,7 +555,7 @@ function showNotification(message, type = 'info') {
  * @param {string} [label='🤖 Copilot'] - Display label for the tab.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label) {
+async function createTab(label, initialModel) {
   const tabLabel = label || '🤖 Copilot';
   const tabId = await copilot.chat.newTab();
 
@@ -589,9 +590,9 @@ async function createTab(label) {
     _lastUsageParsed: null,
     _lastUsageText: null,
     _lastUsageTokens: null,
-    _creditTotal: 0,
+    _costUsd: 0,
     _sessionName: null,
-    selectedModel: getDefaultModelId(),
+    selectedModel: initialModel || getDefaultModelId(),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -636,13 +637,11 @@ function switchTab(tabId) {
   activeTabId = tabId;
   const activeTab = tabs.get(tabId);
 
-  // Load todos and context for this tab's session
+  // Load context for this tab's session; todos are project-scoped (by cwd).
   if (activeTab && activeTab.sessionId) {
     activeSessionId = activeTab.sessionId;
-    loadTodos(activeTab.sessionId);
-  } else {
-    loadTodos(null);
   }
+  loadTodos(activeTab ? activeTab.cwd : null);
 
   renderTabs();
 
@@ -662,6 +661,9 @@ function switchTab(tabId) {
 
   // Update model select button for this tab
   updateModelSelectBtn();
+
+  // Reflect the active tab's stored context-% in the button.
+  updateContextButtonPct(activeTab ? (activeTab._contextPercent ?? null) : null);
 
   // Restore input state for the newly activated tab
   const chatInput = document.getElementById('chatInput');
@@ -765,15 +767,18 @@ function renderTabs() {
       el.appendChild(badge);
     }
 
-    const iconImg = document.createElement('img');
-    iconImg.className = 'tab__icon';
-    iconImg.src = '../assets/icon.png';
-    iconImg.alt = '';
-    el.appendChild(iconImg);
+    const fullLabel = tab.label.replace(/^🤖\s*/, '');
+
+    // Short label (first 3 chars) shown only when the tab is collapsed — CSS
+    // truncation looked cut-off, so we render the exact short text ourselves.
+    const shortSpan = document.createElement('span');
+    shortSpan.className = 'tab__short';
+    shortSpan.textContent = fullLabel.slice(0, 3);
+    el.appendChild(shortSpan);
 
     const labelSpan = document.createElement('span');
     labelSpan.className = 'tab__label';
-    labelSpan.textContent = tab.label.replace(/^🤖\s*/, '');
+    labelSpan.textContent = fullLabel;
     el.appendChild(labelSpan);
 
     // Edit (pencil) button — visible on hover
@@ -856,6 +861,11 @@ function startTabRename(tabId, tabEl, labelSpan) {
             tab.sessionId = newId;
             activeSessionId = newId;
             setSessionName(newId, newName);
+            // Persist the tab's chosen model/provider (and cwd) against the new
+            // session id. Without this, a tab saved before its first message
+            // would lose its provider and fall back to Copilot on resume.
+            if (tab.selectedModel) saveSessionModel(newId, tab.selectedModel);
+            if (tab.cwd) saveSessionCwd(newId, tab.cwd);
             saveOpenTabs();
           }
         } catch (e) {
@@ -1079,6 +1089,13 @@ function sendMessage() {
 
   if (tab.isProcessing) return;
 
+  // Guard: a Copilot model that the CLI no longer offers (removed from the
+  // dynamic list) can't be used — tell the user instead of failing opaquely.
+  if (getTabProvider(tab) === 'copilot' && tab.selectedModel && !isCopilotModelAvailable(tab.selectedModel)) {
+    showNotification(`Modell „${tab.selectedModel}" ist bei Copilot nicht mehr verfügbar. Bitte im 🧠-Menü ein anderes wählen.`, 'error');
+    return;
+  }
+
   // Show user message in stream
   const inputEl = document.createElement('div');
   inputEl.className = 'stream-input';
@@ -1155,6 +1172,17 @@ function sendMessage() {
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
   const mergedDenied = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
 
+  // For direct-API backends, pass the active skill/agent identifiers so main
+  // can inline their .md content into the (cached) system prompt. Ignored by
+  // the Copilot backend (the CLI reads these files itself).
+  const activeSkillDirs = [...activeSkills].map(id => skills.find(s => s.id === id)?.dirName).filter(Boolean);
+  const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
+
+  const sendTabId = activeTabId;
+  // Freeze the model this prompt actually runs on. The token delta measured after
+  // completion must be priced at THIS model — not tab.selectedModel, which the
+  // user may switch (for the next prompt) before /usage is read.
+  tab._billingModel = tab.selectedModel || DEFAULT_MODEL_ID;
   copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
@@ -1165,7 +1193,13 @@ function sendMessage() {
     mode: tab.mode || DEFAULT_MODE_ID,
     model: tab.selectedModel || DEFAULT_MODEL_ID,
     cwd: tab.cwd || undefined,
-  });
+    activeSkills: activeSkillDirs,
+    activeAgents: activeAgentSlugs,
+    geminiMode: tab.geminiMode || 'search',
+    baseURL: getProviderBaseUrl(getTabProvider(tab)) || undefined,
+  })
+    .then((res) => handleSendResult(sendTabId, res))
+    .catch((err) => handleSendResult(sendTabId, { success: false, error: err?.message || String(err) }));
 
   // Update lastUsed for sorting
   if (tab.sessionId) touchSession(tab.sessionId);
@@ -1185,7 +1219,134 @@ function sendMessage() {
   scrollToBottom(tab.streamEl);
 }
 
+/**
+ * Handle the result of copilot.chat.send. On success the backend streams events
+ * and emits copilot:done; on failure no events arrive, so we must unstick the
+ * tab's "processing" state here and surface the error (with an auth action when
+ * the failure is an authentication problem).
+ * @param {number} tabId
+ * @param {number|{success:false,error:string}} res
+ */
+function handleSendResult(tabId, res) {
+  // Success → res is the tab id (number). Failure → { success:false, error }.
+  if (!res || typeof res !== 'object' || res.success !== false) return;
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  stopInactivityMonitor(tabId);
+  tab.isProcessing = false;
+  if (tab.statusEl) tab.statusEl.style.display = 'none';
+
+  const err = res.error || 'Unbekannter Fehler';
+  if (/auth/i.test(err)) {
+    showAuthRequiredBanner(tab);
+  } else {
+    const quota = appendStreamError(tab, err);
+    showNotification(quota ? `${quota.title}: ${quota.detail}` : err, quota ? 'warning' : 'error');
+  }
+  setTabStatus(tabId, 'error');
+  scrollToBottom(tab.streamEl);
+}
+
+/**
+ * Insert an "authentication required" banner with a login button into a tab's
+ * stream. The button triggers the existing Copilot CLI login flow.
+ * @param {Object} tab
+ */
+function showAuthRequiredBanner(tab) {
+  const el = document.createElement('div');
+  el.className = 'stream-auth-required';
+  const msg = document.createElement('span');
+  msg.textContent = '🔐 Copilot-Anmeldung erforderlich — im Terminal anmelden, danach die App neu starten, damit die Sitzung übernommen wird.';
+  el.appendChild(msg);
+
+  // Restart button — hidden until login is triggered; the new auth state is only
+  // picked up at main-process startup, so a renderer reload is not enough.
+  const restartBtn = document.createElement('button');
+  restartBtn.className = 'stream-auth-required__btn';
+  restartBtn.textContent = 'App neu starten';
+  restartBtn.style.display = 'none';
+  restartBtn.addEventListener('click', () => {
+    restartBtn.disabled = true;
+    restartBtn.textContent = 'Wird neu gestartet…';
+    copilot.window.relaunch().catch((e) => {
+      showNotification('Neustart fehlgeschlagen: ' + (e?.message || e), 'error');
+      restartBtn.disabled = false;
+      restartBtn.textContent = 'App neu starten';
+    });
+  });
+
+  const btn = document.createElement('button');
+  btn.className = 'stream-auth-required__btn';
+  btn.textContent = 'Anmelden';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Login geöffnet…';
+    try {
+      const r = await copilot.auth.login();
+      showNotification(
+        r && r.pendingInTerminal
+          ? 'Login im Terminal abschließen, danach „App neu starten" klicken.'
+          : 'Anmeldung gestartet.',
+        'info',
+      );
+      // Offer the restart once login is running in the terminal.
+      restartBtn.style.display = '';
+      btn.textContent = 'Login erneut öffnen';
+      btn.disabled = false;
+    } catch (e) {
+      showNotification('Login fehlgeschlagen: ' + (e?.message || e), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Anmelden';
+    }
+  });
+  el.appendChild(btn);
+  el.appendChild(restartBtn);
+
+  tab.streamEl.insertBefore(el, tab.statusEl);
+  showNotification('Copilot-Anmeldung erforderlich.', 'warning');
+}
+
 // ── Copilot Event Processing (JSONL) ─────────────────────────
+
+/**
+ * Finalize the current streaming response bubble: flush the throttled markdown
+ * render and detach it, so the next message text starts a fresh bubble. Called
+ * at tool-call boundaries so interleaved "narrate → act → narrate" turns are
+ * shown as separate messages instead of one concatenated blob.
+ * @param {Object} tab
+ */
+function finalizeResponseBubble(tab) {
+  if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
+  if (tab._responseEl && tab._responseRaw) {
+    tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+  }
+  tab._responseEl = null;
+  tab._responseRaw = '';
+}
+
+/**
+ * Append an error bubble to a tab's stream. Quota / rate-limit / billing errors
+ * (Gemini 429, Anthropic credit limit, OpenAI insufficient_quota, …) are parsed
+ * into a short, friendly info message; anything else is shown verbatim.
+ * @param {Object} tab
+ * @param {string} message - Raw error message/JSON.
+ * @returns {{title:string, detail:string}|null} The parsed quota info, or null.
+ */
+function appendStreamError(tab, message) {
+  const quota = window.RendererLogic.parseQuotaError(message);
+  const el = document.createElement('div');
+  if (quota) {
+    el.className = 'stream-error stream-error--quota';
+    el.innerHTML = `<strong>ℹ️ ${escapeHtml(quota.title)}</strong><br>${escapeHtml(quota.detail)}`;
+  } else {
+    el.className = 'stream-error';
+    el.textContent = `⚠️ ${message}`;
+  }
+  tab.streamEl.insertBefore(el, tab.statusEl);
+  return quota;
+}
+
 /**
  * Register IPC event handlers for all Copilot CLI JSONL events.
  * Handles reasoning deltas, streaming message text, tool execution,
@@ -1214,7 +1375,20 @@ function initCopilotIPC() {
           tab._thinkingEl = content;
           tab._thinkingDetails = details;
         }
-        tab._thinkingEl.textContent += event.data.deltaContent || '';
+        {
+          // A tool call (incl. report_intent) interrupted the reasoning stream.
+          // Insert a break so the resumed thought doesn't glue onto the previous
+          // one ("…protocol.Now I'm…"). Only when both sides lack whitespace.
+          const delta = event.data.deltaContent || '';
+          if (tab._pendingThinkBreak) {
+            tab._pendingThinkBreak = false;
+            const cur = tab._thinkingEl.textContent;
+            if (cur && !/\s$/.test(cur) && delta && !/^\s/.test(delta)) {
+              tab._thinkingEl.textContent += '\n\n';
+            }
+          }
+          tab._thinkingEl.textContent += delta;
+        }
         scrollToBottom(tab.streamEl);
         break;
       }
@@ -1246,7 +1420,19 @@ function initCopilotIPC() {
           tab.streamEl.insertBefore(tab._responseEl, tab.statusEl);
           tab._responseRaw = '';
         }
-        tab._responseRaw += event.data.deltaContent || '';
+        {
+          // A report_intent (or other tool) interrupted the text without ending
+          // the bubble → insert a paragraph break so sentences before/after don't
+          // glue together (".mdDas Protokoll…"). Only when both sides lack whitespace.
+          const delta = event.data.deltaContent || '';
+          if (tab._pendingTextBreak) {
+            tab._pendingTextBreak = false;
+            if (tab._responseRaw && !/\s$/.test(tab._responseRaw) && delta && !/^\s/.test(delta)) {
+              tab._responseRaw += '\n\n';
+            }
+          }
+          tab._responseRaw += delta;
+        }
         // Throttled markdown render
         if (!tab._mdTimer) {
           tab._mdTimer = setTimeout(() => {
@@ -1264,6 +1450,8 @@ function initCopilotIPC() {
         tab.lastActivityAt = Date.now();
         tab.statusEl.textContent = '● Thinking…';
         tab.statusEl.style.display = 'block';
+        // Fresh turn → forget prior tool-result elements (dedup is per turn).
+        tab._toolResultEls = new Map();
         break;
 
       case 'assistant.turn_end':
@@ -1279,20 +1467,8 @@ function initCopilotIPC() {
         }
         tab._responseEl = null;
         tab._responseRaw = '';
-
-        // Show tool requests (what the assistant wants to call)
-        if (event.data.toolRequests && event.data.toolRequests.length > 0) {
-          for (const req of event.data.toolRequests) {
-            if (req.name === 'report_intent') continue;
-            const icon = toolIcon(req.name);
-            if (!icon) continue; // hide unknown tools
-            const el = document.createElement('div');
-            el.className = 'stream-tool-call';
-            const args = formatToolArgs(req.name, req.arguments);
-            el.innerHTML = `<span class="stream-tool-call__icon">${icon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(req.name))}</span> <span class="stream-tool-call__args">${escapeHtml(args)}</span>`;
-            tab.streamEl.insertBefore(el, tab.statusEl);
-          }
-        }
+        // Tool calls are rendered centrally in tool.execution_start (single source
+        // of truth), so nothing to do here for toolRequests.
         scrollToBottom(tab.streamEl);
         break;
       }
@@ -1300,6 +1476,11 @@ function initCopilotIPC() {
       // ── Tool execution ────────────────────────────────────
       case 'tool.execution_start': {
         tab.lastActivityAt = Date.now();
+        // A tool call interrupts the assistant's text/reasoning stream. Mark a
+        // pending break so the next delta doesn't glue onto the previous text —
+        // report_intent keeps the same bubble, so without this the sentences merge.
+        tab._pendingTextBreak = true;
+        tab._pendingThinkBreak = true;
         // Track tool call info for denied messages
         if (event.data.toolCallId) {
           pendingToolCalls.set(event.data.toolCallId, {
@@ -1312,6 +1493,20 @@ function initCopilotIPC() {
           tab.statusEl.textContent = `● ${event.data.arguments?.intent || 'Working…'}`;
           tab.statusEl.style.display = 'block';
           break;
+        }
+        // A real tool call ends the current message — close its bubble so the
+        // text after the tool renders as a separate message.
+        finalizeResponseBubble(tab);
+        // Render the tool call itself so it's always visible — even if the
+        // matching completion carries no result content. MCP/unknown tools get a
+        // generic icon. (report_intent already returned above.)
+        {
+          const callIcon = toolIcon(event.data.toolName) || '🔧';
+          const callEl = document.createElement('div');
+          callEl.className = 'stream-tool-call';
+          const callArgs = formatToolArgs(event.data.toolName, event.data.arguments || {});
+          callEl.innerHTML = `<span class="stream-tool-call__icon">${callIcon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(event.data.toolName))}</span> <span class="stream-tool-call__args">${escapeHtml(callArgs)}</span>`;
+          tab.streamEl.insertBefore(callEl, tab.statusEl);
         }
         if (event.data.toolName === 'ask_user') {
           setTabStatus(tabId, 'question');
@@ -1349,25 +1544,38 @@ function initCopilotIPC() {
         if (!event.data || !event.data.result) break;
         const toolName = event.data.toolName || '';
         if (toolName === 'report_intent') break;
-        const icon = toolIcon(toolName);
-        if (!icon) break; // hide unknown tools
+        // MCP/unknown tools have no built-in icon → show a generic one instead of
+        // hiding the result (previously all Playwright MCP results were suppressed).
+        const icon = toolIcon(toolName) || '🔧';
 
-        const toolEl = document.createElement('details');
-        toolEl.className = 'stream-tool-result';
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
-        const preview = (event.data.result.content || '').replace(/\n/g, ' ');
+        const resultContent = event.data.result.content || '';
+        const preview = resultContent.replace(/\n/g, ' ');
+        const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
 
-        const summary = document.createElement('summary');
-        summary.innerHTML = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
-        toolEl.appendChild(summary);
-
-        const content = document.createElement('pre');
-        content.className = 'stream-tool-result__content';
-        content.textContent = event.data.result.content || '';
-        toolEl.appendChild(content);
-
-        tab.streamEl.insertBefore(toolEl, tab.statusEl);
+        // ACP emits multiple tool_call_update events per call (pending →
+        // in_progress → completed). Keyed by toolCallId, update the SAME result
+        // element in place instead of appending a duplicate for every status.
+        if (!tab._toolResultEls) tab._toolResultEls = new Map();
+        const callId = event.data.toolCallId || '';
+        let toolEl = callId ? tab._toolResultEls.get(callId) : null;
+        if (toolEl) {
+          toolEl.querySelector('summary').innerHTML = summaryHtml;
+          toolEl.querySelector('.stream-tool-result__content').textContent = resultContent;
+        } else {
+          toolEl = document.createElement('details');
+          toolEl.className = 'stream-tool-result';
+          const summary = document.createElement('summary');
+          summary.innerHTML = summaryHtml;
+          toolEl.appendChild(summary);
+          const content = document.createElement('pre');
+          content.className = 'stream-tool-result__content';
+          content.textContent = resultContent;
+          toolEl.appendChild(content);
+          tab.streamEl.insertBefore(toolEl, tab.statusEl);
+          if (callId) tab._toolResultEls.set(callId, toolEl);
+        }
         scrollToBottom(tab.streamEl);
         break;
       }
@@ -1408,6 +1616,13 @@ function initCopilotIPC() {
         break;
       }
 
+      case 'copilot.models_available': {
+        // The CLI reported which models this account can use → use them for the
+        // Copilot model dropdown instead of the hardcoded fallback list.
+        updateCopilotModels(event.data.models);
+        break;
+      }
+
       case 'session.tools_updated': {
         const modelName = event.data.model || '?';
         // Only set the model on first update — sub-agents send their own model
@@ -1429,7 +1644,11 @@ function initCopilotIPC() {
         if (cwdMatch) {
           const cwd = cwdMatch[1].trim();
           tab.context.cwd = cwd;
-          if (!tab.cwd) tab.cwd = cwd;
+          if (!tab.cwd) {
+            tab.cwd = cwd;
+            // First time we learn this tab's project dir → load its todos.
+            if (tabId === activeTabId) loadTodos(tab.cwd);
+          }
         }
         break;
       }
@@ -1443,10 +1662,10 @@ function initCopilotIPC() {
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           saveOpenTabs();
-          // Show todos panel for this session
+          // Show todos panel (project-scoped by cwd) for this session
           if (!activeSessionId) {
             activeSessionId = event.sessionId;
-            loadTodos(event.sessionId);
+            loadTodos(tab.cwd);
           }
         }
         break;
@@ -1461,10 +1680,7 @@ function initCopilotIPC() {
       }
 
       case 'error': {
-        const errEl = document.createElement('div');
-        errEl.className = 'stream-error';
-        errEl.textContent = `⚠️ ${event.data.message}`;
-        tab.streamEl.insertBefore(errEl, tab.statusEl);
+        appendStreamError(tab, event.data.message);
         break;
       }
     }
@@ -1516,9 +1732,18 @@ function initCopilotIPC() {
     }
 
     if (code === 0) {
-      // Always refresh so cost tracking works for background tabs too.
-      // updateUsageDisplay() inside only updates the visible bar for the active tab.
-      refreshUsageDisplay(tabId);
+      // Run /usage first, then /context — the backend handles only one silent
+      // command at a time ("Cannot run command while busy" otherwise). Refresh
+      // runs for background tabs too so cost tracking stays accurate.
+      refreshUsageDisplay(tabId).finally(() => {
+        // /context is free for all providers. Direct-API tabs additionally
+        // auto-compact when high; Copilot manages its own context window.
+        if (getTabProvider(tab) !== 'copilot') {
+          refreshApiContext(tabId);
+        } else {
+          refreshContextDisplay(tabId);
+        }
+      });
     }
   });
 }
@@ -1537,13 +1762,355 @@ window.confirmDeleteAgent = confirmDeleteAgent;
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
 // the background terminal. We use a preferences-stored model list instead.
 const DEFAULT_MODEL_ID = 'claude-sonnet-4.6';
+// `tier`: 'aic' = über Copilot-Abo/AI Credits abgerechnet, 'free' = im
+// kostenlosen Kontingent des Providers nutzbar, 'paid' = direkt kostenpflichtig.
 const DEFAULT_MODELS = [
-  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
-  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
-  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6' },
-  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8' },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3' },
+  // Copilot CLI (provider: 'copilot')
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot', tier: 'aic' },
+  { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot', tier: 'aic' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot', tier: 'aic' },
+  // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic', tier: 'paid' },
+  // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini', tier: 'paid' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini', tier: 'free' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini', tier: 'paid' },
+  // OpenAI API (provider: 'openai') — benötigt API-Key
+  { id: 'gpt-5.1', label: 'GPT-5.1', short: 'GPT-5.1', provider: 'openai', tier: 'paid' },
+  { id: 'gpt-5.1-mini', label: 'GPT-5.1 mini', short: 'GPT-5.1 mini', provider: 'openai', tier: 'paid' },
+  { id: 'gpt-4.1', label: 'GPT-4.1', short: 'GPT-4.1', provider: 'openai', tier: 'paid' },
+  // GLM / Zhipu (provider: 'glm') — benötigt API-Key
+  { id: 'glm-4.6', label: 'GLM-4.6', short: 'GLM-4.6', provider: 'glm', tier: 'paid' },
+  { id: 'glm-4.5', label: 'GLM-4.5', short: 'GLM-4.5', provider: 'glm', tier: 'paid' },
+  { id: 'glm-4.5-air', label: 'GLM-4.5 Air', short: 'GLM-4.5 Air', provider: 'glm', tier: 'paid' },
+  // Ollama (provider: 'ollama') — lokal, kein Key, kostenlos
+  { id: 'llama3.1', label: 'Llama 3.1 (Ollama)', short: 'Llama 3.1', provider: 'ollama', tier: 'free' },
+  { id: 'qwen2.5-coder', label: 'Qwen2.5 Coder (Ollama)', short: 'Qwen2.5 Coder', provider: 'ollama', tier: 'free' },
+  { id: 'gpt-oss:20b', label: 'gpt-oss 20B (Ollama)', short: 'gpt-oss 20B', provider: 'ollama', tier: 'free' },
 ];
+
+// Badge-Markup für die Modell-Kennzeichnung (kostenpflichtig / kostenlos / AIC).
+const MODEL_TIER_BADGE = {
+  paid: '<span class="model-tier model-tier--paid" data-tooltip="Direkt kostenpflichtig (Abrechnung pro Token beim Provider)">💲 kostenpflichtig</span>',
+  free: '<span class="model-tier model-tier--free" data-tooltip="Im kostenlosen Kontingent des Providers nutzbar">🆓 kostenlos</span>',
+  aic: '<span class="model-tier model-tier--aic" data-tooltip="Abrechnung über dein GitHub-Copilot-Abo / AI Credits">AIC</span>',
+};
+function modelTierBadge(model) {
+  return model && model.tier ? (MODEL_TIER_BADGE[model.tier] || '') : '';
+}
+
+const PROVIDER_LABELS = {
+  copilot: 'GitHub Copilot',
+  anthropic: 'Anthropic API',
+  gemini: 'Google Gemini',
+  openai: 'OpenAI',
+  ollama: 'Ollama (lokal)',
+  glm: 'GLM (Zhipu)',
+};
+
+const PROVIDER_ICON = '🔌';
+
+// Providers offered in the provider selector. `active: false` ones are shown
+// but not yet selectable (backend not implemented).
+// Order shown in the new-tab provider menu: Copilot (default) first, then the
+// direct-API providers. Gemini/OpenAI are listed but not yet selectable.
+const PROVIDERS = [
+  { id: 'copilot', active: true },
+  { id: 'gemini', active: true },
+  { id: 'anthropic', active: true },
+  { id: 'openai', active: true },
+  { id: 'glm', active: true },
+  { id: 'ollama', active: true },
+];
+
+// Maturity markers per provider. Beta = tested but not final; Alpha = untested.
+// Copilot is the primary, fully-tested provider and carries no badge.
+const BETA_PROVIDERS = new Set(['gemini']);
+const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+
+/** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
+function providerStageBadge(provider) {
+  if (BETA_PROVIDERS.has(provider)) {
+    return ' <span class="beta-badge" title="Getestet nicht final">Beta</span>';
+  }
+  if (ALPHA_PROVIDERS.has(provider)) {
+    return ' <span class="alpha-badge" title="Nicht getestet">Alpha</span>';
+  }
+  return '';
+}
+
+/** Providers that have selectable models (in display order). */
+function getProvidersWithModels() {
+  const seen = [];
+  for (const m of DEFAULT_MODELS) {
+    const p = m.provider || 'copilot';
+    if (!seen.includes(p)) seen.push(p);
+  }
+  return seen;
+}
+
+/** The configured default provider for new tabs (falls back to copilot). */
+function getDefaultProvider() {
+  const p = getSettings().defaultProvider;
+  return getProvidersWithModels().includes(p) ? p : 'copilot';
+}
+
+// Sensible out-of-box default model per provider (used when the user hasn't
+// chosen one in settings). Copilot intentionally defaults to Sonnet, NOT the
+// first list entry (Haiku) — see DEFAULT_MODEL_ID.
+const PROVIDER_DEFAULT_MODEL = {
+  copilot: DEFAULT_MODEL_ID,        // claude-sonnet-4.6
+  anthropic: 'claude-opus-4-8',
+  gemini: 'gemini-2.5-flash',
+  openai: 'gpt-5.1',
+  glm: 'glm-4.6',
+  ollama: 'llama3.1',
+};
+
+/**
+ * Default model for a provider: the user-configured choice if valid, else a
+ * sensible per-provider default, else the first model of that provider. Used by
+ * the "+" menu and new-tab creation.
+ */
+function getDefaultModelForProvider(provider) {
+  const valid = (id) => id && DEFAULT_MODELS.some(m => m.id === id && (m.provider || 'copilot') === provider);
+  const configured = (getSettings().defaultModels || {})[provider];
+  if (valid(configured)) return configured;
+  if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
+  const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
+  return m ? m.id : DEFAULT_MODEL_ID;
+}
+
+/** Persist the default model for one provider. */
+function saveDefaultModelForProvider(provider, modelId) {
+  const map = { ...(getSettings().defaultModels || {}) };
+  map[provider] = modelId;
+  saveSetting('defaultModels', map);
+}
+
+const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)' };
+
+/** Render the "default provider" + "default model per provider" settings controls. */
+function renderDefaultModelSettings() {
+  const provSel = document.getElementById('settDefaultProvider');
+  const container = document.getElementById('settDefaultModelsPerProvider');
+  const providers = getProvidersWithModels();
+  if (provSel) {
+    provSel.innerHTML = providers
+      .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(PROVIDER_SHORT[p] || p)}</option>`)
+      .join('');
+    provSel.value = getDefaultProvider();
+  }
+  if (container) {
+    container.innerHTML = '';
+    for (const p of providers) {
+      const row = document.createElement('div');
+      row.className = 'settings__provider-default-row';
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'settings__provider-default-label';
+      labelSpan.textContent = PROVIDER_SHORT[p] || p;
+      const sel = document.createElement('select');
+      sel.className = 'settings__select';
+      sel.innerHTML = getModelsForProvider(p)
+        .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
+        .join('');
+      sel.value = getDefaultModelForProvider(p);
+      sel.addEventListener('change', () => saveDefaultModelForProvider(p, sel.value));
+      row.appendChild(labelSpan);
+      row.appendChild(sel);
+      container.appendChild(row);
+    }
+  }
+}
+
+/**
+ * Dynamically discovered models per provider. Copilot models arrive via ACP; the
+ * direct-API providers are polled via providers:listModels. When a provider has
+ * an entry here it replaces that provider's hardcoded list, so the dropdown
+ * reflects the account's actually-available models.
+ * @type {Object<string, Array<{id:string,label:string,short:string,provider:string,tier:string}>>}
+ */
+const _dynamicModels = {};
+
+/** Default cost tier for freshly-discovered models, by provider. */
+const PROVIDER_DEFAULT_TIER = {
+  copilot: 'aic', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
+};
+
+/**
+ * Merge a freshly discovered model list for a provider: normalize to the internal
+ * shape, announce models we've never seen before, persist, and refresh the UI.
+ * @param {string} provider
+ * @param {Array<{id:string,name?:string}>} models - raw {id,name} pairs
+ */
+function applyDynamicModels(provider, models) {
+  if (!Array.isArray(models) || !models.length) return;
+  const tier = PROVIDER_DEFAULT_TIER[provider] || 'paid';
+  const mapped = models
+    .filter(m => m && m.id)
+    .map(m => ({ id: m.id, label: m.name || m.id, short: m.name || m.id, provider, tier }));
+  if (!mapped.length) return;
+
+  // "New" = neither in the hardcoded list nor in the previously-known dynamic
+  // list. The very first discovery for a provider is treated as initial
+  // population (no notification); only genuinely new arrivals later are announced.
+  const hadPrevious = Array.isArray(_dynamicModels[provider]) && _dynamicModels[provider].length > 0;
+  const known = new Set([
+    ...DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider).map(m => m.id),
+    ...((_dynamicModels[provider] || []).map(m => m.id)),
+  ]);
+  const fresh = mapped.filter(m => !known.has(m.id));
+
+  _dynamicModels[provider] = mapped;
+  setPref('dynamicModels', _dynamicModels);
+
+  if (hadPrevious && fresh.length) {
+    const names = fresh.map(m => m.short).slice(0, 4).join(', ');
+    const more = fresh.length > 4 ? ` +${fresh.length - 4}` : '';
+    showNotification(`🆕 Neues Modell bei ${PROVIDER_SHORT[provider] || provider}: ${names}${more}`, 'info');
+  }
+
+  updateModelSelectBtn(activeTabId);
+  if (document.getElementById('settDefaultProvider')) renderDefaultModelSettings();
+}
+
+/** Merge the CLI-reported Copilot models into the selectable list (via ACP). */
+function updateCopilotModels(models) {
+  applyDynamicModels('copilot', models);
+}
+
+/** Load persisted dynamic models (incl. the legacy Copilot-only list) at startup. */
+function initCopilotModels() {
+  const stored = getPref('dynamicModels', null);
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [prov, list] of Object.entries(stored)) {
+      if (Array.isArray(list) && list.length) _dynamicModels[prov] = list;
+    }
+  }
+  // Back-compat: older builds stored only the Copilot list under 'copilotModels'.
+  if (!_dynamicModels.copilot) {
+    const legacy = getPref('copilotModels', null);
+    if (Array.isArray(legacy) && legacy.length) _dynamicModels.copilot = legacy;
+  }
+}
+
+/**
+ * Fetch a direct-API provider's current models and merge them in. Best-effort:
+ * failures (no key, offline, unsupported endpoint) leave the hardcoded list intact.
+ * @param {string} provider
+ */
+async function refreshProviderModels(provider) {
+  if (provider === 'copilot') return; // Copilot models arrive via ACP, not here.
+  try {
+    const res = await copilot.providers.listModels(provider);
+    if (res && res.ok && Array.isArray(res.models) && res.models.length) {
+      applyDynamicModels(provider, res.models);
+    }
+  } catch (_) { /* discovery is best-effort */ }
+}
+
+/** Discover models for every direct-API provider that has a key (or is keyless). */
+async function refreshAllProviderModels() {
+  const KEYLESS = new Set(['ollama']);
+  let status = null;
+  try { status = await copilot.providers.status(); } catch (_) { /* ignore */ }
+  const keyed = (status && status.keyed) || {};
+  for (const p of ['anthropic', 'gemini', 'openai', 'glm', 'ollama']) {
+    if (KEYLESS.has(p) || keyed[p]) refreshProviderModels(p);
+  }
+}
+
+/**
+ * Whether a Copilot model is currently offered by the CLI. Permissive when we
+ * have no dynamic list yet (the static fallback list is in use).
+ * @param {string} modelId
+ */
+function isCopilotModelAvailable(modelId) {
+  const list = _dynamicModels.copilot;
+  if (!list || !list.length) return true;
+  return list.some(m => m.id === modelId);
+}
+
+/** Models belonging to a given provider (the dynamic list wins when known). */
+function getModelsForProvider(provider) {
+  const dyn = _dynamicModels[provider];
+  if (dyn && dyn.length) return dyn;
+  return DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
+}
+
+/**
+ * The provider of a tab, always derived from its selected model (the model is
+ * the single source of truth; the provider is implied by it).
+ */
+function getTabProvider(tab) {
+  return window.RendererLogic.getModelProvider(tab?.selectedModel || '') || 'copilot';
+}
+
+const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+
+/** Update the read-only provider label (shown next to the cost) for a tab. */
+function updateProviderSelectBtn(tabId) {
+  const el = document.getElementById('sessionProvider');
+  if (!el) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  const provider = getTabProvider(tab);
+  el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${providerStageBadge(provider)}`;
+  // Subtle accent for non-default (direct-API) providers.
+  el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
+  updateGeminiModeBtn(tabId);
+}
+
+const GEMINI_MODE_LABELS = {
+  search: '🔍 Recherche',
+  files: '📁 Dateien',
+};
+
+/**
+ * Show/refresh the Gemini tool-mode toggle. Only visible for Gemini tabs, since
+ * Gemini 2.5 cannot use live search and file tools in the same request.
+ */
+function updateGeminiModeBtn(tabId) {
+  const wrapper = document.getElementById('geminiModeWrapper');
+  const btn = document.getElementById('btnGeminiMode');
+  if (!wrapper || !btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  const isGemini = tab && getTabProvider(tab) === 'gemini';
+  wrapper.style.display = isGemini ? '' : 'none';
+  if (!isGemini) return;
+  const mode = tab.geminiMode || 'search';
+  btn.textContent = GEMINI_MODE_LABELS[mode] || GEMINI_MODE_LABELS.search;
+}
+
+/** Wire the Gemini mode toggle (switches the active tab between search/files). */
+function initGeminiModeToggle() {
+  const btn = document.getElementById('btnGeminiMode');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const tab = tabs.get(activeTabId);
+    if (!tab || getTabProvider(tab) !== 'gemini') return;
+    tab.geminiMode = (tab.geminiMode || 'search') === 'search' ? 'files' : 'search';
+    updateGeminiModeBtn(activeTabId);
+    const label = tab.geminiMode === 'search'
+      ? 'Gemini: Live-Suche aktiv (Datei-Tools aus).'
+      : 'Gemini: Datei-Tools aktiv (Live-Suche aus).';
+    showNotification(label, 'info');
+  });
+}
+
+/** @type {{available: boolean, keyed: Object<string,boolean>}} Cached provider key status. */
+let _providerStatus = { available: false, keyed: {} };
+
+async function refreshProviderStatus() {
+  try {
+    _providerStatus = await window.copilot.providers.status();
+  } catch (e) {
+    console.warn('[providers] status fehlgeschlagen:', e?.message);
+  }
+}
 
 function getAvailableModels() {
   return DEFAULT_MODELS;
@@ -1573,11 +2140,15 @@ function updateModeSelectBtn(tabId) {
 }
 
 /**
- * The default model new tabs start with — configurable in settings,
- * falling back to DEFAULT_MODEL_ID if unset or invalid.
+ * The default model new tabs start with: the default model of the configured
+ * default provider. Falls back to legacy `defaultModel` / DEFAULT_MODEL_ID.
  * @returns {string}
  */
 function getDefaultModelId() {
+  // Per-provider default of the configured default provider (#2 + #3).
+  const byProvider = getDefaultModelForProvider(getDefaultProvider());
+  if (byProvider) return byProvider;
+  // Legacy single-default fallback.
   const configured = getSettings().defaultModel;
   return DEFAULT_MODELS.some(m => m.id === configured) ? configured : DEFAULT_MODEL_ID;
 }
@@ -1593,9 +2164,11 @@ function updateModelSelectBtn(tabId) {
   // Explicit selection takes priority, fallback to actual model from session,
   // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
   const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
-  const found = DEFAULT_MODELS.find(m => m.id === modelId);
+  const found = DEFAULT_MODELS.find(m => m.id === modelId)
+    || Object.values(_dynamicModels).flat().find(m => m.id === modelId);
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
+  updateProviderSelectBtn(tabId);
 }
 
 /**
@@ -1621,10 +2194,11 @@ function initTabModelSelector() {
       return;
     }
 
-    const models = getAvailableModels();
     const openedForTabId = activeTabId;
     const tab = tabs.get(openedForTabId);
     const currentModel = tab?.selectedModel || '';
+    // Only show models for the tab's currently selected provider.
+    const models = getModelsForProvider(getTabProvider(tab));
 
     const dropdown = document.createElement('div');
     dropdown.className = 'model-dropdown model-dropdown--below';
@@ -1633,7 +2207,7 @@ function initTabModelSelector() {
       const isActive = currentModel === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
-      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>`;
+      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>${modelTierBadge(m)}`;
       item.addEventListener('click', () => {
         dropdown.remove();
         if (activeCloseHandler) {
@@ -1741,11 +2315,30 @@ function parseContextPercent(text) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-function updateContextButton(text) {
+/** Set the context button to a given percentage (null → default label). */
+function updateContextButtonPct(pct) {
   const btn = document.getElementById('btnContextInfo');
   if (!btn) return;
-  const pct = parseContextPercent(text);
   btn.textContent = pct != null ? `📊 ${pct}%` : '📊 Kontext';
+}
+
+/**
+ * Store a tab's context-% (parsed from a /context response) and, if the tab is
+ * active, reflect it in the button. Persisting per tab keeps the button correct
+ * across tab switches.
+ * @param {number} tabId
+ * @param {string} text - Raw /context response.
+ */
+function setTabContext(tabId, text) {
+  const tab = tabs.get(tabId);
+  const pct = parseContextPercent(text);
+  if (tab) tab._contextPercent = pct;
+  if (tabId === activeTabId) updateContextButtonPct(pct);
+}
+
+/** Manual/active-tab convenience wrapper. */
+function updateContextButton(text) {
+  setTabContext(activeTabId, text);
 }
 
 async function runContextAction(actionId) {
@@ -1870,11 +2463,37 @@ function initContextInfo() {
 // renderer-logic.js is loaded as a classic <script> before app.js and
 // exposes its API on window.RendererLogic (the renderer has no require()).
 const {
-  MODEL_PRICING,
   parseUsageTokens,
   parseUsageRequests,
-  estimateCreditsDelta,
+  estimateCostUsdDelta,
+  getModelPricing,
+  setDynamicPricing,
 } = window.RendererLogic;
+
+/**
+ * Load the public pricing fallback (LiteLLM) so models without a hardcoded
+ * price still show costs. Runs in the background at startup; failures are silent.
+ */
+async function initDynamicPricing() {
+  try {
+    const map = await window.copilot.pricing.getMap();
+    if (map && Object.keys(map).length) {
+      setDynamicPricing(map);
+      // Recompute the visible cost display now that more prices are known.
+      const tab = tabs.get(activeTabId);
+      if (tab) refreshUsageDisplay(activeTabId);
+    }
+  } catch (e) {
+    console.warn('[pricing] init failed:', e?.message);
+  }
+}
+
+/** Format a USD amount for display (more precision for tiny amounts). */
+function formatUsd(v) {
+  const n = Number(v) || 0;
+  if (n > 0 && n < 0.01) return '$' + n.toFixed(4);
+  return '$' + n.toFixed(2);
+}
 // Other RendererLogic helpers (parseTokenK, estimateCredits, buildCostBuckets,
 // aggregateCostBySession, trimCostLog) are used internally by the above or
 // consumed directly by modules/costs.js via window.RendererLogic.
@@ -1883,19 +2502,22 @@ async function refreshUsageDisplay(tabId) {
   try {
     const result = await window.copilot.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
+    // DIAGNOSTIC: raw /usage output — to check whether it breaks down tokens by
+    // model/subagent or only reports a single session-wide aggregate.
+    console.log(`[usage-raw tab${tabId}]\n${result.text}`);
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
     if (tab) {
-      const modelId = tab.selectedModel || '';
-      // Bill only the *new* tokens since the last reading, at the current
-      // model's price — so a mid-session model switch never re-prices the
-      // tokens consumed under the previous model.
-      const deltaCredits = estimateCreditsDelta(tokens, tab._lastUsageTokens, modelId);
-      if (deltaCredits && deltaCredits > 0) {
-        tab._creditTotal = (tab._creditTotal || 0) + deltaCredits;
-        tab._creditTotal = Math.round(tab._creditTotal * 10) / 10;
-        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaCredits);
+      // Price the new tokens at the model that actually PRODUCED them — the one
+      // frozen when this prompt was sent (_billingModel) — not tab.selectedModel,
+      // which may already point at a different model chosen for the next prompt.
+      // This keeps a mid-session model switch from mis-pricing prior tokens.
+      const modelId = tab._billingModel || tab.selectedModel || '';
+      const deltaUsd = estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
+      if (deltaUsd && deltaUsd > 0) {
+        tab._costUsd = (tab._costUsd || 0) + deltaUsd;
+        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, getTabProvider(tab));
       }
       tab._lastUsageParsed = parsed;
       tab._lastUsageText = result.text;
@@ -1907,6 +2529,47 @@ async function refreshUsageDisplay(tabId) {
   }
 }
 
+/**
+ * Read & display the context-% for a tab without auto-compacting. Used for
+ * Copilot tabs (the CLI manages its own context window). /context is free.
+ * @param {number} tabId
+ */
+async function refreshContextDisplay(tabId) {
+  try {
+    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    if (res.success) setTabContext(tabId, res.text);
+  } catch (e) {
+    console.warn('[context] refreshContextDisplay fehlgeschlagen:', e?.message);
+  }
+}
+
+/** Context utilisation (%) at which a direct-API tab auto-compacts. */
+const AUTO_COMPACT_PERCENT = 80;
+
+/**
+ * For direct-API tabs: refresh the context-% button after a turn and, if the
+ * window is filling up, automatically compact the conversation. Copilot tabs
+ * are unaffected (their context is managed by the CLI).
+ * @param {number} tabId
+ */
+async function refreshApiContext(tabId) {
+  try {
+    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    if (!res.success) return;
+    setTabContext(tabId, res.text);
+
+    const pct = parseContextPercent(res.text);
+    if (pct != null && pct >= AUTO_COMPACT_PERCENT) {
+      showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
+      await window.copilot.chat.silentCommand(tabId, '/compact');
+      const after = await window.copilot.chat.silentCommand(tabId, '/context');
+      if (after.success) setTabContext(tabId, after.text);
+    }
+  } catch (e) {
+    console.warn('[context] refreshApiContext fehlgeschlagen:', e?.message);
+  }
+}
+
 function updateUsageDisplay(parsed, tokens, fullText) {
   const el = document.getElementById('sessionUsage');
   if (!el) return;
@@ -1915,11 +2578,10 @@ function updateUsageDisplay(parsed, tokens, fullText) {
   const modelId = tab?.selectedModel || '';
 
   let display;
-  if (MODEL_PRICING[modelId]) {
-    // Known pricing → show the running per-prompt credit total (always ≥ 0,
-    // defaulting to ~0C before the first prompt).
-    const total = tab?._creditTotal || 0;
-    display = `~${total}C`;
+  if (getModelPricing(modelId)) {
+    // Known pricing (hardcoded or from the dynamic source) → show the running
+    // per-prompt cost in USD (≥ 0, $0.00 before the first prompt).
+    display = '~' + formatUsd(tab?._costUsd || 0);
   } else if (parsed) {
     // Unknown model → fall back to the raw /usage figure.
     const short = parsed.unit?.toLowerCase().includes('credit') ? 'AIC'
@@ -1927,7 +2589,7 @@ function updateUsageDisplay(parsed, tokens, fullText) {
       : 'Req';
     display = `${parsed.value} ${short}`;
   } else {
-    display = '~0C';
+    display = '~$0.00';
   }
   el.textContent = display;
   el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';
@@ -2102,6 +2764,7 @@ async function pickSessionCwd(sessionId) {
       tab.cwd = selected;
       if (tabId === activeTabId) {
         loadProjectSkillsAndAgents(selected);
+        loadTodos(selected); // todos are project-scoped → follow the new cwd
       }
     }
   }
@@ -2148,10 +2811,12 @@ async function resumeSession(sessionId) {
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // Restore the project directory so project-scoped todos load correctly.
+  if (!tab.cwd) tab.cwd = getSessionCwd(sessionId) || null;
   // Update lastUsed timestamp
   touchSession(sessionId);
   activeSessionId = sessionId;
-  loadTodos(sessionId);
+  loadTodos(tab.cwd);
   saveOpenTabs();
   renderSessions(filterSessions());
 
@@ -2199,20 +2864,28 @@ async function displaySessionContext(tab, sessionId) {
   headerEl.innerHTML = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
   insertBefore(headerEl);
 
-  // 2. Letzte Nachrichten als echte Chat-Bubbles
+  // 2. Letzte Nachrichten als echte Chat-Bubbles. Direkt-API-Sessions haben
+  // keine CLI-State-Dateien — ihren Verlauf laden wir aus dem API-Session-Store.
   try {
-    const messages = await copilot.sessions.readRecentMessages(sessionId);
-    if (messages && messages.length > 0) {
-      for (const msg of messages) {
-        const el = document.createElement('div');
-        if (msg.role === 'user') {
-          el.className = 'stream-input stream-input--history';
-          el.textContent = msg.content;
-        } else {
-          el.className = 'stream-response markdown-body stream-response--history';
-          el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+    if (getTabProvider(tab) !== 'copilot') {
+      const history = await window.copilot.providers.loadSessionHistory(sessionId);
+      renderApiHistory(history, insertBefore);
+    } else {
+      // Full conversation history (not just the last few) so reopening a
+      // Copilot session restores the whole verlauf in the tab.
+      const messages = await copilot.sessions.readAllMessages(sessionId);
+      if (messages && messages.length > 0) {
+        for (const msg of messages) {
+          const el = document.createElement('div');
+          if (msg.role === 'user') {
+            el.className = 'stream-input stream-input--history';
+            el.textContent = msg.content;
+          } else {
+            el.className = 'stream-response markdown-body stream-response--history';
+            el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+          }
+          insertBefore(el);
         }
-        insertBefore(el);
       }
     }
   } catch (e) { console.warn('[sessions] Nachrichten nicht verfügbar:', e.message); }
@@ -2222,6 +2895,76 @@ async function displaySessionContext(tab, sessionId) {
   footerEl.className = 'stream-session-context';
   footerEl.innerHTML = '<div class="stream-session-context__footer">Session bereit — schreibe eine Nachricht um fortzufahren</div>';
   insertBefore(footerEl);
+
+  // Jump to the latest message — otherwise a long restored history leaves the
+  // view pinned at the very top and the user has to scroll all the way down.
+  // rAF so the browser has laid out the freshly-inserted bubbles first.
+  requestAnimationFrame(() => scrollToBottom(tab.streamEl));
+}
+
+/**
+ * Render a persisted direct-API conversation (Anthropic-native messages) as
+ * history bubbles + tool-call lines. Tool-result messages (internal to the
+ * agent loop) and thinking blocks are skipped.
+ * @param {Array} messages - Provider-native message history.
+ * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
+ */
+function renderApiHistory(messages, insertBefore) {
+  if (!Array.isArray(messages)) return;
+
+  const userBubble = (text) => {
+    const el = document.createElement('div');
+    el.className = 'stream-input stream-input--history';
+    el.textContent = text;
+    insertBefore(el);
+  };
+  const assistantBubble = (text) => {
+    const el = document.createElement('div');
+    el.className = 'stream-response markdown-body stream-response--history';
+    el.innerHTML = window.markdown ? window.markdown.render(text) : escapeHtml(text);
+    insertBefore(el);
+  };
+  const toolLine = (name, input) => {
+    const el = document.createElement('div');
+    el.className = 'stream-tool--history';
+    let args = '';
+    try { args = typeof formatToolArgs === 'function' ? formatToolArgs(input) : ''; } catch (_) { /* ignore */ }
+    if (!args && input) { try { args = JSON.stringify(input).slice(0, 120); } catch (_) { /* ignore */ } }
+    el.textContent = `🔧 ${name}${args ? ' — ' + args : ''}`;
+    insertBefore(el);
+  };
+
+  for (const msg of messages) {
+    if (Array.isArray(msg.parts)) {
+      // Gemini shape: { role: 'user' | 'model', parts: [{text}|{functionCall}|{functionResponse}] }
+      const text = msg.parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+      if (msg.role === 'model') {
+        if (text) assistantBubble(text);
+        for (const p of msg.parts) {
+          if (p.functionCall) toolLine(p.functionCall.name, p.functionCall.args);
+        }
+      } else if (text) {
+        userBubble(text); // functionResponse parts (internal) skipped
+      }
+    } else if (msg.role === 'user') {
+      // Anthropic shape
+      if (typeof msg.content === 'string' && msg.content.trim()) userBubble(msg.content);
+      // array content = tool_result blocks (internal) → skip
+    } else if (msg.role === 'assistant') {
+      const blocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content || '') }];
+      const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      if (text) assistantBubble(text);
+      for (const b of blocks) {
+        if (b.type === 'tool_use') toolLine(b.name, b.input);
+      }
+      // OpenAI-compatible shape: tool calls live on msg.tool_calls.
+      for (const tc of msg.tool_calls || []) {
+        let input = {};
+        try { input = JSON.parse(tc.function?.arguments || '{}'); } catch (_) { /* ignore */ }
+        toolLine(tc.function?.name || 'tool', input);
+      }
+    }
+  }
 }
 
 // ── Delete Session ────────────────────────────────────────────
@@ -2360,7 +3103,18 @@ function renderMcpServers() {
   if (!container) return;
   const countEl = document.getElementById('mcpCount');
   const section = container.closest('.sidebar__section');
-  
+
+  // MCP servers are only wired to the Copilot CLI. Direct-API providers
+  // (Anthropic/Gemini/OpenAI/Ollama/GLM) have no MCP connection by design
+  // (internal/sensitive servers must not reach external APIs) — hide the
+  // section entirely for those tabs.
+  const activeTab = tabs.get(activeTabId);
+  if (activeTab && getTabProvider(activeTab) !== 'copilot') {
+    if (section) section.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
   if (mcpServers.length === 0) {
     if (section) section.style.display = 'none';
     if (countEl) countEl.textContent = '';
@@ -3535,9 +4289,64 @@ function initChatInput() {
     renderSessions(filterSessions());
   });
 
-  document.getElementById('btnAddTab').addEventListener('click', () => {
-    createTab('🤖 Copilot');
+  document.getElementById('btnAddTab').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openAddTabProviderMenu(e.currentTarget);
   });
+}
+
+/**
+ * Opens the provider chooser anchored to the "+" new-tab button. Selecting a
+ * provider creates a new tab pre-set to that provider's default model (the
+ * model implies the provider; switching providers within a tab is not offered
+ * because it would discard the tab's conversation).
+ * @param {HTMLElement} btn - The "+" button.
+ */
+function openAddTabProviderMenu(btn) {
+  const existing = document.querySelector('.provider-add-dropdown');
+  if (existing) { existing.remove(); return; }
+
+  const dropdown = document.createElement('div');
+  // Own panel class (fixed-positioned) — not .model-dropdown, whose
+  // bottom/animation rules conflict with fixed anchoring under the "+".
+  dropdown.className = 'provider-add-dropdown';
+  const rect = btn.getBoundingClientRect();
+  // Right-align to the button so it doesn't overflow the window edge.
+  dropdown.style.top = `${rect.bottom + 4}px`;
+  dropdown.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+
+  let closeHandler = null;
+  const close = () => {
+    dropdown.remove();
+    if (closeHandler) { document.removeEventListener('click', closeHandler, true); closeHandler = null; }
+  };
+
+  PROVIDERS.forEach(p => {
+    const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const item = document.createElement('div');
+    item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
+    let badge = providerStageBadge(p.id);
+    if (!p.active) badge += ' <span class="model-dropdown__hint">in Vorbereitung</span>';
+    else if (!hasKey) badge += ' <span class="model-dropdown__hint">Key nötig</span>';
+    item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
+    item.addEventListener('click', () => {
+      if (!p.active) {
+        showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
+        return;
+      }
+      close();
+      const label = p.id === 'copilot' ? '🤖 Copilot' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
+      createTab(label, getDefaultModelForProvider(p.id));
+      if (p.id !== 'copilot' && !hasKey) {
+        showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
+      }
+    });
+    dropdown.appendChild(item);
+  });
+
+  document.body.appendChild(dropdown);
+  closeHandler = (ev) => { if (!dropdown.contains(ev.target) && ev.target !== btn) close(); };
+  setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
 }
 
 /**
@@ -3594,9 +4403,9 @@ function initSlashButtons() {
     const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
     try {
       for (const todo of openTodos) {
-        await copilot.todos.update(tab.sessionId, todo.id, { status: 'done' });
+        await copilot.todos.update(tab.cwd, todo.id, { status: 'done' });
       }
-      await loadTodos(tab.sessionId);
+      await loadTodos(tab.cwd);
     } catch (err) {
       showNotification(`Fehler: ${err.message}`, 'error');
       return;
@@ -3627,7 +4436,7 @@ function initSettings() {
   const settSound = document.getElementById('settSound');
   const settDevMode = document.getElementById('settDevMode');
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
-  const settDefaultModel = document.getElementById('settDefaultModel');
+  const settDefaultProvider = document.getElementById('settDefaultProvider');
 
   document.querySelectorAll('.settings__tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -3650,13 +4459,8 @@ function initSettings() {
   applyDevMode(savedSettings.devMode === true);
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
 
-  // Populate the default-model dropdown from the shared model list.
-  if (settDefaultModel) {
-    settDefaultModel.innerHTML = getAvailableModels()
-      .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`)
-      .join('');
-    settDefaultModel.value = getDefaultModelId();
-  }
+  // Default provider (#3) + default model per provider (#2).
+  renderDefaultModelSettings();
 
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
@@ -3682,7 +4486,9 @@ function initSettings() {
   settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
   settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
   settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
-  settDefaultModel?.addEventListener('change', () => saveSetting('defaultModel', settDefaultModel.value));
+  settDefaultProvider?.addEventListener('change', () => {
+    saveSetting('defaultProvider', settDefaultProvider.value);
+  });
 
   renderDeniedTools();
   renderExtraDirs();
@@ -3762,6 +4568,8 @@ function initSettings() {
   document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
   initShortcutsSettings();
+
+  document.querySelector('.settings__tab[data-tab="providers"]')?.addEventListener('click', renderProvidersSettings);
 
   // Dev tools: Onboarding toggle
   async function loadDevOnboardingState() {
@@ -3885,6 +4693,215 @@ function initTestRunner() {
   document.getElementById('btnRunTests')?.addEventListener('click', runTests);
   document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
   document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
+}
+
+// ── API-Provider Settings ────────────────────────────────────
+
+/** Providers shown in the settings panel. `active` ones have a working backend. */
+const PROVIDER_SETTINGS = [
+  {
+    id: 'copilot', active: true, cli: true,
+    info: [
+      'GitHub Copilot – voll agentisch über die Copilot CLI.',
+      '',
+      'Als einziger Provider mit MCP-Server-Unterstützung.',
+      'Anmeldung über die CLI (Terminal), kein API-Key.',
+      'Benötigt die installierte „copilot"-CLI.',
+    ].join('\n'),
+  },
+  {
+    id: 'anthropic', active: true, placeholder: 'sk-ant-…',
+    info: [
+      'Claude – voll agentisch (direkte API).',
+      '',
+      'Tools:',
+      '• Shell (Befehle ausführen)',
+      '• Datei lesen / schreiben / bearbeiten',
+      '• Verzeichnis auflisten, glob, grep',
+      '',
+      'Besonderheiten:',
+      '• Skills, Agents & Instructions werden mitgegeben',
+      '• Prompt-Caching + adaptives Thinking',
+      '• Exakte Token-/Kostenabrechnung',
+    ].join('\n'),
+  },
+  {
+    id: 'gemini', active: true, placeholder: 'AIza…',
+    info: [
+      'Gemini – recherche-orientiert (direkte API).',
+      '',
+      'Zwei Modi pro Tab umschaltbar (nicht gleichzeitig):',
+      '🔍 Recherche: Live-Google-Suche mit Quellenangaben',
+      '📁 Dateien: lesen / schreiben / bearbeiten, Verzeichnis, glob, grep',
+      '',
+      'Besonderheiten:',
+      '• Kein Shell-Zugriff',
+      '• Keine Skills/Agents/Instructions',
+      '• Suche & Datei-Tools schließen sich pro Anfrage aus',
+    ].join('\n'),
+  },
+  {
+    id: 'openai', active: true, placeholder: 'sk-…', baseUrl: true, defaultBaseUrl: 'https://api.openai.com/v1',
+    info: [
+      'OpenAI – voll agentisch (Chat Completions + Function Calling).',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+      'Base-URL überschreibbar (z.B. für OpenRouter).',
+    ].join('\n'),
+  },
+  {
+    id: 'glm', active: true, placeholder: 'xxxx.xxxx (Zhipu API-Key)', baseUrl: true, defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    info: [
+      'GLM (Zhipu) – voll agentisch über OpenAI-kompatible API.',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+    ].join('\n'),
+  },
+  {
+    id: 'ollama', active: true, placeholder: '(kein Key nötig)', keyless: true, baseUrl: true, defaultBaseUrl: 'http://localhost:11434/v1',
+    info: [
+      'Ollama – lokale Modelle, kein API-Key, kostenlos.',
+      '',
+      'Tools: Shell, Datei lesen/schreiben/bearbeiten, list/glob/grep.',
+      'Base-URL = Adresse deines Ollama-Servers (Standard localhost:11434).',
+    ].join('\n'),
+  },
+];
+
+/**
+ * (Re)render the API-provider key settings panel: one row per provider with a
+ * masked input, save/delete buttons and the stored/empty status.
+ */
+async function renderProvidersSettings() {
+  const list = document.getElementById('providersKeyList');
+  if (!list) return;
+  await refreshProviderStatus();
+
+  document.getElementById('providersUnavailable').style.display =
+    _providerStatus.available ? 'none' : 'block';
+
+  list.innerHTML = '';
+  for (const p of PROVIDER_SETTINGS) {
+    if (p.cli) { renderCopilotProviderRow(list, p); continue; }
+    const hasKey = Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const status = p.keyless ? 'kein Key nötig' : (hasKey ? '● hinterlegt' : '○ leer');
+    const row = document.createElement('div');
+    row.className = 'providers-row';
+    const keyControls = p.keyless ? '' : `
+      <div class="providers-row__controls">
+        <input type="password" class="providers-row__input" placeholder="${escapeAttr(p.placeholder)}" autocomplete="off" />
+        <button class="action-btn providers-row__save">Speichern</button>
+        <button class="action-btn providers-row__delete" ${hasKey ? '' : 'disabled'}>Löschen</button>
+      </div>`;
+    const baseUrlControls = p.baseUrl ? `
+      <div class="providers-row__controls">
+        <input type="text" class="providers-row__baseurl" placeholder="${escapeAttr(p.defaultBaseUrl || '')}" autocomplete="off" value="${escapeAttr(getProviderBaseUrl(p.id))}" />
+        <button class="action-btn providers-row__save-url">Base-URL speichern</button>
+      </div>` : '';
+    row.innerHTML = `
+      <div class="providers-row__head">
+        <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+        ${providerStageBadge(p.id).trim()}
+        <span class="providers-row__status ${hasKey || p.keyless ? 'is-set' : ''}">${status}</span>
+        ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
+      </div>
+      ${keyControls}
+      ${baseUrlControls}`;
+
+    if (!p.keyless) {
+      const input = row.querySelector('.providers-row__input');
+      row.querySelector('.providers-row__save').addEventListener('click', async () => {
+        const key = input.value.trim();
+        if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
+        const res = await window.copilot.providers.setKey(p.id, key);
+        if (res.success) {
+          input.value = '';
+          showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
+          renderProvidersSettings();
+          refreshProviderModels(p.id); // discover this provider's models now that it has a key
+        } else {
+          showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+        }
+      });
+      row.querySelector('.providers-row__delete').addEventListener('click', async () => {
+        await window.copilot.providers.deleteKey(p.id);
+        showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
+        renderProvidersSettings();
+      });
+    }
+
+    if (p.baseUrl) {
+      const urlInput = row.querySelector('.providers-row__baseurl');
+      row.querySelector('.providers-row__save-url').addEventListener('click', () => {
+        saveProviderBaseUrl(p.id, urlInput.value.trim());
+        showNotification(`${PROVIDER_LABELS[p.id]} Base-URL gespeichert.`, 'success');
+      });
+    }
+
+    list.appendChild(row);
+  }
+}
+
+/** Per-provider base URL override (empty → provider default). */
+function getProviderBaseUrl(provider) {
+  return (getSettings().providerBaseUrls || {})[provider] || '';
+}
+function saveProviderBaseUrl(provider, url) {
+  const map = { ...(getSettings().providerBaseUrls || {}) };
+  if (url) map[provider] = url; else delete map[provider];
+  saveSetting('providerBaseUrls', map);
+}
+
+/**
+ * Render the Copilot row in the provider settings — presented like the other
+ * providers, but driven by the CLI status (installed? logged in?) instead of an
+ * API key. Shows an install hint, "Anmelden" (terminal login) and re-check.
+ */
+async function renderCopilotProviderRow(list, p) {
+  const row = document.createElement('div');
+  row.className = 'providers-row';
+  row.innerHTML = `
+    <div class="providers-row__head">
+      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS.copilot)}</span>
+      ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+      <span class="providers-row__status">… wird geprüft</span>
+    </div>
+    <div class="providers-row__controls"></div>`;
+  list.appendChild(row);
+
+  const statusEl = row.querySelector('.providers-row__status');
+  const controls = row.querySelector('.providers-row__controls');
+
+  let status = { cliInstalled: false, authenticated: false, user: null };
+  try { status = await window.copilot.auth.status(); } catch (_) { /* old build / offline */ }
+
+  const addBtn = (label, primary, onClick) => {
+    const b = document.createElement('button');
+    b.className = 'action-btn' + (primary ? ' action-btn--primary' : '');
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    controls.appendChild(b);
+  };
+
+  if (!status.cliInstalled) {
+    statusEl.textContent = '⚠ CLI nicht gefunden';
+    const hint = document.createElement('span');
+    hint.className = 'providers-row__hint';
+    hint.textContent = 'Bitte die „copilot"-CLI installieren und die App neu starten.';
+    controls.appendChild(hint);
+  } else if (status.authenticated) {
+    statusEl.textContent = '● eingeloggt' + (status.user ? ' als ' + status.user : '');
+    statusEl.classList.add('is-set');
+    addBtn('Neu anmelden', false, () => window.copilot.auth.login());
+  } else {
+    statusEl.textContent = '○ CLI installiert, nicht eingeloggt';
+    addBtn('Anmelden', true, async () => {
+      await window.copilot.auth.login();
+      showNotification('Login im Terminal abschließen, danach „Status prüfen".', 'info');
+    });
+    addBtn('Status prüfen', false, () => renderProvidersSettings());
+  }
 }
 
 /**
@@ -4397,6 +5414,120 @@ function initDragDrop() {
  * Initialize the global tooltip system. Tooltips appear for any element
  * with a `data-tooltip` attribute after a short hover delay.
  */
+// ── Self-Update (git-basiert) ────────────────────────────────
+
+/** True while an update check or apply is in flight (prevents double-clicks). */
+let _updateBusy = false;
+/** Version the user dismissed — suppresses re-nagging for the same version on silent checks. */
+let _dismissedUpdateVersion = null;
+/** Interval between background update checks while the app runs (6 h). */
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Check for a newer release. On startup this runs silently (only surfaces a
+ * banner if an update exists); the settings button passes silent=false to also
+ * report "up to date" / errors.
+ * @param {{silent?: boolean}} [opts]
+ */
+async function checkForUpdates({ silent = true } = {}) {
+  if (_updateBusy) return;
+  if (!window.copilot?.updates) return;
+  _updateBusy = true;
+  const statusEl = document.getElementById('updateCheckStatus');
+  if (!silent && statusEl) statusEl.textContent = 'Suche…';
+  try {
+    const res = await copilot.updates.check();
+    if (res.updateAvailable) {
+      // On silent (background) checks, don't re-show a banner the user already
+      // dismissed for this exact version; the settings button (silent=false)
+      // always shows it again.
+      if (silent && res.latestVersion === _dismissedUpdateVersion) {
+        if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+      } else {
+        showUpdateBanner(res.currentVersion, res.latestVersion);
+        if (statusEl) statusEl.textContent = `Neue Version v${res.latestVersion} verfügbar.`;
+      }
+    } else if (!silent) {
+      if (res.ok) {
+        if (statusEl) statusEl.textContent = `Aktuell (v${res.currentVersion}).`;
+        showNotification(`Du nutzt bereits die neueste Version (v${res.currentVersion}).`, 'success');
+      } else {
+        const msg = updateReasonText(res.reason, res.error);
+        if (statusEl) statusEl.textContent = msg;
+        showNotification('Update-Prüfung fehlgeschlagen: ' + msg, 'warning');
+      }
+    }
+  } catch (e) {
+    if (!silent) showNotification('Update-Prüfung fehlgeschlagen: ' + (e?.message || e), 'error');
+  } finally {
+    _updateBusy = false;
+  }
+}
+
+/** Human-readable explanation for a non-ok check/apply reason. */
+function updateReasonText(reason, error) {
+  switch (reason) {
+    case 'not-a-git-checkout': return 'App läuft nicht aus einem Git-Checkout.';
+    case 'git-failed': return 'Git-Abfrage fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    case 'dirty-working-tree': return 'Lokale, nicht gespeicherte Änderungen vorhanden — bitte committen oder verwerfen.';
+    case 'pull-failed': return 'git pull fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    case 'npm-install-failed': return 'npm install fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    default: return error || 'Unbekannter Fehler.';
+  }
+}
+
+/** Show the top update banner (idempotent — replaces any existing one). */
+function showUpdateBanner(currentVersion, latestVersion) {
+  document.getElementById('updateBanner')?.remove();
+  const bar = document.createElement('div');
+  bar.id = 'updateBanner';
+  bar.className = 'update-banner';
+  bar.innerHTML = `
+    <span class="update-banner__text">🔄 Neue Version <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
+    <button class="update-banner__btn" id="btnApplyUpdate">Herunterladen & Neustarten</button>
+    <button class="update-banner__close" id="btnDismissUpdate" aria-label="Schließen">✕</button>`;
+  document.body.appendChild(bar);
+  document.getElementById('btnDismissUpdate').addEventListener('click', () => {
+    _dismissedUpdateVersion = latestVersion; // don't re-nag on background checks
+    bar.remove();
+  });
+  document.getElementById('btnApplyUpdate').addEventListener('click', () => applyUpdate(bar));
+}
+
+/** Apply the update: confirm, run via main, handle failure reasons. */
+async function applyUpdate(bar) {
+  if (_updateBusy) return;
+  const btn = document.getElementById('btnApplyUpdate');
+  _updateBusy = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Wird aktualisiert…'; }
+  try {
+    const res = await copilot.updates.apply();
+    if (res.ok) {
+      if (btn) btn.textContent = 'Neustart…';
+      showNotification('Update geladen' + (res.depsInstalled ? ' (inkl. Abhängigkeiten)' : '') + ' — App startet neu.', 'success');
+      // Main process relaunches shortly; nothing else to do here.
+    } else {
+      const msg = updateReasonText(res.reason, res.error);
+      showNotification('Update fehlgeschlagen: ' + msg, 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+    }
+  } catch (e) {
+    showNotification('Update fehlgeschlagen: ' + (e?.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+  } finally {
+    _updateBusy = false;
+  }
+}
+
+/** Wire the settings "check for updates" button and run the silent startup check. */
+function initUpdateChecker() {
+  document.getElementById('btnCheckUpdates')?.addEventListener('click', () => checkForUpdates({ silent: false }));
+  // Silent check shortly after startup so it never blocks the UI, then
+  // periodically while the app stays open.
+  setTimeout(() => checkForUpdates({ silent: true }), 3000);
+  setInterval(() => checkForUpdates({ silent: true }), UPDATE_CHECK_INTERVAL_MS);
+}
+
 function initTooltips() {
   const tooltip = document.createElement('div');
   tooltip.className = 'js-tooltip';
@@ -4500,7 +5631,7 @@ function showOnboardingStep(step) {
   if (step === 1) {
     renderCwdStep(body, btnNext);
   } else if (step === 2) {
-    renderLoginStep(body, btnNext);
+    renderProviderStep(body, btnNext);
   } else if (step === 3) {
     renderFolderStep(body, btnNext);
   } else if (step === 4) {
@@ -4518,7 +5649,7 @@ async function renderCwdStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-cwd">
       <h2 class="onboarding-cwd__title">📂 Arbeitsverzeichnis</h2>
-      <p class="onboarding-cwd__desc">Wähle das Verzeichnis, in dem Copilot Desktop arbeiten soll. Dort werden deine Sessions und Dateien gespeichert.</p>
+      <p class="onboarding-cwd__desc">Wähle das Verzeichnis, in dem Agent Desktop arbeiten soll. Dort werden deine Sessions und Dateien gespeichert.</p>
       <div id="onboarding-cwd-status" class="onboarding-cwd__status">
         <span class="onboarding-login__spinner"></span> Lade aktuelles Verzeichnis…
       </div>
@@ -4556,43 +5687,96 @@ async function renderCwdStep(body, btnNext) {
 }
 
 /**
- * Render the GitHub Copilot login check/prompt step.
- * @param {HTMLElement} body - Container element for step content.
- * @param {HTMLButtonElement} btnNext - The "Next" button to enable when authenticated.
- * @returns {Promise<void>}
+ * Render the provider-choice step: the user picks which provider to start with
+ * (Copilot OR an API provider OR Ollama). Copilot is no longer mandatory — any
+ * choice lets the user continue. The choice sets settings.defaultProvider.
+ * @param {HTMLElement} body
+ * @param {HTMLButtonElement} btnNext
  */
-async function renderLoginStep(body, btnNext) {
+function renderProviderStep(body, btnNext) {
+  const choices = [
+    { id: 'copilot', label: '🔌 GitHub Copilot', sub: 'CLI-Login, MCP-Unterstützung' },
+    { id: 'anthropic', label: '🟣 Anthropic', sub: 'API-Key (Claude)' },
+    { id: 'gemini', label: '🔷 Google Gemini', sub: 'API-Key, Live-Suche' },
+    { id: 'openai', label: '🟢 OpenAI', sub: 'API-Key (GPT)' },
+    { id: 'glm', label: '🟡 GLM (Zhipu)', sub: 'API-Key' },
+    { id: 'ollama', label: '💻 Ollama', sub: 'lokal, kein Key' },
+  ];
+  const current = getDefaultProvider();
   body.innerHTML = `
     <div class="onboarding-login">
-      <h2 class="onboarding-login__title">🔐 GitHub Copilot Login</h2>
-      <p class="onboarding-login__desc">Für die Nutzung von Copilot Desktop benötigst du einen aktiven GitHub Copilot Account. Der Login erfolgt über die Copilot CLI.</p>
-      <div class="onboarding-login__status" id="onboarding-login-status">
-        <span class="onboarding-login__spinner"></span> Prüfe Login-Status…
+      <h2 class="onboarding-login__title">🧩 Provider wählen</h2>
+      <p class="onboarding-login__desc">Womit möchtest du starten? Du kannst das später jederzeit in den Einstellungen ändern und weitere Provider hinzufügen.</p>
+      <div class="onboarding-provider-grid">
+        ${choices.map(c => `
+          <button class="onboarding-provider-card${c.id === current ? ' onboarding-provider-card--active' : ''}" data-provider="${c.id}">
+            <span class="onboarding-provider-card__label">${escapeHtml(c.label)}</span>
+            <span class="onboarding-provider-card__sub">${escapeHtml(c.sub)}</span>
+          </button>`).join('')}
       </div>
+      <div class="onboarding-provider-detail" id="onboarding-provider-detail"></div>
     </div>`;
 
-  try {
-    const result = await copilot.auth.check();
-    const statusEl = document.getElementById('onboarding-login-status');
-    if (!statusEl) return;
+  const detail = document.getElementById('onboarding-provider-detail');
+  const select = (provider) => {
+    saveSetting('defaultProvider', provider);
+    body.querySelectorAll('.onboarding-provider-card').forEach(el =>
+      el.classList.toggle('onboarding-provider-card--active', el.dataset.provider === provider));
+    // A provider is chosen → the user may continue (login/key are optional and
+    // can be completed here or later in settings).
+    btnNext.disabled = false;
+    renderProviderDetail(detail, provider);
+  };
 
-    if (result.authenticated) {
-      const user = result.user ? escapeHtml(result.user) : '';
-      statusEl.className = 'onboarding-login__status onboarding-login__status--ok';
-      statusEl.innerHTML = `✅ Eingeloggt${user ? ' als <strong>' + user + '</strong>' : ''}`;
-      btnNext.disabled = false;
+  body.querySelectorAll('.onboarding-provider-card').forEach(card => {
+    card.addEventListener('click', () => select(card.dataset.provider));
+  });
+
+  // Pre-select the current default so "Weiter" is reachable immediately.
+  select(current);
+}
+
+/** Render the provider-specific sub-area (Copilot login / API key / Ollama info). */
+async function renderProviderDetail(container, provider) {
+  if (provider === 'copilot') {
+    container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Prüfe Copilot-Status…</div>';
+    let status = { cliInstalled: false, authenticated: false, user: null };
+    try { status = await window.copilot.auth.status(); } catch (_) { /* ignore */ }
+    if (!status.cliInstalled) {
+      container.innerHTML = '<div class="onboarding-login__status onboarding-login__status--warn">⚠️ Copilot-CLI nicht gefunden. Installiere die „copilot"-CLI oder wähle einen API-Provider. Du kannst trotzdem fortfahren.</div>';
+    } else if (status.authenticated) {
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--ok">✅ Eingeloggt${status.user ? ' als <strong>' + escapeHtml(status.user) + '</strong>' : ''}</div>`;
     } else {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
-      statusEl.innerHTML = `⚠️ Nicht eingeloggt. <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button> <button class="action-btn onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
-      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
-      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
+      container.innerHTML = '<div class="onboarding-login__status onboarding-login__status--warn">⚠️ Nicht eingeloggt. <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Jetzt einloggen</button> <button class="action-btn onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button></div>';
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderProviderDetail(container, 'copilot'));
     }
-  } catch (e) {
-    const statusEl = document.getElementById('onboarding-login-status');
-    if (statusEl) {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-      statusEl.innerHTML = `❌ Prüfung fehlgeschlagen: ${escapeHtml(e.message)}`;
-    }
+  } else if (provider === 'ollama') {
+    container.innerHTML = '<div class="onboarding-login__status">💻 Ollama läuft lokal — kein API-Key nötig. Stelle sicher, dass der Ollama-Server läuft (Standard: localhost:11434).</div>';
+  } else {
+    // API providers: inline key entry (reuses the secure store).
+    const label = PROVIDER_LABELS[provider] || provider;
+    const stored = Boolean(_providerStatus.keyed && _providerStatus.keyed[provider]);
+    container.innerHTML = `
+      <div class="onboarding-login__status">
+        🔑 ${escapeHtml(label)}: ${stored ? 'Key bereits hinterlegt.' : 'API-Key eingeben (optional — auch später in den Einstellungen möglich).'}
+      </div>
+      <div class="onboarding-provider-key">
+        <input type="password" id="onboardingProviderKey" class="onboarding-role__input" placeholder="API-Key" autocomplete="off" />
+        <button class="action-btn action-btn--primary" id="btnOnboardingSaveKey">Speichern</button>
+      </div>`;
+    document.getElementById('btnOnboardingSaveKey').addEventListener('click', async () => {
+      const key = document.getElementById('onboardingProviderKey').value.trim();
+      if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
+      const res = await window.copilot.providers.setKey(provider, key);
+      if (res.success) {
+        await refreshProviderStatus();
+        showNotification(`${label}-Key gespeichert.`, 'success');
+        renderProviderDetail(container, provider);
+      } else {
+        showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+      }
+    });
   }
 }
 
@@ -4602,27 +5786,23 @@ async function renderLoginStep(body, btnNext) {
  * @param {HTMLButtonElement} btnNext - The "Next" button to enable on success.
  * @returns {Promise<void>}
  */
-async function handleOnboardingLogin(btnNext) {
-  const statusEl = document.getElementById('onboarding-login-status');
-  if (!statusEl) return;
-  statusEl.className = 'onboarding-login__status';
-  statusEl.innerHTML = '<span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.';
+async function handleOnboardingLogin() {
+  const container = document.getElementById('onboarding-provider-detail');
+  if (!container) return;
+  container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.</div>';
 
   try {
     const result = await copilot.auth.login();
     if (result.success) {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--warn';
-      statusEl.innerHTML = `ℹ️ Login-Fenster geöffnet. Bitte melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button>`;
-      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderLoginStep(document.getElementById('onboarding-body'), btnNext));
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--warn">ℹ️ Login-Fenster geöffnet. Melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button></div>`;
+      document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderProviderDetail(container, 'copilot'));
     } else {
-      statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-      statusEl.innerHTML = `❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
-      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+      container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--error">❌ Login fehlgeschlagen: ${escapeHtml(result.error || 'Unbekannter Fehler')} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button></div>`;
+      document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
     }
   } catch (e) {
-    statusEl.className = 'onboarding-login__status onboarding-login__status--error';
-    statusEl.innerHTML = `❌ Fehler: ${escapeHtml(e.message)} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button>`;
-    document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin(btnNext));
+    container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--error">❌ Fehler: ${escapeHtml(e.message)} <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingLogin">Erneut versuchen</button></div>`;
+    document.getElementById('btnOnboardingLogin').addEventListener('click', () => handleOnboardingLogin());
   }
 }
 
@@ -4637,7 +5817,7 @@ async function renderFolderStep(body, btnNext) {
   body.innerHTML = `
     <div class="onboarding-folders">
       <h2 class="onboarding-folders__title">📁 Ordner einrichten</h2>
-      <p class="onboarding-folders__desc">Copilot Desktop benötigt einige Ordner für Skills, Agents, Sessions und Instructions. Diese werden in deinem Home-Verzeichnis angelegt.</p>
+      <p class="onboarding-folders__desc">Agent Desktop benötigt einige Ordner für Skills, Agents, Sessions und Instructions. Diese werden in deinem Home-Verzeichnis angelegt.</p>
       <ul class="onboarding-folder-list" id="onboarding-folder-list">
         <li class="onboarding-folder-item"><span class="onboarding-login__spinner"></span> Prüfe…</li>
       </ul>
@@ -5092,6 +6272,8 @@ async function finishOnboarding() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
+  initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
+  refreshAllProviderModels(); // discover direct-API provider models in the background
   applyTheme(getCurrentTheme());
   initCopilotIPC();
   initResize();
@@ -5127,6 +6309,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTooltips();
   initTabModelSelector();
   initTabModeSelector();
+  initGeminiModeToggle();
   initContextInfo();
   initOnboarding();
+  refreshProviderStatus();
+  initUpdateChecker();
+  initDynamicPricing();
 });

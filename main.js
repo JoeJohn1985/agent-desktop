@@ -10,11 +10,14 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', 'copilot-desktop');
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
-const { readCheckpoints, readPlan, readTodos, writeTodos, readRecentMessages } = require('./src/sessions');
+const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
+const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory } = require('./src/agents');
 const { AcpClient } = require('./src/acp-client');
+const { getModelProvider, createApiBackend } = require('./src/providers');
+const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 
@@ -77,8 +80,8 @@ const folderConfig = readFolderConfig();
 // ── Globals ──────────────────────────────────────────────────
 /** @type {BrowserWindow|null} Main application window */
 let mainWindow = null;
-/** @type {Map<number, import('./src/acp-client').AcpClient>} tabId → AcpClient instance */
-const acpClients = new Map();
+/** @type {Map<number, object>} tabId → ChatBackend instance (AcpClient or a direct-API backend) */
+const backends = new Map();
 /** @type {number} Auto-incrementing tab identifier */
 let nextTabId = 1;
 /** @type {string} Directory for Copilot session state files */
@@ -131,7 +134,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 500,
-    title: 'Copilot Desktop',
+    title: 'Agent Desktop',
     icon: appIcon,
     backgroundColor: '#f5f3ef',
     frame: false,
@@ -162,8 +165,8 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    acpClients.forEach(client => client.destroy().catch(() => {}));
-    acpClients.clear();
+    backends.forEach(client => client.destroy().catch(() => {}));
+    backends.clear();
   });
 }
 
@@ -184,9 +187,23 @@ function createWindow() {
  * @returns {Promise<number>} The tab ID
  */
 async function sendCopilotPrompt(tabId, prompt, options = {}) {
-  let client = acpClients.get(tabId);
-
   const cwd = options.cwd || COPILOT_CWD;
+  const provider = getModelProvider(options.model || '');
+
+  let client = backends.get(tabId);
+
+  // If the selected provider changed for this tab, tear down the old backend.
+  if (client && client.__provider && client.__provider !== provider) {
+    try { await client.destroy(); } catch (_) { /* ignore */ }
+    backends.delete(tabId);
+    client = null;
+  }
+
+  if (provider !== 'copilot') {
+    return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
+  }
+
+  // ── Copilot CLI (ACP) path ───────────────────────────────────
   const clientOptions = {
     cwd,
     copilotBin: COPILOT_BIN,
@@ -205,7 +222,8 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
 
   if (!client) {
     client = new AcpClient(tabId, sendToRenderer, clientOptions);
-    acpClients.set(tabId, client);
+    client.__provider = 'copilot';
+    backends.set(tabId, client);
   } else {
     // Update options if they changed (e.g., model switch)
     client.updateOptions(clientOptions);
@@ -237,6 +255,79 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   return tabId;
 }
 
+/**
+ * Sends a prompt to a direct-API backend (Anthropic/Gemini/OpenAI). Constructs
+ * the backend on first use with the decrypted API key from the secure store.
+ * @param {number} tabId
+ * @param {string} prompt
+ * @param {Object} options - includes provider, cwd, model, deniedTools, existing
+ * @returns {Promise<number>}
+ */
+async function sendApiPrompt(tabId, prompt, options) {
+  const { provider, cwd } = options;
+  // Ollama runs locally and needs no API key.
+  const KEYLESS_PROVIDERS = new Set(['ollama']);
+  const apiKey = secureStore.getKey(provider);
+  if (!apiKey && !KEYLESS_PROVIDERS.has(provider)) {
+    throw new Error(`Kein API-Key für ${provider} hinterlegt. Bitte in den Einstellungen unter „API-Provider" eintragen.`);
+  }
+
+  // Compose the system context (instructions + active agents + active skills)
+  // from their .md files — for direct APIs there is no CLI to read them.
+  // Only Anthropic uses it; Gemini is intentionally kept context-light.
+  let systemContext = '';
+  try {
+    const { composeSystemContext } = require('./src/providers/system-context');
+    // Full-agentic providers get the project context (instructions/agents/skills);
+    // Gemini is intentionally kept context-light.
+    const CONTEXT_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+    if (CONTEXT_PROVIDERS.has(provider)) systemContext = composeSystemContext({
+      cwd,
+      skillsDir: folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
+      agentsDir: folderConfig.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),
+      instructionsFile: folderConfig.instructionsFile,
+      activeSkills: options.activeSkills || [],
+      activeAgents: options.activeAgents || [],
+    });
+  } catch (e) {
+    console.warn('[api] composeSystemContext failed:', e?.message);
+  }
+
+  const backendOptions = {
+    cwd,
+    model: options.model,
+    deniedTools: options.deniedTools || [],
+    apiKey,
+    baseURL: options.baseURL,
+    systemContext,
+    geminiMode: options.geminiMode,
+  };
+
+  let client = options.existing || backends.get(tabId);
+  if (!client) {
+    client = createApiBackend(provider, tabId, sendToRenderer, backendOptions);
+    if (!client) throw new Error(`Provider „${provider}" wird noch nicht unterstützt.`);
+    client.__provider = provider;
+    backends.set(tabId, client);
+  } else {
+    client.updateOptions(backendOptions);
+  }
+
+  if (client.state === 'dead') await client.start();
+
+  if (!client.sessionId) {
+    if (options.sessionId) await client.loadSession(options.sessionId, cwd);
+    else await client.newSession(cwd);
+  }
+
+  client.prompt(prompt).catch((err) => {
+    if (err.message === 'Cancelled') return;
+    console.error(`[api:tab${tabId}] prompt error:`, err.message);
+  });
+
+  return tabId;
+}
+
 // ── IPC Handlers ─────────────────────────────────────────────
 
 /**
@@ -263,7 +354,7 @@ ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
 
 /** @ipc copilot:silentCommand — Runs a slash command silently and returns the text response. */
 ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
   try {
     const text = await client.silentCommand(command);
@@ -277,6 +368,63 @@ ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
 ipcMain.handle('copilot:newTab', () => {
   return nextTabId++;
+});
+
+// ── Provider API keys (secure store) ─────────────────────────
+/** @ipc providers:status — Whether OS encryption is available + which providers have a stored key. */
+ipcMain.handle('providers:status', () => {
+  const keyed = {};
+  for (const p of secureStore.KNOWN_PROVIDERS) keyed[p] = secureStore.hasKey(p);
+  return { available: secureStore.isAvailable(), keyed };
+});
+
+/** @ipc providers:setKey — Stores an encrypted API key for a provider. Never returns the key. */
+ipcMain.handle('providers:setKey', (_event, provider, key) => {
+  if (!secureStore.KNOWN_PROVIDERS.includes(provider)) {
+    return { success: false, error: 'Unbekannter Provider' };
+  }
+  try {
+    secureStore.setKey(provider, key);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/** @ipc providers:deleteKey — Removes the stored API key for a provider. */
+ipcMain.handle('providers:deleteKey', (_event, provider) => {
+  secureStore.deleteKey(provider);
+  return { success: true };
+});
+
+/**
+ * @ipc providers:listModels — Discover a provider's currently-offered models from
+ * its API. Best-effort: returns {ok:false} on missing key / network error instead
+ * of throwing, so the renderer can silently fall back to the hardcoded list.
+ */
+ipcMain.handle('providers:listModels', async (_event, provider, baseURL) => {
+  try {
+    const modelDiscovery = require('./src/model-discovery');
+    const KEYLESS_PROVIDERS = new Set(['ollama']);
+    const apiKey = secureStore.getKey(provider);
+    if (!apiKey && !KEYLESS_PROVIDERS.has(provider)) {
+      return { ok: false, reason: 'no-key', models: [] };
+    }
+    const models = await modelDiscovery.listModels(provider, { apiKey, baseURL });
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, reason: 'error', error: e?.message || String(e), models: [] };
+  }
+});
+
+/** @ipc providers:loadSessionHistory — Persisted direct-API conversation history for a session. */
+ipcMain.handle('providers:loadSessionHistory', (_event, sessionId) => {
+  try {
+    const data = require('./src/providers/session-store').load(sessionId);
+    return (data && Array.isArray(data.messages)) ? data.messages : [];
+  } catch (_) {
+    return [];
+  }
 });
 
 /** @ipc copilot:getCwd @returns {string} Current working directory */
@@ -313,6 +461,59 @@ ipcMain.handle('copilot:getVersions', async () => {
   return { app: appVersion, cli: cliVersion };
 });
 
+// ── Preis-Fallback-Quelle (LiteLLM) ──────────────────────────
+const pricingSource = require('./src/pricing-source');
+/**
+ * @ipc pricing:getMap — Public price fallback (USD/1M) for models without a
+ * hardcoded price. Cached weekly under ~/.copilot-desktop/. Never throws.
+ * @returns {Promise<Object<string,{input:number,cache:number,output:number}>>}
+ */
+ipcMain.handle('pricing:getMap', async () => {
+  try {
+    return await pricingSource.getPricingMap();
+  } catch (e) {
+    console.warn('[pricing:getMap]', e.message || e);
+    return {};
+  }
+});
+
+// ── Self-Update (git-basiert) ────────────────────────────────
+const updater = require('./src/updater');
+/** Repo root = directory containing this main.js. */
+const REPO_DIR = __dirname;
+
+/**
+ * @ipc updates:check — Checks the remote for a newer release tag.
+ * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>}
+ */
+ipcMain.handle('updates:check', async () => {
+  try {
+    return await updater.checkForUpdate(REPO_DIR);
+  } catch (e) {
+    console.warn('[updates:check] Fehler:', e.message || e);
+    return { ok: false, currentVersion: require('./package.json').version, latestVersion: null, updateAvailable: false, reason: 'exception', error: e.message || String(e) };
+  }
+});
+
+/**
+ * @ipc updates:apply — Pulls the latest `main`, runs npm install if deps
+ * changed, then relaunches the app. Blocks on a dirty working tree.
+ * @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>}
+ */
+ipcMain.handle('updates:apply', async () => {
+  try {
+    const res = await updater.applyUpdate(REPO_DIR);
+    if (res.ok) {
+      // Give the renderer a tick to show its "restarting" state, then relaunch.
+      setTimeout(() => { app.relaunch(); app.exit(0); }, 400);
+    }
+    return res;
+  } catch (e) {
+    console.error('[updates:apply] Fehler:', e.message || e);
+    return { ok: false, reason: 'exception', error: e.message || String(e) };
+  }
+});
+
 /**
  * @ipc copilot:getInstructions — Discovers all copilot-instructions.md files
  * from configured paths, CWD, and home directory.
@@ -344,8 +545,13 @@ ipcMain.handle('copilot:getInstructions', () => {
 
 /** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
 ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (!client) return { success: false, error: 'Kein aktiver Client' };
+  // Direct-API backends read the deny list live per tool call — no restart needed.
+  if (client.__provider && client.__provider !== 'copilot') {
+    client.updateOptions({ deniedTools });
+    return { success: true };
+  }
   const sessionId = client.sessionId;
   if (!sessionId) return { success: false, error: 'Keine aktive Session' };
   try {
@@ -363,7 +569,7 @@ ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedToo
 
 /** @ipc copilot:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('copilot:stop', (_event, tabId) => {
-  const client = acpClients.get(tabId);
+  const client = backends.get(tabId);
   if (client) {
     client.cancel().catch(err => {
       console.warn(`[copilot:stop] cancel error for tab ${tabId}:`, err.message);
@@ -418,12 +624,50 @@ ipcMain.handle('sessions:readRecentMessages', async (_event, sessionId) => {
   return readRecentMessages(safeSessionPath(sessionId), 5);
 });
 
-/** @ipc sessions:delete — Deletes a session directory recursively. @returns {Promise<boolean>} */
+/** @ipc sessions:readAllMessages — Full chronological message history of a session. @param {string} sessionId @returns {Promise<Array>} */
+ipcMain.handle('sessions:readAllMessages', async (_event, sessionId) => {
+  return readAllMessages(safeSessionPath(sessionId));
+});
+
+/**
+ * Backs up a session's todos.json (if present and non-empty) before deletion,
+ * so a manually curated todo list is never lost permanently. Copies go to
+ * ~/.copilot-desktop/deleted-todos/<sessionId>-<timestamp>.json.
+ * @param {string} sessionPath - Absolute path to the session directory.
+ * @param {string} sessionId
+ */
+function backupSessionTodos(sessionPath, sessionId) {
+  try {
+    const todosPath = path.join(sessionPath, 'todos.json');
+    if (!fs.existsSync(todosPath)) return;
+    const raw = fs.readFileSync(todosPath, 'utf-8').trim();
+    if (!raw || raw === '[]') return; // nichts Sinnvolles zu sichern
+    const backupDir = path.join(os.homedir(), '.copilot-desktop', 'deleted-todos');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(backupDir, `${sessionId}-${stamp}.json`), raw, 'utf-8');
+  } catch (e) {
+    console.warn('[sessions:delete] Todo-Backup fehlgeschlagen:', e.message || e);
+  }
+}
+
+/** @ipc sessions:delete — Moves a session directory to the OS trash (recoverable). @returns {Promise<boolean>} */
 ipcMain.handle('sessions:delete', async (_event, sessionId) => {
+  // Also drop any persisted direct-API history for this session.
+  try { require('./src/providers/session-store').remove(sessionId); } catch (_) { /* ignore */ }
   try {
     const sessionPath = safeSessionPath(sessionId);
     if (!fs.existsSync(sessionPath)) return false;
-    fs.rmSync(sessionPath, { recursive: true, force: true });
+    // Insurance: keep a copy of the curated todo list outside the session.
+    backupSessionTodos(sessionPath, sessionId);
+    // Prefer the OS trash so an accidental delete stays recoverable; fall back
+    // to a hard delete only if trashing is unavailable.
+    try {
+      await shell.trashItem(sessionPath);
+    } catch (trashErr) {
+      console.warn('[sessions:delete] Papierkorb nicht verfügbar, lösche hart:', trashErr.message || trashErr);
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
     return true;
   } catch (e) {
     console.warn('[sessions:delete] Fehler:', e.message || e);
@@ -453,74 +697,74 @@ ipcMain.handle('sessions:create', async (_event, name) => {
   return id;
 });
 
-/** @ipc todos:list @returns {Promise<Array<Object>>} All todos for the session */
-// Todos (per session)
-ipcMain.handle('todos:list', async (_event, sessionId) => {
-  return readTodos(safeSessionPath(sessionId));
+/** @ipc todos:list @param {string} cwd @returns {Promise<Array<Object>>} All todos for the project (cwd) */
+// Todos (per project / cwd) — stored as <cwd>/todo/todos.md so they survive
+// session deletion and are shared across sessions in the same directory.
+ipcMain.handle('todos:list', async (_event, cwd) => {
+  return readTodos(cwd);
 });
 
 /**
- * @ipc todos:add — Adds a new todo to a session.
- * @param {string} sessionId
+ * @ipc todos:add — Adds a new todo to a project (cwd).
+ * @param {string} cwd
  * @param {Object} todo - Must contain `text` string property
  * @returns {Promise<Array<Object>>} Updated todo list
  */
-ipcMain.handle('todos:add', async (_event, sessionId, todo) => {
-  if (!todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
+ipcMain.handle('todos:add', async (_event, cwd, todo) => {
+  if (!cwd || !todo || typeof todo !== 'object' || typeof todo.text !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(safeSessionPath(sessionId));
+  const todos = readTodos(cwd);
   todo.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   todo.status = todo.status || 'open';
-  todo.createdAt = new Date().toISOString();
   todos.push(todo);
-  writeTodos(safeSessionPath(sessionId), todos);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /**
  * @ipc todos:update — Merges updates into an existing todo.
- * @param {string} sessionId
+ * @param {string} cwd
  * @param {string} todoId
  * @param {Object} updates - Fields to merge
  * @returns {Promise<Array<Object>>} Updated todo list
  */
-ipcMain.handle('todos:update', async (_event, sessionId, todoId, updates) => {
+ipcMain.handle('todos:update', async (_event, cwd, todoId, updates) => {
   if (typeof todoId !== 'string' || typeof updates !== 'object') {
     return { success: false, error: 'Ungültige Argumente' };
   }
-  const todos = readTodos(safeSessionPath(sessionId));
+  const todos = readTodos(cwd);
   const idx = todos.findIndex(t => t.id === todoId);
   if (idx === -1) return todos;
-  Object.assign(todos[idx], updates, { updatedAt: new Date().toISOString() });
-  writeTodos(safeSessionPath(sessionId), todos);
+  Object.assign(todos[idx], updates);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /** @ipc todos:delete — Removes a todo by ID. @returns {Promise<Array<Object>>} */
-ipcMain.handle('todos:delete', async (_event, sessionId, todoId) => {
-  let todos = readTodos(safeSessionPath(sessionId));
+ipcMain.handle('todos:delete', async (_event, cwd, todoId) => {
+  let todos = readTodos(cwd);
   todos = todos.filter(t => t.id !== todoId);
-  writeTodos(safeSessionPath(sessionId), todos);
+  writeTodos(cwd, todos);
   return todos;
 });
 
 /**
  * @ipc todos:reorder — Reorders todos according to the given ID sequence.
  * Todos not in the list are appended at the end (safety fallback).
- * @param {string} sessionId
+ * @param {string} cwd
  * @param {string[]} orderedIds
  * @returns {Promise<Array<Object>>} Reordered todo list
  */
-ipcMain.handle('todos:reorder', async (_event, sessionId, orderedIds) => {
-  const todos = readTodos(safeSessionPath(sessionId));
+ipcMain.handle('todos:reorder', async (_event, cwd, orderedIds) => {
+  const todos = readTodos(cwd);
   const byId = new Map(todos.map(t => [t.id, t]));
   const reordered = orderedIds.map(id => byId.get(id)).filter(Boolean);
   // Append any todos not in the ordered list (safety)
   for (const t of todos) {
     if (!orderedIds.includes(t.id)) reordered.push(t);
   }
-  writeTodos(safeSessionPath(sessionId), reordered);
+  writeTodos(cwd, reordered);
   return reordered;
 });
 
@@ -1392,26 +1636,75 @@ ipcMain.handle('auth:check', async () => {
 });
 
 /**
- * @ipc auth:login — Opens a detached PowerShell window running `copilot login`.
- * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: null}>}
+ * @ipc copilot:status — Combined Copilot provider status for the settings UI:
+ * whether the CLI is installed (+version) and whether a user is logged in.
+ * @returns {Promise<{cliInstalled: boolean, version: string|null, authenticated: boolean, user: string|null}>}
+ */
+ipcMain.handle('copilot:status', async () => {
+  let cliInstalled = false;
+  let version = null;
+  try {
+    const { execSync } = require('child_process');
+    version = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS, env: buildEnv() }).toString().trim();
+    cliInstalled = true;
+  } catch {
+    /* CLI not installed / not on PATH */
+  }
+  const config = readCopilotConfig();
+  const user = config.lastLoggedInUser;
+  return {
+    cliInstalled,
+    version,
+    authenticated: Boolean(user && user.login),
+    user: (user && user.login) || null,
+  };
+});
+
+/**
+ * @ipc auth:login — Opens a VISIBLE terminal window running `copilot login`
+ * so the user can complete the device-code flow.
+ * @returns {Promise<{success: boolean, pendingInTerminal: boolean, error: string|null}>}
  */
 ipcMain.handle('auth:login', async () => {
-  console.log('[auth:login] Starting copilot login in new terminal window');
-  const psScript = [
-    'Write-Host "Copilot CLI Login" -ForegroundColor Cyan;',
-    'copilot login;',
-    'Write-Host "";',
-    'Write-Host "Dieses Fenster kann jetzt geschlossen werden." -ForegroundColor Green;',
-    'Start-Sleep -Seconds 3',
-  ].join(' ');
-  const child = require('child_process').spawn('powershell.exe', ['-NoLogo', '-Command', psScript], {
-    detached: true,
-    stdio: 'ignore',
-    shell: false,
-    windowsHide: false,
-  });
-  child.unref();
-  return { success: true, pendingInTerminal: true, error: null };
+  console.log('[auth:login] Opening copilot login in a new terminal window');
+  try {
+    if (process.platform === 'win32') {
+      // A bare detached spawn from a GUI app does NOT allocate a visible
+      // console on Windows. Use cmd's `start` (via shell) to pop a real
+      // window, and `-NoExit` so it stays open for the login flow + output.
+      const cmd = 'start "Copilot Login" powershell -NoLogo -NoExit -Command "copilot login"';
+      const child = require('child_process').spawn(cmd, {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      const child = require('child_process').spawn('open', ['-a', 'Terminal', COPILOT_BIN], { detached: true, stdio: 'ignore' });
+      child.unref();
+    } else {
+      // Linux: try a common terminal emulator.
+      const child = require('child_process').spawn('x-terminal-emulator', ['-e', 'copilot', 'login'], { detached: true, stdio: 'ignore' });
+      child.unref();
+    }
+    return { success: true, pendingInTerminal: true, error: null };
+  } catch (err) {
+    console.error('[auth:login]', err.message);
+    return { success: false, pendingInTerminal: false, error: err.message };
+  }
+});
+
+/**
+ * @ipc app:relaunch — Restarts the app. Needed after `copilot login` because the
+ * authentication state is picked up at main-process startup; a renderer reload
+ * alone does not re-establish the Copilot session.
+ */
+ipcMain.handle('app:relaunch', async () => {
+  console.log('[app:relaunch] Relaunching the app');
+  app.relaunch();
+  app.exit(0);
+  return { success: true };
 });
 
 // Window controls
@@ -1509,7 +1802,7 @@ function scanAgents() {
 
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
-  console.log(`[app] Copilot Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
+  console.log(`[app] Agent Desktop v${require('./package.json').version} started (platform: ${process.platform}, arch: ${process.arch})`);
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
   }
@@ -1518,8 +1811,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  acpClients.forEach(client => client.destroy().catch(() => {}));
-  acpClients.clear();
+  backends.forEach(client => client.destroy().catch(() => {}));
+  backends.clear();
   stopImageWatcher();
   closeLogger();
   app.quit();

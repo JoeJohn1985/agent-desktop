@@ -1,6 +1,6 @@
 # Copilot Desktop — Architektur (arc42)
 
-> **Version:** 0.31.0 · **Stand:** Juni 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), marked, highlight.js, jest
+> **Version:** 0.32.0 · **Stand:** Juni 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, marked, highlight.js, jest
 
 ---
 
@@ -181,8 +181,10 @@
 | `renderer/app.js` | **Frontend-Logik** — Chat-UI, Tab-Management, Settings, Kosten-Visualisierung |
 | `renderer/styles.css` | **Alle Styles** — CSS-Variablen, 3 Themes (Light/Dark/GEBIT) |
 | `renderer/modules/*.js` | **UI-Module** — Bilder, Todos, Test-Runner, Session-Tools, Dev-Console, Kosten-Panel |
-| `src/acp-client.js` | **AcpClient** — JSON-RPC über NDJSON stdio, Session-Management, silentCommand |
-| `src/renderer-logic.js` | **Pure Logik** — Token-Parser, Credit-Berechnung, Cost-Log-Helfer |
+| `src/acp-client.js` | **AcpClient** (Copilot-Backend) — JSON-RPC über NDJSON stdio, Session-Management, silentCommand |
+| `src/providers/*.js` | **Direkt-API-Backends** — Registry, `ApiAgentClient` (Agent-Schleife), Anthropic-Adapter, Tool-Runtime, Session-Store, System-Context |
+| `src/secure-store.js` | **Verschlüsselte API-Key-Speicherung** (Electron `safeStorage`) |
+| `src/renderer-logic.js` | **Pure Logik** — Token-Parser, Credit-Berechnung, Provider-Auflösung, Cost-Log-Helfer |
 | `src/ipc/*.js` | **IPC-Handler-Module** — Bilder, Tests |
 | `src/*.js` | **Reine Logik-Module** — testbar ohne Electron |
 | `__tests__/` | **Jest Unit-Tests** |
@@ -221,6 +223,26 @@ Da `--deny-tool`-Flags nur beim Spawn akzeptiert werden, muss bei Änderung der 
 ```
 stop() → updateOptions({ deniedTools }) → start() → loadSession(sessionId)
 ```
+
+### 5.4a Multi-Provider-Backends (`src/providers/`)
+
+Pro Tab kann ein anderes Backend genutzt werden. **Der entscheidende Vertrag:** jedes Backend
+emittiert dasselbe Renderer-Event-Vokabular (`copilot:event` / `copilot:done`) wie der `AcpClient`,
+sodass der Renderer backend-agnostisch bleibt. `main.js` hält eine `backends`-Map (tabId → Backend)
+und wählt das Backend über `getModelProvider(modelId)`.
+
+| Datei | Aufgabe |
+|---|---|
+| `providers/index.js` | Registry — Modell→Provider, `createApiBackend()` |
+| `providers/api-agent-client.js` | Basisklasse: Agent-Tool-Schleife, Token-/Kontext-Accounting, Persistenz, `/context`/`/compact`/`/usage` lokal |
+| `providers/anthropic-provider.js` | Anthropic-Adapter: Streaming, Tools, adaptives Thinking, Prompt-Caching, Compact |
+| `providers/agent-tools.js` | Provider-agnostische Tools (`shell` via PowerShell auf Windows, Datei-/Such-Tools) + Deny-Gating |
+| `providers/session-store.js` | History-Persistenz unter `~/.copilot-desktop/api-sessions/` |
+| `providers/system-context.js` | Skills + Agents + `copilot-instructions.md` → gecachter System-Prompt |
+
+API-Keys liegen verschlüsselt im OS-Schlüsselbund (`src/secure-store.js`); der Klartext-Key verlässt
+den Hauptprozess nicht. Slash-Commands der Direkt-Provider sind lokale Äquivalente (`/usage` gibt die
+Copilot-Token-Zeile zurück → bestehende Kosten-Pipeline greift unverändert).
 
 ### 5.5 Renderer-Module
 

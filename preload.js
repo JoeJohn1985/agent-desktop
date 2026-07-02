@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld('copilot', {
     readPlan: (id) => ipcRenderer.invoke('sessions:readPlan', id),
     /** @ipc sessions:readRecentMessages @param {string} id - Session ID @returns {Promise<Array>} Last 5 messages */
     readRecentMessages: (id) => ipcRenderer.invoke('sessions:readRecentMessages', id),
+    /** @ipc sessions:readAllMessages — Full chronological history. @param {string} id @returns {Promise<Array>} */
+    readAllMessages: (id) => ipcRenderer.invoke('sessions:readAllMessages', id),
     /** @ipc sessions:create @param {string} name - Session display name @returns {Promise<string>} New session UUID */
     create: (name) => ipcRenderer.invoke('sessions:create', name),
     /** @ipc sessions:delete @param {string} id - Session ID @returns {Promise<boolean>} */
@@ -142,33 +144,33 @@ contextBridge.exposeInMainWorld('copilot', {
    * @namespace copilot.todos
    */
   todos: {
-    /** @ipc todos:list @param {string} sessionId @returns {Promise<Array<Object>>} */
-    list: (sessionId) => ipcRenderer.invoke('todos:list', sessionId),
+    /** @ipc todos:list @param {string} cwd Project directory @returns {Promise<Array<Object>>} */
+    list: (cwd) => ipcRenderer.invoke('todos:list', cwd),
     /**
      * @ipc todos:add
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {Object} todo - Todo object with at least `text` property
      * @returns {Promise<Array<Object>>} Updated todo list
      */
-    add: (sessionId, todo) => ipcRenderer.invoke('todos:add', sessionId, todo),
+    add: (cwd, todo) => ipcRenderer.invoke('todos:add', cwd, todo),
     /**
      * @ipc todos:update
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {string} todoId
      * @param {Object} updates - Fields to merge into the todo
      * @returns {Promise<Array<Object>>} Updated todo list
      */
-    update: (sessionId, todoId, updates) => ipcRenderer.invoke('todos:update', sessionId, todoId, updates),
-    /** @ipc todos:delete @param {string} sessionId @param {string} todoId @returns {Promise<Array<Object>>} */
-    delete: (sessionId, todoId) => ipcRenderer.invoke('todos:delete', sessionId, todoId),
+    update: (cwd, todoId, updates) => ipcRenderer.invoke('todos:update', cwd, todoId, updates),
+    /** @ipc todos:delete @param {string} cwd @param {string} todoId @returns {Promise<Array<Object>>} */
+    delete: (cwd, todoId) => ipcRenderer.invoke('todos:delete', cwd, todoId),
     /**
      * Reorders todos according to the given ID sequence.
      * @ipc todos:reorder
-     * @param {string} sessionId
+     * @param {string} cwd - Project directory
      * @param {string[]} orderedIds - Todo IDs in desired order
      * @returns {Promise<Array<Object>>} Reordered todo list
      */
-    reorder: (sessionId, orderedIds) => ipcRenderer.invoke('todos:reorder', sessionId, orderedIds),
+    reorder: (cwd, orderedIds) => ipcRenderer.invoke('todos:reorder', cwd, orderedIds),
   },
 
   // ── Images ────────────────────────────────────────────────
@@ -226,6 +228,27 @@ contextBridge.exposeInMainWorld('copilot', {
     read: () => ipcRenderer.invoke('preferences:read'),
     /** @ipc preferences:write @param {Object} prefs - Preferences to persist @returns {Promise<boolean>} */
     write: (prefs) => ipcRenderer.invoke('preferences:write', prefs),
+  },
+
+  // ── Provider API keys (secure store) ──────────────────────
+
+  /**
+   * Encrypted provider API key management. Keys are stored via the OS keychain
+   * in the main process and are never returned to the renderer.
+   *
+   * @namespace copilot.providers
+   */
+  providers: {
+    /** @ipc providers:status @returns {Promise<{available: boolean, keyed: Object<string,boolean>}>} */
+    status: () => ipcRenderer.invoke('providers:status'),
+    /** @ipc providers:setKey @param {string} provider @param {string} key @returns {Promise<{success:boolean,error?:string}>} */
+    setKey: (provider, key) => ipcRenderer.invoke('providers:setKey', provider, key),
+    /** @ipc providers:deleteKey @param {string} provider @returns {Promise<{success:boolean}>} */
+    deleteKey: (provider) => ipcRenderer.invoke('providers:deleteKey', provider),
+    /** @ipc providers:loadSessionHistory @param {string} sessionId @returns {Promise<Array>} Persisted API conversation */
+    loadSessionHistory: (sessionId) => ipcRenderer.invoke('providers:loadSessionHistory', sessionId),
+    /** @ipc providers:listModels @param {string} provider @param {string} [baseURL] @returns {Promise<{ok:boolean,models:Array,reason?:string}>} */
+    listModels: (provider, baseURL) => ipcRenderer.invoke('providers:listModels', provider, baseURL),
   },
 
   // ── Folders ───────────────────────────────────────────────
@@ -503,6 +526,30 @@ contextBridge.exposeInMainWorld('copilot', {
     check: () => ipcRenderer.invoke('auth:check'),
     /** @ipc auth:login — Opens a new terminal window for `copilot login`. @returns {Promise<{success: boolean, pendingInTerminal: boolean}>} */
     login: () => ipcRenderer.invoke('auth:login'),
+    /** @ipc copilot:status — Copilot CLI install + login status. @returns {Promise<{cliInstalled:boolean, version:string|null, authenticated:boolean, user:string|null}>} */
+    status: () => ipcRenderer.invoke('copilot:status'),
+  },
+
+  /**
+   * Self-update (git-based): check for newer release tags and apply via git pull.
+   *
+   * @namespace copilot.updates
+   */
+  updates: {
+    /** @ipc updates:check @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>} */
+    check: () => ipcRenderer.invoke('updates:check'),
+    /** @ipc updates:apply — Pulls latest main, installs deps if needed, relaunches. @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>} */
+    apply: () => ipcRenderer.invoke('updates:apply'),
+  },
+
+  /**
+   * Public pricing fallback source (LiteLLM) for models without a hardcoded price.
+   *
+   * @namespace copilot.pricing
+   */
+  pricing: {
+    /** @ipc pricing:getMap @returns {Promise<Object<string,{input:number,cache:number,output:number}>>} normalized model key → USD/1M */
+    getMap: () => ipcRenderer.invoke('pricing:getMap'),
   },
 
   // ── Window ────────────────────────────────────────────────
@@ -519,6 +566,8 @@ contextBridge.exposeInMainWorld('copilot', {
     maximize: () => ipcRenderer.send('window:maximize'),
     /** @ipc window:close */
     close: () => ipcRenderer.send('window:close'),
+    /** @ipc app:relaunch — Restarts the app (e.g. after Copilot login). @returns {Promise<{success: boolean}>} */
+    relaunch: () => ipcRenderer.invoke('app:relaunch'),
   },
 
   // ── File Utilities ────────────────────────────────────────
