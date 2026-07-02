@@ -855,6 +855,7 @@ body {
   flex: 1;
 }
 .tab__short { flex-shrink: 0; }
+.tab__app-icon { width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
 .tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
 .tab--active {
   color: var(--text-primary);

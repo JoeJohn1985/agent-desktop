@@ -767,7 +767,18 @@ function renderTabs() {
       el.appendChild(badge);
     }
 
+    const hasBotIcon = tab.label.startsWith('🤖');
     const fullLabel = tab.label.replace(/^🤖\s*/, '');
+
+    // For default/Copilot chat tabs (🤖 prefix), show the app icon in place of
+    // the robot emoji.
+    if (hasBotIcon) {
+      const appIcon = document.createElement('img');
+      appIcon.className = 'tab__app-icon';
+      appIcon.src = '../assets/icon.png';
+      appIcon.alt = '';
+      el.appendChild(appIcon);
+    }
 
     // Short label (first 3 chars) shown only when the tab is collapsed — CSS
     // truncation looked cut-off, so we render the exact short text ourselves.
