@@ -1,6 +1,11 @@
-# Copilot Desktop — Architektur (arc42)
+# Agent Desktop — Architektur (arc42)
 
-> **Version:** 0.32.0 · **Stand:** Juni 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, marked, highlight.js, jest
+> **Version:** 1.0.0 · **Stand:** Juli 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, @google/genai, marked, highlight.js, jest
+>
+> Hinweis: Intern hieß die App bis 1.0 `copilot-desktop`. Mit 1.0 wurde die
+> App-Identität auf `agent-desktop` umbenannt (Datenpfad `~/.agent-desktop`,
+> Electron-`userData`), inkl. automatischer Migration. Die Provider-ID `copilot`
+> und die IPC-Kanäle `copilot:*` bleiben (referenzieren die Copilot-Integration).
 
 ---
 
@@ -8,7 +13,7 @@
 
 ### 1.1 Aufgabenstellung
 
-**Copilot Desktop** ist eine Electron-Desktop-App, die das CLI `copilot` (GitHub Copilot CLI) in eine polierte Chat-Oberfläche einbettet. Statt auf der Kommandozeile zu arbeiten, bekommt der User:
+**Agent Desktop** ist eine Electron-Desktop-App, die mehrere LLM-Provider (primär das CLI `copilot` / GitHub Copilot CLI, dazu Anthropic, Gemini, OpenAI, GLM, Ollama) in eine polierte Chat-Oberfläche einbettet. Statt auf der Kommandozeile zu arbeiten, bekommt der User:
 
 - Markdown-Rendering mit Syntax-Highlighting
 - Multi-Tab-Sessions, die parallel mit der CLI sprechen (via **ACP-Protokoll**)
@@ -75,7 +80,7 @@
                              │ GUI (Electron Window)
                              ▼
    ┌─────────────────────────────────────────────────┐
-   │              Copilot Desktop (App)              │
+   │               Agent Desktop (App)               │
    └──┬──────────────┬────────────────┬──────────────┘
       │              │                │
       │ ACP          │ liest/         │ liest/schreibt
@@ -84,7 +89,7 @@
  ┌──────────┐  ┌────────────┐  ┌───────────────────────┐
  │ copilot  │  │ ~/.copilot │  │ userData/             │
  │   CLI    │  │ /sessions, │  │   preferences.json    │
- │  --acp   │  │   skills,  │  │ ~/.copilot-desktop/   │
+ │  --acp   │  │   skills,  │  │ ~/.agent-desktop/   │
  │ (gh ext) │  │ instructns │  │   logs, folders.json  │
  └────┬─────┘  └────────────┘  └───────────────────────┘
       │
@@ -97,7 +102,7 @@
 | Schnittstelle | Richtung | Beschreibung |
 |---|---|---|
 | **Copilot CLI (ACP)** | App ↔ CLI | `copilot --acp` — JSON-RPC über NDJSON auf stdin/stdout. Methoden: `initialize`, `session/new`, `session/load`, `session/prompt`. Events: `session/update`-Notifications |
-| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`), Skills (`~/.copilot/skills/`), Logs (`~/.copilot-desktop/logs/`), Preferences (`app.getPath('userData')/preferences.json`), Folders-Config |
+| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`), Skills (`~/.copilot/skills/`), Logs (`~/.agent-desktop/logs/`), Preferences (`app.getPath('userData')/preferences.json`), Folders-Config |
 | **Shell** | App → Shell | Test-Runner spawnt `npm test`, `npm run test:coverage`, Playwright |
 | **OS Window-Manager** | App ↔ OS | Native Frame deaktiviert; Custom Titlebar mit min/max/close via IPC |
 
@@ -152,7 +157,7 @@
 │     ├── src/scanners.js               — Skills, Folder-Config                │
 │     ├── src/agents.js                 — Sub-Agent-Verzeichnis                │
 │     ├── src/file-processing.js        — Drag&Drop-Pipeline                   │
-│     ├── src/logger.js                 — File-Logger ~/.copilot-desktop/logs  │
+│     ├── src/logger.js                 — File-Logger ~/.agent-desktop/logs  │
 │     └── src/utils.js                  — stripAnsi, safeSessionPath, …       │
 └──────────────────────────────────────────────────────────────────────────────┘
                                │  ACP (JSON-RPC / NDJSON stdio)
@@ -237,7 +242,7 @@ und wählt das Backend über `getModelProvider(modelId)`.
 | `providers/api-agent-client.js` | Basisklasse: Agent-Tool-Schleife, Token-/Kontext-Accounting, Persistenz, `/context`/`/compact`/`/usage` lokal |
 | `providers/anthropic-provider.js` | Anthropic-Adapter: Streaming, Tools, adaptives Thinking, Prompt-Caching, Compact |
 | `providers/agent-tools.js` | Provider-agnostische Tools (`shell` via PowerShell auf Windows, Datei-/Such-Tools) + Deny-Gating |
-| `providers/session-store.js` | History-Persistenz unter `~/.copilot-desktop/api-sessions/` |
+| `providers/session-store.js` | History-Persistenz unter `~/.agent-desktop/api-sessions/` |
 | `providers/system-context.js` | Skills + Agents + `copilot-instructions.md` → gecachter System-Prompt |
 
 API-Keys liegen verschlüsselt im OS-Schlüsselbund (`src/secure-store.js`); der Klartext-Key verlässt
@@ -425,7 +430,7 @@ User deaktiviert Tool in Session-Tools-Popup
 
 | Umgebung | Komponenten | Persistenz |
 |---|---|---|
-| **End-User-Desktop** (Win 11, Linux, macOS) | Electron-App, `copilot`-CLI (extern) | `app.getPath('userData')` (Theme, Tabs, Permissions, Cost-Log); `~/.copilot-desktop/` (Logs, Folders); `~/.copilot/` (Sessions, Skills — CLI-verwaltet) |
+| **End-User-Desktop** (Win 11, Linux, macOS) | Electron-App, `copilot`-CLI (extern) | `app.getPath('userData')` (Theme, Tabs, Permissions, Cost-Log); `~/.agent-desktop/` (Logs, Folders); `~/.copilot/` (Sessions, Skills — CLI-verwaltet) |
 | **CI** | `node`, `npm test`, `npm run lint` | nichts persistent |
 | **Entwicklung** | `npm run dev` (Electron + DevTools), Jest-Watch | `preferences.test.json` separat |
 
@@ -433,9 +438,9 @@ User deaktiviert Tool in Session-Tools-Popup
 
 | Zweck | Windows | Linux/macOS |
 |---|---|---|
-| Preferences | `%APPDATA%\copilot-desktop\preferences.json` | `~/.config/copilot-desktop/preferences.json` |
-| Logs | `~/.copilot-desktop/logs/` | `~/.copilot-desktop/logs/` |
-| Folders-Config | `~/.copilot-desktop/folders.json` | `~/.copilot-desktop/folders.json` |
+| Preferences | `%APPDATA%\agent-desktop\preferences.json` | `~/.config/agent-desktop/preferences.json` |
+| Logs | `~/.agent-desktop/logs/` | `~/.agent-desktop/logs/` |
+| Folders-Config | `~/.agent-desktop/folders.json` | `~/.agent-desktop/folders.json` |
 | Copilot Sessions | `%USERPROFILE%\.copilot\session-state\` | `~/.copilot/session-state/` |
 
 ### 7.2 Persistenz im Detail
@@ -443,10 +448,10 @@ User deaktiviert Tool in Session-Tools-Popup
 | Daten | Speicherort | Verantwortlich |
 |---|---|---|
 | Preferences (Theme, Tabs, Settings, Cost-Log) | `userData/preferences.json` (+ `.bak`) | `src/preferences.js` |
-| Folders-Config, Onboarding, Tutorial-Flags | `~/.copilot-desktop/folders.json` | `src/scanners.js`, `main.js` |
+| Folders-Config, Onboarding, Tutorial-Flags | `~/.agent-desktop/folders.json` | `src/scanners.js`, `main.js` |
 | Sessions | `~/.copilot/session-state/<uuid>/` | CLI (Read-only) |
 | Todos | `~/.copilot/session-state/<uuid>/todos.json` | `src/sessions.js` |
-| Logs | `~/.copilot-desktop/logs/copilot-desktop-<YYYY-MM-DD>.log` | `src/logger.js` |
+| Logs | `~/.agent-desktop/logs/agent-desktop-<YYYY-MM-DD>.log` | `src/logger.js` |
 | Cost-Log | `userData/preferences.json` (Key: `costLog`) | `renderer/app.js` |
 
 ---
@@ -490,7 +495,7 @@ Token-Daten kommen aus `/usage` (via `silentCommand`). Pro Prompt wird das Delta
 
 ### 8.4 Logging & Diagnose
 
-- `src/logger.js` schreibt nach `~/.copilot-desktop/logs/` (tägliche Rotation, 7 Tage).
+- `src/logger.js` schreibt nach `~/.agent-desktop/logs/` (tägliche Rotation, 7 Tage).
 - `console.log/warn/error` im Main-Prozess sind monkey-gepatched: Logs gehen zusätzlich in Datei und DevConsole-Panel.
 
 ### 8.5 Theme-System

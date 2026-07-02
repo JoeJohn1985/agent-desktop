@@ -1,6 +1,15 @@
 # Konzept: Copilot-Angleichung & Provider-Neutralität
 
-**Status:** Entwurf zur Abnahme · **Datum:** 2026-06-30
+> **Umsetzungsstand (1.0.0, 2026-07-02):** Umgesetzt. Zusätzlich zur ursprünglich
+> geplanten reinen Anzeigenamens-Änderung wurde in 1.0 die **komplette interne
+> Identität** von `copilot-desktop` auf `agent-desktop` umbenannt (inkl.
+> `app.name`, `package.json`, Datenpfad `~/.agent-desktop`, Electron-`userData`)
+> — mit automatischer Datenmigration (`src/data-dir.js`; Windows behält per DPAPI
+> die verschlüsselten Keys). Die unten stehende Passage „interne IDs bleiben
+> unverändert" ist damit **überholt**. Provider-ID `copilot` und IPC-Kanäle
+> `copilot:*` bleiben bewusst bestehen.
+
+**Status:** Umgesetzt in 1.0.0 · **Datum:** 2026-06-30
 **Ziel:** Die App von einer „Copilot-UI" zu einer provider-neutralen, lokalen Agent-Anwendung angleichen. Copilot bleibt technisch die CLI (keine API-Anbindung), wird aber für den Nutzer **wie ein Provider unter mehreren** behandelt.
 
 Entscheidungen (abgestimmt):

@@ -1,4 +1,4 @@
-# 📘 Copilot Desktop – Benutzerhandbuch
+# 📘 Agent Desktop – Benutzerhandbuch
 
 **Version 0.32.0** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
 
@@ -36,7 +36,7 @@
 
 ## Überblick
 
-Copilot Desktop verpackt GitHub Copilot CLI in eine moderne Chat-Oberfläche. Statt auf der Kommandozeile zu arbeiten, interagierst du über eine grafische Anwendung mit Copilot – inklusive Multi-Session-Tabs, einer Sidebar für Sessions, Skills und Todos, Kontext-Überwachung und Kosten-Tracking.
+Agent Desktop verpackt mehrere LLM-Provider (primär GitHub Copilot CLI, dazu Anthropic, Gemini, OpenAI, GLM, Ollama) in eine moderne Chat-Oberfläche. Statt auf der Kommandozeile zu arbeiten, interagierst du über eine grafische Anwendung – inklusive Multi-Session-Tabs, einer Sidebar für Sessions, Skills und Todos, Kontext-Überwachung und Kosten-Tracking.
 
 ---
 
@@ -69,7 +69,7 @@ Beim **ersten App-Start** führt dich ein 4-stufiger Onboarding-Wizard durch die
 | Schritt | Inhalt |
 |---|---|
 | **1. GitHub Auth-Check** | Prüft `gh auth status` und leitet bei Bedarf `gh auth login` ein |
-| **2. Ordner-Einrichtung** | Erstellt das Verzeichnis `~/.copilot-desktop/` mit allen nötigen Unterordnern |
+| **2. Ordner-Einrichtung** | Erstellt das Verzeichnis `~/.agent-desktop/` mit allen nötigen Unterordnern |
 | **3. Starter Agents & Skills** | Auswahl aus 6 Kategorien – jede per Toggle aktivierbar/deaktivierbar |
 | **4. Feature-Einführung** | 3-Slide-Carousel mit den wichtigsten App-Features |
 
@@ -92,7 +92,7 @@ Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🟢 Copilot Desktop                  v0.32.0         _ □ ✕     │  ← Titlebar
+│  🟢 Agent Desktop                    v1.0.0         _ □ ✕     │  ← Titlebar
 ├────────────┬────────────────────────────────────────────────────┤
 │            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab-Bar
 │  Sessions  ├────────────────────────────────────────────────────┤
@@ -112,7 +112,7 @@ Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich
 
 Die App verwendet eine frameless Titlebar im Custom-Design:
 
-- **Links:** App-Icon und Titel „Copilot Desktop"
+- **Links:** App-Icon und Titel „Agent Desktop"
 - **Mitte:** Version-Badge
 - **Rechts:** Fenster-Steuerung – Minimieren, Maximieren, Schließen
 
@@ -421,4 +421,4 @@ Konfigurierbare Kürzel sind über **Settings → Tastenkürzel** anpassbar.
 
 ---
 
-> **Copilot Desktop v0.32.0** · Entwickelt für GEBIT Solutions
+> **Agent Desktop v1.0.0** · Entwickelt für GEBIT Solutions

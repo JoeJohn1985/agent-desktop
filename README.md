@@ -2,7 +2,7 @@
 
 > **Version 1.0** — erstes stabiles Release.
 
-**Agent Desktop** (internes Package: `copilot-desktop`) is an Electron-based desktop app for working with multiple LLM providers through one polished chat interface. Its fully-tested core wraps the **GitHub Copilot CLI**; in addition, several **direct-API providers** can be used per tab:
+**Agent Desktop** (Package: `agent-desktop`) is an Electron-based desktop app for working with multiple LLM providers through one polished chat interface. Its fully-tested core wraps the **GitHub Copilot CLI**; in addition, several **direct-API providers** can be used per tab:
 
 | Provider | Reifegrad | Hinweis |
 |---|---|---|
@@ -31,7 +31,7 @@ Jeder Provider emittiert dasselbe interne Event-Vokabular, sodass Chat, Kosten-T
 ### Onboarding & Tutorials
 - 🚀 **First-Run Onboarding Wizard** — Four-step guided setup on first launch:
   1. GitHub authentication check (`gh auth login`)
-  2. Folder structure setup (`~/.copilot-desktop/`)
+  2. Folder structure setup (`~/.agent-desktop/`)
   3. Starter agents & skills selection (6 categories, individually toggleable)
   4. Feature introduction via 3-slide carousel
 - 💡 **Tutorial Popups** — Contextual hints for Skills reload and Tab rename; auto-close on action or after 30 seconds
@@ -77,7 +77,7 @@ pwsh setup.ps1
 
 Das Script macht zwei Dinge:
 1. `npm install` — installiert alle Dependencies
-2. Erstellt eine Desktop-Verknüpfung **"Copilot Desktop"** mit App-Icon
+2. Erstellt eine Desktop-Verknüpfung **"Agent Desktop"** mit App-Icon
 
 Danach: **Verknüpfung doppelklicken** oder an die Taskleiste pinnen — fertig.
 
