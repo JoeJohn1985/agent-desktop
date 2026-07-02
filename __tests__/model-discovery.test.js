@@ -16,6 +16,17 @@ describe('model-discovery: parseOpenAIModels', () => {
     expect(parseOpenAIModels(null)).toEqual([]);
     expect(parseOpenAIModels({ data: [{}, { id: 'ok' }] })).toEqual([{ id: 'ok', name: 'ok' }]);
   });
+  it('filtert Nicht-Chat-Modelle (Embeddings/TTS/Whisper/DALL·E) heraus', () => {
+    const res = parseOpenAIModels({ data: [
+      { id: 'gpt-5' },
+      { id: 'text-embedding-3-large' },
+      { id: 'whisper-1' },
+      { id: 'tts-1' },
+      { id: 'dall-e-3' },
+      { id: 'omni-moderation-latest' },
+    ] });
+    expect(res).toEqual([{ id: 'gpt-5', name: 'gpt-5' }]);
+  });
 });
 
 describe('model-discovery: parseAnthropicModels', () => {

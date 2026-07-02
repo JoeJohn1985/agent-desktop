@@ -10,7 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
 
-const KNOWN_PROVIDERS = ['anthropic', 'gemini', 'openai'];
+// Providers that may store an API key. GLM needs a key too; Ollama is keyless
+// but listed so providers:status reports it consistently. (Copilot uses the CLI.)
+const KNOWN_PROVIDERS = ['anthropic', 'gemini', 'openai', 'glm', 'ollama'];
 
 let _filePath = null;
 

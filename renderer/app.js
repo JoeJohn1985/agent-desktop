@@ -2508,6 +2508,16 @@ async function refreshUsageDisplay(tabId) {
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
+    if (tab && tab._usageBaselinePending) {
+      // First read after reopening a session: adopt the cumulative counts as the
+      // baseline WITHOUT billing — the prior tokens were already paid for earlier.
+      tab._usageBaselinePending = false;
+      tab._lastUsageParsed = parsed;
+      tab._lastUsageText = result.text;
+      tab._lastUsageTokens = tokens;
+      if (tabId === activeTabId) updateUsageDisplay(parsed, tokens, result.text);
+      return;
+    }
     if (tab) {
       // Price the new tokens at the model that actually PRODUCED them — the one
       // frozen when this prompt was sent (_billingModel) — not tab.selectedModel,
@@ -2811,6 +2821,10 @@ async function resumeSession(sessionId) {
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
+  // The CLI's /usage is cumulative across restarts. Without a baseline the first
+  // reading after reopening would be billed in full (re-charging the whole prior
+  // session). Flag it so the next /usage read only establishes the baseline.
+  tab._usageBaselinePending = true;
   // Restore the project directory so project-scoped todos load correctly.
   if (!tab.cwd) tab.cwd = getSessionCwd(sessionId) || null;
   // Update lastUsed timestamp

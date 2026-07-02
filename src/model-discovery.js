@@ -15,11 +15,17 @@ const DEFAULT_BASE_URLS = {
 
 const FETCH_TIMEOUT_MS = 15_000;
 
-/** OpenAI-compatible /models → [{id,name}]. */
+// Non-chat model families that /models also returns (OpenAI et al.) but that
+// cannot serve as a chat model — filtered out so they don't pollute the picker.
+const NON_CHAT_MODEL = /(embedding|whisper|tts|dall-e|dalle|moderation|image|audio|realtime|rerank|speech|transcrib)/i;
+
+/** OpenAI-compatible /models → [{id,name}] (chat-capable only). */
 function parseOpenAIModels(json) {
   const data = json && json.data;
   if (!Array.isArray(data)) return [];
-  return data.filter(m => m && m.id).map(m => ({ id: String(m.id), name: String(m.id) }));
+  return data
+    .filter(m => m && m.id && !NON_CHAT_MODEL.test(String(m.id)))
+    .map(m => ({ id: String(m.id), name: String(m.id) }));
 }
 
 /** Anthropic /v1/models → [{id,name}]. */
