@@ -829,25 +829,19 @@ body {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
+  gap: 4px;
+  padding: 0 6px 0 10px;
   font-size: 16px;
   color: var(--text-muted);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  max-width: 200px;
   min-width: 0;
+  max-width: 200px;
   white-space: nowrap;
   overflow: hidden;
   transition: all 0.15s ease;
-}
-.tab__icon {
-  width: 16px;
-  height: 16px;
-  object-fit: contain;
-  flex-shrink: 0;
 }
 .tab__label {
   overflow: hidden;
@@ -863,6 +857,24 @@ body {
   border-bottom-color: var(--accent);
   background: var(--bg-base);
 }
+
+/* Collapsed tabs (not active, not hovered): show only ~3 chars, no ellipsis,
+   and hide the edit/close controls so many tabs stay readable. */
+.tab:not(.tab--active):not(:hover) .tab__label {
+  max-width: 3ch;
+  text-overflow: clip;
+}
+.tab:not(.tab--active):not(:hover) .tab__edit,
+.tab:not(.tab--active):not(:hover) .tab__close {
+  display: none;
+}
+/* Active or hovered tab is "large": full label + controls. */
+.tab--active .tab__label,
+.tab:hover .tab__label {
+  max-width: 160px;
+  text-overflow: ellipsis;
+}
+
 .tab__close {
   font-size: 18px;
   color: var(--text-muted);
