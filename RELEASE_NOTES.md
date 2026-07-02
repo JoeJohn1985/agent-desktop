@@ -1,3 +1,20 @@
+# Release Notes v1.0.0
+
+**Erstes stabiles Release.** GitHub Copilot (CLI/ACP) ist der vollständig getestete Kern. Zusätzlich stehen Direkt-API-Provider bereit — nach Reifegrad gekennzeichnet: **Gemini = Beta** („Getestet nicht final"), **Anthropic/OpenAI/GLM/Ollama = Alpha** („Nicht getestet"). Copilot trägt kein Label.
+
+## Was ist neu in 1.0?
+
+- **Dynamische Modell-Ermittlung** für alle Provider (live per `/models` bzw. ACP), inkl. Info-Meldung bei neu aufgetauchten Modellen.
+- **Reifegrad-Labels (Alpha/Beta)** je Provider mit Tooltip.
+- **Tab-Leiste überarbeitet**: aktiver Tab groß, übrige kompakt (Kürzel + Trenn-Ränder), Aktionen bei Hover, Schließen-✕ in der Ecke.
+
+### Behobene Fehler
+- Kosten werden je Nachricht mit dem **tatsächlich verwendeten Modell** abgerechnet (kein Fehlpreis mehr bei Modellwechsel zwischen Prompts).
+- **Tool-Aufrufe wieder sichtbar** (Copilot/ACP: korrektes Icon; MCP-Tools wie Playwright nicht mehr ausgeblendet); **keine dreifache** Ergebnis-Anzeige mehr.
+- Fehlender **Absatz zwischen Sätzen** behoben; nach Session-Laden wird **ans Ende gescrollt**.
+
+---
+
 # Release Notes v0.32.0
 
 ## Was ist neu?

@@ -1,6 +1,16 @@
-# Copilot Desktop
+# Agent Desktop
 
-**Copilot Desktop** is an Electron-based desktop app that wraps the GitHub Copilot CLI in a polished chat interface. It supports multiple named sessions, toggleable AI skills and agents, a first-run onboarding wizard, plugin marketplace, todos, markdown rendering, file drag & drop, model switching, and automatic task routing to sub-agents based on complexity — all in a clean, themeable UI.
+> **Version 1.0** — erstes stabiles Release.
+
+**Agent Desktop** (internes Package: `copilot-desktop`) is an Electron-based desktop app for working with multiple LLM providers through one polished chat interface. Its fully-tested core wraps the **GitHub Copilot CLI**; in addition, several **direct-API providers** can be used per tab:
+
+| Provider | Reifegrad | Hinweis |
+|---|---|---|
+| GitHub Copilot (CLI/ACP) | stabil | Primär-Provider, ohne Label |
+| Google Gemini | **Beta** | „Getestet nicht final" — recherche-orientiert (Live-Suche/Grounding) |
+| Anthropic · OpenAI · GLM (Zhipu) · Ollama | **Alpha** | „Nicht getestet" — voll agentisch; Ollama lokal & keyless |
+
+Jeder Provider emittiert dasselbe interne Event-Vokabular, sodass Chat, Kosten-Tracking, Tools und UI providerübergreifend gleich funktionieren. Weitere Merkmale: mehrere benannte Sessions, umschaltbare Skills/Agents, Onboarding-Assistent, Plugin-Marktplatz, Todos, Markdown-Rendering, Datei-Drag&Drop, Modellwechsel pro Tab, dynamische Modell-Ermittlung und USD-genaues Kosten-Tracking — in einer sauberen, themebaren UI.
 
 ## Features
 

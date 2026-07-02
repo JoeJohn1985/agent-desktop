@@ -1,6 +1,41 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-07-02
+
+Erstes stabiles Release. Die Kernfunktion (GitHub Copilot CLI) ist vollständig
+getestet; die Direkt-API-Provider sind je nach Reifegrad als **Beta** (Gemini)
+bzw. **Alpha** (Anthropic, OpenAI, GLM, Ollama) gekennzeichnet.
+
+### Added
+- **Dynamische Modell-Ermittlung für alle Provider** — Modelle werden per
+  `/models`-Endpoint (Anthropic, Gemini, OpenAI, GLM, Ollama) bzw. via ACP
+  (Copilot) live erkannt und persistiert. Taucht ein neues Modell auf, erscheint
+  eine Info. (`src/model-discovery.js`, IPC `providers:listModels`)
+- **Alpha-/Beta-Reifegrad-Labels** je Provider mit Tooltip (Beta: „Getestet
+  nicht final", Alpha: „Nicht getestet"); Copilot ohne Label.
+- **Diagnose-Logging** (unbekannte ACP-Events vollständig + roher `/usage`-Text)
+  zur Untersuchung von Subagent-/Usage-Signalen.
+
+### Changed
+- **Tab-Leiste optimiert**: aktiver Tab groß (volles Label + Aktionen), übrige
+  kompakt (3-Zeichen-Kürzel, Trenn-Ränder, Aktionen nur bei Hover); App-Icon
+  entfernt; Schließen-✕ in der rechten Ecke.
+
+### Fixed
+- **Kosten je Nachricht mit dem tatsächlich verwendeten Modell** abgerechnet
+  (eingefroren beim Senden) — ein Modellwechsel zwischen zwei Prompts verrechnet
+  frühere Tokens nicht mehr zum neuen Preis.
+- **Tool-Aufrufe bei Copilot (ACP) sichtbar**: `kind` wird über
+  `tool_call_update` hinweg gemerkt (korrektes Icon statt versteckt); der
+  Tool-Aufruf wird zentral in `tool.execution_start` gerendert.
+- **MCP-Tool-Aufrufe** (z. B. Playwright) werden nicht mehr ausgeblendet
+  (generisches 🔧-Icon + sinnvolle Argument-Anzeige).
+- **Tool-Ergebnis nicht mehr dreifach** angezeigt (ACP-Status-Updates werden per
+  `toolCallId` dedupliziert und in-place aktualisiert).
+- **Fehlender Absatz zwischen Sätzen** an `report_intent`-Grenzen behoben.
+- **Nach dem Laden einer Session** wird ans Ende (letzter Dialogstand) gescrollt.
+
+<!-- Die folgenden Einträge waren zuvor unter [Unreleased] und sind Teil von 1.0.0. -->
 
 ### Added
 - **Drei neue Provider: OpenAI, Ollama, GLM (Zhipu)** — voll agentisch über einen gemeinsamen OpenAI-kompatiblen Kern (Chat Completions + Function Calling, SSE-Streaming, dependency-frei). Ollama ist lokal & keyless; Base-URL pro Provider in den Einstellungen überschreibbar. (`src/providers/openai-compatible-provider.js` + `openai/ollama/glm-provider.js`)
