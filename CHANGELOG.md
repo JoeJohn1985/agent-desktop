@@ -17,6 +17,13 @@ bzw. **Alpha** (Anthropic, OpenAI, GLM, Ollama) gekennzeichnet.
   zur Untersuchung von Subagent-/Usage-Signalen.
 
 ### Changed
+- **Interne Umbenennung `copilot-desktop` → `agent-desktop`** (App-Identität,
+  `app.name`, Datenverzeichnis `~/.agent-desktop`, Electron-`userData`). Beim
+  ersten Start migriert die App vorhandene Daten (Preferences, verschlüsselte
+  API-Keys, Sessions, Logs) automatisch aus der alten Identität — unter Windows
+  bleiben die Keys gültig (DPAPI). Provider-ID `copilot` und die IPC-Kanäle
+  bleiben bewusst unverändert (referenzieren die echte Copilot-Integration).
+  (`src/data-dir.js`)
 - **Tab-Leiste optimiert**: aktiver Tab groß (volles Label + Aktionen), übrige
   kompakt (3-Zeichen-Kürzel, Trenn-Ränder, Aktionen nur bei Hover); App-Icon
   entfernt; Schließen-✕ in der rechten Ecke.

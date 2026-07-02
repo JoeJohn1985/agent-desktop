@@ -1,5 +1,5 @@
 /**
- * E2E Tests für die Copilot Desktop App (Electron + Playwright).
+ * E2E Tests für Agent Desktop (Electron + Playwright).
  * Testet echte UI-Interaktionen: Fenster-Start, Tab-Management,
  * Theme-Wechsel, Sidebar, Settings, Terminal-Panel.
  */

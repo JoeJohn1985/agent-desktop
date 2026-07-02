@@ -2,7 +2,7 @@
 
 // Public pricing fallback source. Model prices we don't hardcode (e.g. a Copilot
 // model the CLI reports dynamically) are looked up from LiteLLM's public
-// price table, converted to USD-per-1M and cached under ~/.copilot-desktop/.
+// price table, converted to USD-per-1M and cached under ~/.agent-desktop/.
 //
 // The renderer keeps its own hardcoded MODEL_PRICING as the source of truth; this
 // only fills gaps. All parsing is pure and unit-tested; the fetch/cache is a thin
@@ -10,10 +10,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { DATA_DIR } = require('./data-dir');
 
 const PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
-const CACHE_PATH = path.join(os.homedir(), '.copilot-desktop', 'pricing-cache.json');
+const CACHE_PATH = path.join(DATA_DIR, 'pricing-cache.json');
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // refresh at most weekly
 const FETCH_TIMEOUT_MS = 15_000;
 

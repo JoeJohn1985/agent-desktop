@@ -1,13 +1,13 @@
 // ── File Logger ─────────────────────────────────────────────
-// Writes structured log lines to ~/.copilot-desktop/logs/copilot-desktop-<date>.log
+// Writes structured log lines to ~/.agent-desktop/logs/agent-desktop-<date>.log
 // Rotates daily and cleans up logs older than 7 days on startup.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { DATA_DIR } = require('./data-dir');
 
-const LOG_DIR = path.join(os.homedir(), '.copilot-desktop', 'logs');
+const LOG_DIR = path.join(DATA_DIR, 'logs');
 const MAX_AGE_DAYS = 7;
 
 let _stream = null;
@@ -29,14 +29,15 @@ function _ensureDir() {
 }
 
 function _logFilePath(d) {
-  return path.join(LOG_DIR, `copilot-desktop-${_dateTag(d)}.log`);
+  return path.join(LOG_DIR, `agent-desktop-${_dateTag(d)}.log`);
 }
 
 function _cleanOldLogs() {
   try {
     const cutoff = Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
     for (const entry of fs.readdirSync(LOG_DIR)) {
-      if (!entry.startsWith('copilot-desktop-') || !entry.endsWith('.log')) continue;
+      // Match both the new prefix and the legacy one (so old logs also age out).
+      if ((!entry.startsWith('agent-desktop-') && !entry.startsWith('copilot-desktop-')) || !entry.endsWith('.log')) continue;
       const fullPath = path.join(LOG_DIR, entry);
       try {
         const stat = fs.statSync(fullPath);

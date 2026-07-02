@@ -7,7 +7,7 @@ const yaml = require('yaml');
 
 // Force WM_CLASS on Linux (must be set before app 'ready')
 if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('class', 'copilot-desktop');
+  app.commandLine.appendSwitch('class', 'agent-desktop');
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
@@ -20,8 +20,21 @@ const { getModelProvider, createApiBackend } = require('./src/providers');
 const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
+const { DATA_DIR, migrateLegacyData } = require('./src/data-dir');
 
-app.name = 'copilot-desktop';
+app.name = 'agent-desktop';
+
+// One-shot migration of legacy "copilot-desktop" data (home dir + userData) into
+// the new "agent-desktop" identity. Must run before the logger creates its dir
+// and before preferences are read. Windows keeps encrypted keys valid (DPAPI).
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    migrateLegacyData({
+      userDataDir: app.getPath('userData'),
+      legacyUserDataDir: path.join(app.getPath('appData'), 'copilot-desktop'),
+    });
+  } catch (_) { /* best effort — never block startup */ }
+}
 
 // ── File Logger Init ────────────────────────────────────────
 initLogger();
@@ -55,7 +68,7 @@ console.error = (...args) => { _originalConsoleError(...args); writeLog('error',
 
 // ── Folder Configuration ─────────────────────────────────────
 /** @type {string} Path to the persistent folder configuration JSON */
-const FOLDERS_CONFIG_PATH = path.join(os.homedir(), '.copilot-desktop', 'folders.json');
+const FOLDERS_CONFIG_PATH = path.join(DATA_DIR, 'folders.json');
 
 /**
  * Reads the folder configuration from disk.
@@ -642,7 +655,7 @@ function backupSessionTodos(sessionPath, sessionId) {
     if (!fs.existsSync(todosPath)) return;
     const raw = fs.readFileSync(todosPath, 'utf-8').trim();
     if (!raw || raw === '[]') return; // nichts Sinnvolles zu sichern
-    const backupDir = path.join(os.homedir(), '.copilot-desktop', 'deleted-todos');
+    const backupDir = path.join(DATA_DIR, 'deleted-todos');
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     fs.writeFileSync(path.join(backupDir, `${sessionId}-${stamp}.json`), raw, 'utf-8');

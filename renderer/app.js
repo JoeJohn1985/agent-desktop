@@ -198,7 +198,7 @@ async function restoreOpenTabs() {
     for (const t of openTabs) {
       // Use namedSessions as primary label source
       const customName = t.sessionId ? getSessionName(t.sessionId) : null;
-      const label = customName ? '🤖 ' + customName : (t.label || '🤖 Copilot');
+      const label = customName ? '🤖 ' + customName : (t.label || '🤖 Chat');
       // Resolve the model up front (entry first, then per-session map) so the
       // provider is correct from creation — including unsent tabs without id.
       const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
@@ -552,11 +552,11 @@ function showNotification(message, type = 'info') {
 /**
  * Create a new chat tab, register it in the tabs map, and switch to it.
  * Also allocates a stream-output element and a status-line element.
- * @param {string} [label='🤖 Copilot'] - Display label for the tab.
+ * @param {string} [label='🤖 Chat'] - Display label for the tab.
  * @returns {Promise<string>} The new tab's unique ID.
  */
 async function createTab(label, initialModel) {
-  const tabLabel = label || '🤖 Copilot';
+  const tabLabel = label || '🤖 Chat';
   const tabId = await copilot.chat.newTab();
 
   // Create stream output element
@@ -725,7 +725,7 @@ function closeTab(tabId) {
   tabs.delete(tabId);
 
   if (tabs.size === 0) {
-    createTab('🤖 Copilot');
+    createTab('🤖 Chat');
   } else if (activeTabId === tabId) {
     switchTab(tabs.keys().next().value);
   }
@@ -2644,7 +2644,8 @@ function exportChat() {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
   const lines = [];
-  const name = tab.label || 'Copilot Chat';
+  const name = tab.label || 'Chat';
+  const providerName = PROVIDER_SHORT[getTabProvider(tab)] || 'Assistant';
   lines.push(`# ${name}\n`);
   lines.push(`*Exportiert am ${new Date().toLocaleString('de-DE')}*\n`);
 
@@ -2654,7 +2655,7 @@ function exportChat() {
     } else if (el.classList.contains('stream-response')) {
       // Use raw markdown if available, otherwise extract text
       const raw = tab._responseRaw && el === tab._responseEl ? tab._responseRaw : el.textContent.trim();
-      lines.push(`\n## 🤖 Copilot\n\n${raw}\n`);
+      lines.push(`\n## 🤖 ${providerName}\n\n${raw}\n`);
     } else if (el.classList.contains('stream-tool-call')) {
       const toolName = el.querySelector('.stream-tool-call__name')?.textContent || '';
       const toolArgs = el.querySelector('.stream-tool-call__args')?.textContent || '';
@@ -4349,7 +4350,7 @@ function openAddTabProviderMenu(btn) {
         return;
       }
       close();
-      const label = p.id === 'copilot' ? '🤖 Copilot' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
+      const label = p.id === 'copilot' ? '🤖 Chat' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
       createTab(label, getDefaultModelForProvider(p.id));
       if (p.id !== 'copilot' && !hasKey) {
         showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
@@ -5277,7 +5278,7 @@ function initKeyboardShortcuts() {
       return;
     }
 
-    if (sc('newTab', e))   { e.preventDefault(); createTab('🤖 Copilot'); return; }
+    if (sc('newTab', e))   { e.preventDefault(); createTab('🤖 Chat'); return; }
     if (sc('closeTab', e)) { e.preventDefault(); if (activeTabId != null) closeTab(activeTabId); return; }
 
     // Ctrl+1–8: go to tab by index; Ctrl+9: always last tab
@@ -6297,7 +6298,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const restored = await restoreOpenTabs();
   if (!restored) {
-    await createTab('🤖 Copilot');
+    await createTab('🤖 Chat');
   } else {
     // Re-run after restore so project skills load with the now-set tab.cwd.
     // (createTab triggers switchTab before tab.cwd is assigned, so the first
