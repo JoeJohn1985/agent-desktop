@@ -1827,8 +1827,21 @@ const PROVIDERS = [
   { id: 'ollama', active: true },
 ];
 
-// Providers still in beta (not yet extensively tested) — shown with a Beta badge.
-const BETA_PROVIDERS = new Set(['anthropic', 'gemini', 'openai', 'glm', 'ollama']);
+// Maturity markers per provider. Beta = tested but not final; Alpha = untested.
+// Copilot is the primary, fully-tested provider and carries no badge.
+const BETA_PROVIDERS = new Set(['gemini']);
+const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+
+/** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
+function providerStageBadge(provider) {
+  if (BETA_PROVIDERS.has(provider)) {
+    return ' <span class="beta-badge" title="Getestet nicht final">Beta</span>';
+  }
+  if (ALPHA_PROVIDERS.has(provider)) {
+    return ' <span class="alpha-badge" title="Nicht getestet">Alpha</span>';
+  }
+  return '';
+}
 
 /** Providers that have selectable models (in display order). */
 function getProvidersWithModels() {
@@ -2045,8 +2058,7 @@ function updateProviderSelectBtn(tabId) {
   if (!el) return;
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = getTabProvider(tab);
-  const beta = BETA_PROVIDERS.has(provider) ? ' <span class="beta-badge">Beta</span>' : '';
-  el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${beta}`;
+  el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${providerStageBadge(provider)}`;
   // Subtle accent for non-default (direct-API) providers.
   el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
   updateGeminiModeBtn(tabId);
@@ -4313,8 +4325,7 @@ function openAddTabProviderMenu(btn) {
     const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
     const item = document.createElement('div');
     item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
-    let badge = '';
-    if (BETA_PROVIDERS.has(p.id)) badge += ' <span class="beta-badge">Beta</span>';
+    let badge = providerStageBadge(p.id);
     if (!p.active) badge += ' <span class="model-dropdown__hint">in Vorbereitung</span>';
     else if (!hasKey) badge += ' <span class="model-dropdown__hint">Key nötig</span>';
     item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
@@ -4791,7 +4802,7 @@ async function renderProvidersSettings() {
       <div class="providers-row__head">
         <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
         ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
-        ${BETA_PROVIDERS.has(p.id) ? '<span class="beta-badge">Beta</span>' : ''}
+        ${providerStageBadge(p.id).trim()}
         <span class="providers-row__status ${hasKey || p.keyless ? 'is-set' : ''}">${status}</span>
         ${p.active ? '' : '<span class="providers-row__soon">in Vorbereitung</span>'}
       </div>
