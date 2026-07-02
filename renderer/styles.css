@@ -836,6 +836,10 @@ body {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
+  /* Transparent side borders by default → no width shift when a collapsed tab
+     gets its separator borders (see below). */
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
   cursor: pointer;
   min-width: 0;
   max-width: 200px;
@@ -850,6 +854,7 @@ body {
   min-width: 0;
   flex: 1;
 }
+.tab__short { flex-shrink: 0; }
 .tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
 .tab--active {
   color: var(--text-primary);
@@ -858,17 +863,22 @@ body {
   background: var(--bg-base);
 }
 
-/* Collapsed tabs (not active, not hovered): show only ~3 chars, no ellipsis,
-   and hide the edit/close controls so many tabs stay readable. */
-.tab:not(.tab--active):not(:hover) .tab__label {
-  max-width: 3ch;
-  text-overflow: clip;
+/* Collapsed tabs (not active, not hovered): show only the 3-char short label,
+   add separator borders, and hide the full label + edit/close controls. */
+.tab:not(.tab--active):not(:hover) {
+  border-left-color: var(--border);
+  border-right-color: var(--border);
 }
+.tab:not(.tab--active):not(:hover) .tab__label,
 .tab:not(.tab--active):not(:hover) .tab__edit,
 .tab:not(.tab--active):not(:hover) .tab__close {
   display: none;
 }
-/* Active or hovered tab is "large": full label + controls. */
+/* Active or hovered tab is "large": show full label, hide the short one. */
+.tab--active .tab__short,
+.tab:hover .tab__short {
+  display: none;
+}
 .tab--active .tab__label,
 .tab:hover .tab__label {
   max-width: 160px;

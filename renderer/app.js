@@ -767,9 +767,18 @@ function renderTabs() {
       el.appendChild(badge);
     }
 
+    const fullLabel = tab.label.replace(/^🤖\s*/, '');
+
+    // Short label (first 3 chars) shown only when the tab is collapsed — CSS
+    // truncation looked cut-off, so we render the exact short text ourselves.
+    const shortSpan = document.createElement('span');
+    shortSpan.className = 'tab__short';
+    shortSpan.textContent = fullLabel.slice(0, 3);
+    el.appendChild(shortSpan);
+
     const labelSpan = document.createElement('span');
     labelSpan.className = 'tab__label';
-    labelSpan.textContent = tab.label.replace(/^🤖\s*/, '');
+    labelSpan.textContent = fullLabel;
     el.appendChild(labelSpan);
 
     // Edit (pencil) button — visible on hover
