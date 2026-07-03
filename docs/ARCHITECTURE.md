@@ -1,136 +1,136 @@
-# Agent Desktop — Architektur (arc42)
+# Agent Desktop — Architecture (arc42)
 
-> **Version:** 1.0.0 · **Stand:** Juli 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, @google/genai, marked, highlight.js, jest
+> **Version:** 1.0.0 · **Date:** July 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, @google/genai, marked, highlight.js, jest
 >
-> Hinweis: Intern hieß die App bis 1.0 `copilot-desktop`. Mit 1.0 wurde die
-> App-Identität auf `agent-desktop` umbenannt (Datenpfad `~/.agent-desktop`,
-> Electron-`userData`), inkl. automatischer Migration. Die Provider-ID `copilot`
-> und die IPC-Kanäle `copilot:*` bleiben (referenzieren die Copilot-Integration).
+> Note: internally the app was called `copilot-desktop` until 1.0. With 1.0 the
+> app identity was renamed to `agent-desktop` (data path `~/.agent-desktop`,
+> Electron `userData`), including automatic migration. The provider id `copilot`
+> and the IPC channels `copilot:*` remain (they reference the Copilot integration).
 
 ---
 
-## 1. Einführung und Ziele
+## 1. Introduction and goals
 
-### 1.1 Aufgabenstellung
+### 1.1 Requirements overview
 
-**Agent Desktop** ist eine Electron-Desktop-App, die mehrere LLM-Provider (primär das CLI `copilot` / GitHub Copilot CLI, dazu Anthropic, Gemini, OpenAI, GLM, Ollama) in eine polierte Chat-Oberfläche einbettet. Statt auf der Kommandozeile zu arbeiten, bekommt der User:
+**Agent Desktop** is an Electron desktop app that embeds multiple LLM providers (primarily the `copilot` CLI / GitHub Copilot CLI, plus Anthropic, Gemini, OpenAI, GLM, Ollama) into a polished chat interface. Instead of working on the command line, the user gets:
 
-- Markdown-Rendering mit Syntax-Highlighting
-- Multi-Tab-Sessions, die parallel mit der CLI sprechen (via **ACP-Protokoll**)
-- Persistente Sessions, Skills, Tools und Permissions
-- Drag-&-Drop für Dateien und Bilder
-- Kontext-Überwachung (`/context`) und -Management (`/compact`, `/clear`) direkt aus der UI
-- Themes (Light, Dark, GEBIT), Settings, Sub-Agent-Routing, Test-Runner
-- Kosten-Tracking auf Basis von Token-Verbrauch und Modellpreisen
+- Markdown rendering with syntax highlighting
+- Multi-tab sessions that talk to the CLI in parallel (via the **ACP protocol**)
+- Persistent sessions, skills, tools, and permissions
+- Drag & drop for files and images
+- Context monitoring (`/context`) and management (`/compact`, `/clear`) directly from the UI
+- Themes (Light, Dark, GEBIT), settings, sub-agent routing, test runner
+- Cost tracking based on token usage and model prices
 
-### 1.2 Qualitätsziele
+### 1.2 Quality goals
 
-| Priorität | Qualitätsziel | Begründung |
+| Priority | Quality goal | Rationale |
 |---|---|---|
-| 1 | **Zuverlässige CLI-Integration** | Die App ist nutzlos, wenn der ACP-Prozess bricht oder Events verloren gehen. |
-| 2 | **Cross-Platform-Lauffähigkeit** | Primärziel Windows 11; Linux & macOS müssen funktionieren. |
-| 3 | **UI-Responsiveness** | Streaming-Antworten ohne Frame-Drops auch bei langen Markdown-Outputs. |
-| 4 | **Sicherheit** | Renderer ohne Node-Integration; alles via `contextBridge`. DOMPurify gegen XSS in CLI-Output. |
-| 5 | **Testbarkeit** | Jede Logik, die nicht zwingend Electron braucht, lebt in `src/` mit Unit-Tests (>500 Tests). |
+| 1 | **Reliable CLI integration** | The app is useless if the ACP process breaks or events are lost. |
+| 2 | **Cross-platform operation** | Primary target Windows 11; Linux & macOS must work. |
+| 3 | **UI responsiveness** | Streaming responses without frame drops, even for long markdown output. |
+| 4 | **Security** | Renderer without Node integration; everything via `contextBridge`. DOMPurify against XSS in CLI output. |
+| 5 | **Testability** | Any logic that doesn't strictly need Electron lives in `src/` with unit tests (>500 tests). |
 
-### 1.3 Stakeholder
+### 1.3 Stakeholders
 
-| Rolle | Erwartungen |
+| Role | Expectations |
 |---|---|
-| **Endnutzer (Entwickler)** | Schneller, stabiler GUI-Zugang zu Copilot mit allem, was die CLI kann + UI-Komfort |
-| **Wartende Entwickler** | Klare Modul-Grenzen, ausführliche Tests, lesbare Doku |
-| **Security-Review** | Saubere Renderer/Main-Trennung, kein direkter `eval`/Node-Zugriff im Renderer, sanitisierter HTML-Output |
-| **Betrieb / Setup** | `setup.ps1` / manuelle Anleitung muss auf frischen Maschinen funktionieren — siehe README |
+| **End user (developer)** | Fast, stable GUI access to Copilot with everything the CLI can do + UI comfort |
+| **Maintaining developers** | Clear module boundaries, thorough tests, readable docs |
+| **Security review** | Clean renderer/main separation, no direct `eval`/Node access in the renderer, sanitized HTML output |
+| **Ops / setup** | `setup.ps1` / manual instructions must work on fresh machines — see README |
 
 ---
 
-## 2. Randbedingungen
+## 2. Constraints
 
-### 2.1 Technisch
+### 2.1 Technical
 
-- **Electron 35.x** als Runtime (Chromium + Node.js).
-- **GitHub Copilot CLI** (`copilot`-Binary aus `gh extension install github/gh-copilot`) muss im PATH des Prozesses auffindbar sein.
-- **ACP (Agent Communication Protocol):** Die App kommuniziert mit der CLI ausschließlich über `copilot --acp` (JSON-RPC über NDJSON auf stdio). Kein direktes CLI-Spawning mit `--output-format json`, kein PTY mehr.
-- **Keine eigene Cloud-Komponente** — alle KI-Roundtrips laufen über den lokal installierten Copilot CLI.
+- **Electron 35.x** as the runtime (Chromium + Node.js).
+- **GitHub Copilot CLI** (the `copilot` binary from `gh extension install github/gh-copilot`) must be findable in the process PATH (only for the Copilot provider).
+- **ACP (Agent Communication Protocol):** the app communicates with the CLI exclusively via `copilot --acp` (JSON-RPC over NDJSON on stdio). No direct CLI spawning with `--output-format json`, no PTY anymore.
+- **No own cloud component** — Copilot roundtrips go through the locally installed Copilot CLI; the direct-API providers call their respective APIs directly.
 
-### 2.2 Organisatorisch
+### 2.2 Organizational
 
-- Lizenz: MIT
-- Branch-Workflow: kein direkter Push auf `main`. Feature-/Fix-Branches mit Conventional Commits.
-- Versionierung: SemVer; vor jedem Commit Patch- oder Minor-Bump in `package.json`.
+- License: Apache-2.0
+- Branch workflow: no direct push to `main`. Feature/fix branches with conventional commits.
+- Versioning: SemVer; patch or minor bump in `package.json` before every commit.
 
-### 2.3 Konventionen
+### 2.3 Conventions
 
-- **Sprachen:** Code & Tests in englischen Bezeichnern, Kommentare/UI/Doku überwiegend Deutsch.
-- **Linter:** ESLint flat-config (`eslint.config.mjs`).
-- **Tests:** Jest (Unit) + Playwright (E2E unter `e2e/`).
+- **Languages:** code & tests use English identifiers; comments/UI in German, docs in English.
+- **Linter:** ESLint flat config (`eslint.config.mjs`).
+- **Tests:** Jest (unit) + Playwright (E2E under `e2e/`).
 
 ---
 
-## 3. Kontextabgrenzung
+## 3. Context and scope
 
-### 3.1 Fachlicher Kontext
+### 3.1 Business context
 
 ```
                 ┌──────────────────────────┐
-                │   User (Entwickler)      │
-                │   Maus, Tastatur,        │
-                │   Drag&Drop, Clipboard   │
+                │   User (developer)       │
+                │   mouse, keyboard,       │
+                │   drag&drop, clipboard   │
                 └────────────┬─────────────┘
-                             │ GUI (Electron Window)
+                             │ GUI (Electron window)
                              ▼
    ┌─────────────────────────────────────────────────┐
    │               Agent Desktop (App)               │
    └──┬──────────────┬────────────────┬──────────────┘
       │              │                │
-      │ ACP          │ liest/         │ liest/schreibt
-      │ (JSON-RPC)   │ schreibt       │ (Theme, Tabs,
-      ▼              ▼                ▼   Permissions)
+      │ ACP          │ reads/         │ reads/writes
+      │ (JSON-RPC)   │ writes         │ (theme, tabs,
+      ▼              ▼                ▼   permissions)
  ┌──────────┐  ┌────────────┐  ┌───────────────────────┐
  │ copilot  │  │ ~/.copilot │  │ userData/             │
  │   CLI    │  │ /sessions, │  │   preferences.json    │
- │  --acp   │  │   skills,  │  │ ~/.agent-desktop/   │
+ │  --acp   │  │   skills,  │  │ ~/.agent-desktop/     │
  │ (gh ext) │  │ instructns │  │   logs, folders.json  │
  └────┬─────┘  └────────────┘  └───────────────────────┘
       │
       ▼
- GitHub Copilot Cloud  (über CLI; nicht direkt aus der App)
+ GitHub Copilot Cloud  (via CLI; not directly from the app)
 ```
 
-### 3.2 Technischer Kontext
+### 3.2 Technical context
 
-| Schnittstelle | Richtung | Beschreibung |
+| Interface | Direction | Description |
 |---|---|---|
-| **Copilot CLI (ACP)** | App ↔ CLI | `copilot --acp` — JSON-RPC über NDJSON auf stdin/stdout. Methoden: `initialize`, `session/new`, `session/load`, `session/prompt`. Events: `session/update`-Notifications |
-| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`), Skills (`~/.copilot/skills/`), Logs (`~/.agent-desktop/logs/`), Preferences (`app.getPath('userData')/preferences.json`), Folders-Config |
-| **Shell** | App → Shell | Test-Runner spawnt `npm test`, `npm run test:coverage`, Playwright |
-| **OS Window-Manager** | App ↔ OS | Native Frame deaktiviert; Custom Titlebar mit min/max/close via IPC |
+| **Copilot CLI (ACP)** | App ↔ CLI | `copilot --acp` — JSON-RPC over NDJSON on stdin/stdout. Methods: `initialize`, `session/new`, `session/load`, `session/prompt`. Events: `session/update` notifications |
+| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`), skills (`~/.copilot/skills/`), logs (`~/.agent-desktop/logs/`), preferences (`app.getPath('userData')/preferences.json`), folders config |
+| **Shell** | App → Shell | Test runner spawns `npm test`, `npm run test:coverage`, Playwright |
+| **OS window manager** | App ↔ OS | Native frame disabled; custom titlebar with min/max/close via IPC |
 
 ---
 
-## 4. Lösungsstrategie
+## 4. Solution strategy
 
-| Entscheidung | Warum |
+| Decision | Why |
 |---|---|
-| **Electron** statt Web-App | Nativer Filesystem- und CLI-Zugriff — undenkbar im Browser |
-| **Renderer ohne Node-Integration** | XSS in CLI-Output darf nie zum RCE werden. Alles über `contextBridge` in `preload.js`. |
-| **ACP statt JSONL-Spawn + PTY** | Ein einziger langlebiger Prozess pro Tab (statt Spawn-per-Message + PTY); Slash-Commands via `silentCommand()` statt PTY-Bracketed-Paste. Robuster, einfacher zu testen, kein node-pty mehr. |
-| **`src/` für reine Logik, `src/ipc/` für IPC-Handler** | Trennung Domänenlogik vs. Electron-Bindings → testbar ohne Electron-Mock-Hölle |
-| **`silentCommand(command)`** | Slash-Commands (`/context`, `/usage`, `/compact`, `/clear`) werden als stille `session/prompt`-Requests abgesetzt; die Response-Chunks werden intern gesammelt und nicht an die UI weitergeleitet |
-| **`--deny-tool` nur beim Spawn** | ACP hat keine Runtime-API für Tool-Denial → Prozess-Neustart (`stop → updateOptions → start → loadSession`) bei Änderung der Session-spezifischen Deny-Liste |
-| **`buildEnv()` für Child-Prozesse** | Electron sourct unter Linux/macOS keine Shell-RC → `~/.local/bin` etc. fehlen → `copilot`-Binary nicht auffindbar. Wird zentral gefixt. |
-| **Markdown-Rendering im Preload** | Marked + Highlight.js + DOMPurify einmal initialisiert, im Renderer als reine Funktion `window.markdown.render` |
+| **Electron** instead of a web app | Native filesystem and CLI access — impossible in the browser |
+| **Renderer without Node integration** | XSS in CLI output must never become RCE. Everything via `contextBridge` in `preload.js`. |
+| **ACP instead of JSONL spawn + PTY** | A single long-lived process per tab (instead of spawn-per-message + PTY); slash commands via `silentCommand()` instead of PTY bracketed paste. More robust, easier to test, no more node-pty. |
+| **`src/` for pure logic, `src/ipc/` for IPC handlers** | Separates domain logic from Electron bindings → testable without Electron mock hell |
+| **`silentCommand(command)`** | Slash commands (`/context`, `/usage`, `/compact`, `/clear`) are issued as silent `session/prompt` requests; the response chunks are collected internally and not forwarded to the UI |
+| **`--deny-tool` only at spawn** | ACP has no runtime API for tool denial → process restart (`stop → updateOptions → start → loadSession`) when the session-specific deny list changes |
+| **`buildEnv()` for child processes** | On Linux/macOS Electron doesn't source the shell RC → `~/.local/bin` etc. are missing → the `copilot` binary isn't findable. Fixed centrally. |
+| **Markdown rendering in the preload** | Marked + Highlight.js + DOMPurify initialized once, exposed to the renderer as a pure function `window.markdown.render` |
 
 ---
 
-## 5. Bausteinsicht
+## 5. Building block view
 
-### 5.1 Whitebox Gesamtsystem (Level 1)
+### 5.1 Whitebox overall system (level 1)
 
 ```
-┌────────────────────────────── Renderer Process ──────────────────────────────┐
+┌────────────────────────────── Renderer process ──────────────────────────────┐
 │                                                                              │
-│  renderer/index.html  ─►  renderer/app.js  (Chat-, Tab-, Settings-Logik)    │
+│  renderer/index.html  ─►  renderer/app.js  (chat, tab, settings logic)      │
 │                                                                              │
 │           ┌──────────────────── renderer/modules/ ──────────────────┐        │
 │           │ session-tools.js  images.js  todos.js  test-runner.js   │        │
@@ -141,155 +141,154 @@
 └──────────────────────────────┼───────────────────────────────────────────────┘
                                │  contextBridge (preload.js, sandboxed)
 ┌──────────────────────────────▼───────────────────────────────────────────────┐
-│                                Main Process                                  │
+│                                Main process                                  │
 │                                                                              │
-│  main.js (~500 LoC, Bootstrap + Window + AcpClient-Verwaltung + IPC-Glue)   │
+│  main.js (bootstrap + window + AcpClient management + IPC glue)             │
 │     │                                                                        │
-│     ├── src/acp-client.js             — AcpClient (JSON-RPC über NDJSON)    │
-│     ├── src/ipc/images-ipc.js         — Bilder/Videos IPC                   │
-│     ├── src/ipc/tests-ipc.js          — Test-Runner IPC                     │
+│     ├── src/acp-client.js             — AcpClient (JSON-RPC over NDJSON)    │
+│     ├── src/ipc/images-ipc.js         — images/videos IPC                   │
+│     ├── src/ipc/tests-ipc.js          — test-runner IPC                     │
 │     │                                                                        │
 │     ├── src/main-helpers.js           — buildEnv, sendToRenderer             │
-│     ├── src/renderer-logic.js         — Pure Logik (parseTokens, pricing, …)│
-│     ├── src/preferences.js            — read/write/migrate Preferences       │
-│     ├── src/sessions.js               — Checkpoints, Plan, Todos             │
-│     ├── src/named-sessions.js         — User-Bezeichner für Session-IDs      │
-│     ├── src/scanners.js               — Skills, Folder-Config                │
-│     ├── src/agents.js                 — Sub-Agent-Verzeichnis                │
-│     ├── src/file-processing.js        — Drag&Drop-Pipeline                   │
-│     ├── src/logger.js                 — File-Logger ~/.agent-desktop/logs  │
+│     ├── src/renderer-logic.js         — pure logic (parseTokens, pricing, …)│
+│     ├── src/preferences.js            — read/write/migrate preferences       │
+│     ├── src/sessions.js               — checkpoints, plan, todos             │
+│     ├── src/named-sessions.js         — user labels for session IDs          │
+│     ├── src/scanners.js               — skills, folder config                │
+│     ├── src/agents.js                 — sub-agent directory                  │
+│     ├── src/file-processing.js        — drag&drop pipeline                   │
+│     ├── src/logger.js                 — file logger ~/.agent-desktop/logs  │
 │     └── src/utils.js                  — stripAnsi, safeSessionPath, …       │
 └──────────────────────────────────────────────────────────────────────────────┘
                                │  ACP (JSON-RPC / NDJSON stdio)
                                ▼
                     ┌─────────────────────┐
                     │  copilot --acp      │
-                    │  (ein Prozess/Tab)  │
+                    │  (one process/tab)  │
                     └─────────────────────┘
 ```
 
-### 5.2 Prozess-Trennung
+### 5.2 Process separation
 
-| Prozess | Verantwortung |
+| Process | Responsibility |
 |---|---|
-| **Main Process** | Window-Erstellung, AcpClient-Management, File-I/O, alle IPC-Handler |
-| **Renderer Process** | UI-Rendering, Chat-Logik, Tab-State, Theme-Verwaltung |
-| **preload.js** | Sichere Brücke zwischen Main und Renderer via `contextBridge` |
+| **Main process** | Window creation, AcpClient management, file I/O, all IPC handlers |
+| **Renderer process** | UI rendering, chat logic, tab state, theme management |
+| **preload.js** | Secure bridge between main and renderer via `contextBridge` |
 
-### 5.3 Dateistruktur
+### 5.3 File structure
 
-| Datei / Ordner | Beschreibung |
+| File / folder | Description |
 |---|---|
-| `main.js` | **Electron Main Process** — Window-Erstellung, AcpClient-Verwaltung, IPC-Glue |
-| `preload.js` | **Context Bridge** — exponiert `window.copilot` und `window.markdown` |
-| `renderer/index.html` | **App-Shell** — Custom Titlebar, Sidebar, Chat-Area, Settings-Overlay |
-| `renderer/app.js` | **Frontend-Logik** — Chat-UI, Tab-Management, Settings, Kosten-Visualisierung |
-| `renderer/styles.css` | **Alle Styles** — CSS-Variablen, 3 Themes (Light/Dark/GEBIT) |
-| `renderer/modules/*.js` | **UI-Module** — Bilder, Todos, Test-Runner, Session-Tools, Dev-Console, Kosten-Panel |
-| `src/acp-client.js` | **AcpClient** (Copilot-Backend) — JSON-RPC über NDJSON stdio, Session-Management, silentCommand |
-| `src/providers/*.js` | **Direkt-API-Backends** — Registry, `ApiAgentClient` (Agent-Schleife), Anthropic-Adapter, Tool-Runtime, Session-Store, System-Context |
-| `src/secure-store.js` | **Verschlüsselte API-Key-Speicherung** (Electron `safeStorage`) |
-| `src/renderer-logic.js` | **Pure Logik** — Token-Parser, Credit-Berechnung, Provider-Auflösung, Cost-Log-Helfer |
-| `src/ipc/*.js` | **IPC-Handler-Module** — Bilder, Tests |
-| `src/*.js` | **Reine Logik-Module** — testbar ohne Electron |
-| `__tests__/` | **Jest Unit-Tests** |
-| `e2e/` | **Playwright E2E-Tests** |
+| `main.js` | **Electron main process** — window creation, AcpClient management, IPC glue |
+| `preload.js` | **Context bridge** — exposes `window.copilot` and `window.markdown` |
+| `renderer/index.html` | **App shell** — custom titlebar, sidebar, chat area, settings overlay |
+| `renderer/app.js` | **Frontend logic** — chat UI, tab management, settings, cost visualization |
+| `renderer/styles.css` | **All styles** — CSS variables, 3 themes (Light/Dark/GEBIT) |
+| `renderer/modules/*.js` | **UI modules** — images, todos, test runner, session tools, dev console, cost panel |
+| `src/acp-client.js` | **AcpClient** (Copilot backend) — JSON-RPC over NDJSON stdio, session management, silentCommand |
+| `src/providers/*.js` | **Direct-API backends** — registry, `ApiAgentClient` (agent loop), Anthropic adapter, tool runtime, session store, system context |
+| `src/secure-store.js` | **Encrypted API-key storage** (Electron `safeStorage`) |
+| `src/data-dir.js` | **App data directory + one-shot legacy-data migration** |
+| `src/model-discovery.js` | **Dynamic per-provider model discovery** |
+| `src/renderer-logic.js` | **Pure logic** — token parser, credit calculation, provider resolution, cost-log helpers |
+| `src/ipc/*.js` | **IPC handler modules** — images, tests |
+| `src/*.js` | **Pure logic modules** — testable without Electron |
+| `__tests__/` | **Jest unit tests** |
+| `e2e/` | **Playwright E2E tests** |
 
 ### 5.4 AcpClient (`src/acp-client.js`)
 
-Der `AcpClient` kapselt die gesamte Kommunikation mit einem `copilot --acp`-Prozess.
+The `AcpClient` encapsulates all communication with one `copilot --acp` process.
 
-**State-Machine:**
+**State machine:**
 ```
 dead → starting → ready ⇄ busy → dead
 ```
 
-**Wichtige Methoden:**
+**Key methods:**
 
-| Methode | Beschreibung |
+| Method | Description |
 |---|---|
-| `start()` | Spawnt `copilot --acp`, führt `initialize`-Handshake durch |
-| `stop()` | Beendet den Prozess sauber |
-| `newSession(sessionId, opts)` | Erstellt eine neue ACP-Session |
-| `loadSession(sessionId)` | Lädt eine bestehende Session (nach Prozess-Neustart) |
-| `prompt(text, opts)` | Sendet eine Nachricht, streamt Events an den Renderer |
-| `silentCommand(command)` | Sendet einen Slash-Command (`/context`, `/usage`, …) und gibt den Text zurück, ohne etwas an die UI weiterzuleiten |
-| `updateOptions(opts)` | Aktualisiert Options (z. B. `deniedTools`) für den nächsten Start |
+| `start()` | Spawns `copilot --acp`, performs the `initialize` handshake |
+| `stop()` | Terminates the process cleanly |
+| `newSession(sessionId, opts)` | Creates a new ACP session |
+| `loadSession(sessionId)` | Loads an existing session (after process restart) |
+| `prompt(text, opts)` | Sends a message, streams events to the renderer |
+| `silentCommand(command)` | Sends a slash command (`/context`, `/usage`, …) and returns the text without forwarding anything to the UI |
+| `updateOptions(opts)` | Updates options (e.g. `deniedTools`) for the next start |
 
-**`silentCommand`-Ablauf:**
-1. Setzt `#contextQueryCollector = []`
-2. Sendet `session/prompt` mit dem Command-Text
-3. `agent_message_chunk`-Events werden in den Collector geschrieben statt an den Renderer
-4. `agent_turn_start/end`-Events werden unterdrückt
-5. Nach Response: gibt `collector.join('')` zurück, setzt Collector auf `null`
+**`silentCommand` flow:**
+1. Sets `#contextQueryCollector = []`
+2. Sends `session/prompt` with the command text
+3. `agent_message_chunk` events are written into the collector instead of to the renderer
+4. `agent_turn_start/end` events are suppressed
+5. After the response: returns `collector.join('')`, sets the collector to `null`
 
-**Prozess-Neustart für Session-spezifische Tool-Denial:**
-Da `--deny-tool`-Flags nur beim Spawn akzeptiert werden, muss bei Änderung der Session-spezifischen Deny-Liste der Prozess neu gestartet werden:
+**Process restart for session-specific tool denial:**
+Since `--deny-tool` flags are only accepted at spawn, the process must be restarted when the session-specific deny list changes:
 ```
 stop() → updateOptions({ deniedTools }) → start() → loadSession(sessionId)
 ```
 
-### 5.4a Multi-Provider-Backends (`src/providers/`)
+### 5.4a Multi-provider backends (`src/providers/`)
 
-Pro Tab kann ein anderes Backend genutzt werden. **Der entscheidende Vertrag:** jedes Backend
-emittiert dasselbe Renderer-Event-Vokabular (`copilot:event` / `copilot:done`) wie der `AcpClient`,
-sodass der Renderer backend-agnostisch bleibt. `main.js` hält eine `backends`-Map (tabId → Backend)
-und wählt das Backend über `getModelProvider(modelId)`.
+A different backend can be used per tab. **The key contract:** every backend emits the same renderer event vocabulary (`copilot:event` / `copilot:done`) as the `AcpClient`, so the renderer stays backend-agnostic. `main.js` keeps a `backends` map (tabId → backend) and selects the backend via `getModelProvider(modelId)`.
 
-| Datei | Aufgabe |
+| File | Purpose |
 |---|---|
-| `providers/index.js` | Registry — Modell→Provider, `createApiBackend()` |
-| `providers/api-agent-client.js` | Basisklasse: Agent-Tool-Schleife, Token-/Kontext-Accounting, Persistenz, `/context`/`/compact`/`/usage` lokal |
-| `providers/anthropic-provider.js` | Anthropic-Adapter: Streaming, Tools, adaptives Thinking, Prompt-Caching, Compact |
-| `providers/agent-tools.js` | Provider-agnostische Tools (`shell` via PowerShell auf Windows, Datei-/Such-Tools) + Deny-Gating |
-| `providers/session-store.js` | History-Persistenz unter `~/.agent-desktop/api-sessions/` |
-| `providers/system-context.js` | Skills + Agents + `copilot-instructions.md` → gecachter System-Prompt |
+| `providers/index.js` | Registry — model→provider, `createApiBackend()` |
+| `providers/api-agent-client.js` | Base class: agent tool loop, token/context accounting, persistence, `/context`/`/compact`/`/usage` locally |
+| `providers/anthropic-provider.js` | Anthropic adapter: streaming, tools, adaptive thinking, prompt caching, compact |
+| `providers/openai-compatible-provider.js` | Shared OpenAI-compatible core (chat completions + function calling, SSE) for OpenAI/GLM/Ollama |
+| `providers/gemini-provider.js` | Gemini adapter: live search (grounding) + file tools, togglable per tab |
+| `providers/agent-tools.js` | Provider-agnostic tools (`shell` via PowerShell on Windows, file/search tools) + deny gating |
+| `providers/session-store.js` | History persistence under `~/.agent-desktop/api-sessions/` |
+| `providers/system-context.js` | Skills + agents + `copilot-instructions.md` → cached system prompt |
 
-API-Keys liegen verschlüsselt im OS-Schlüsselbund (`src/secure-store.js`); der Klartext-Key verlässt
-den Hauptprozess nicht. Slash-Commands der Direkt-Provider sind lokale Äquivalente (`/usage` gibt die
-Copilot-Token-Zeile zurück → bestehende Kosten-Pipeline greift unverändert).
+API keys are stored encrypted in the OS keychain (`src/secure-store.js`); the plaintext key never leaves the main process. The direct providers' slash commands are local equivalents (`/usage` returns the Copilot token line → the existing cost pipeline applies unchanged).
 
-### 5.5 Renderer-Module
+### 5.5 Renderer modules
 
-| Modul | Aufgabe |
+| Module | Purpose |
 |---|---|
-| `session-tools.js` | UI für Session-spezifische Denied-Tools (Popup, Toggle, Prozess-Neustart) |
-| `costs.js` | Kosten-Log-Persistenz und „Kosten"-Settings-Tab (gestapeltes Balkendiagramm + Aufschlüsselung) |
-| `images.js` | Bild-Thumbnails, Lightbox, Drag&Drop in den Chat |
-| `todos.js` | Per-Session-Aufgabenliste mit IPC-Backend |
-| `test-runner.js` | Frontend für Jest/Playwright/Coverage |
-| `dev-console.js` | UI-Pendant zur Browser-DevConsole |
-| `utils.js` | DOM-Hilfen |
+| `session-tools.js` | UI for session-specific denied tools (popup, toggle, process restart) |
+| `costs.js` | Cost-log persistence and the "Cost" page (stacked bar chart + breakdown) |
+| `images.js` | Image thumbnails, lightbox, drag&drop into the chat |
+| `todos.js` | Per-session task list with IPC backend |
+| `test-runner.js` | Frontend for Jest/Playwright/coverage |
+| `dev-console.js` | UI counterpart to the browser dev console |
+| `utils.js` | DOM helpers |
 
-### 5.6 `src/renderer-logic.js` — Pure Logik
+### 5.6 `src/renderer-logic.js` — pure logic
 
-Enthält alle Funktionen, die keine DOM- oder Electron-Abhängigkeiten haben:
+Contains all functions with no DOM or Electron dependencies:
 
-- **Token-Parsing:** `parseTokenK`, `parseUsageTokens`, `parseUsageRequests`
-- **Credit-Berechnung:** `estimateCredits(tokens, modelId)`, `MODEL_PRICING`
-- **Cost-Log-Helfer:** `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog`
-- **Display-Helfer:** `shortenPath`, `truncatePath`, `formatDate`, `escapeHtml`, `toolIcon`, …
+- **Token parsing:** `parseTokenK`, `parseUsageTokens`, `parseUsageRequests`
+- **Credit calculation:** `estimateCredits(tokens, modelId)`, `MODEL_PRICING`
+- **Cost-log helpers:** `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog`
+- **Display helpers:** `shortenPath`, `truncatePath`, `formatDate`, `escapeHtml`, `toolIcon`, …
 
-### 5.7 First-Run Onboarding Wizard
+### 5.7 First-run onboarding wizard
 
-Ein mehrstufiger Wizard, der beim allerersten App-Start den User durch Authentifizierung, Ordner-Konfiguration und Feature-Einführung leitet.
+A multi-step wizard that guides the user through authentication, folder configuration, and a feature intro on the very first app start.
 
-| Schritt | Beschreibung |
+| Step | Description |
 |---|---|
-| 1. Auth | Prüfung/Anleitung für `gh auth login` |
-| 2. Folder Setup | Auswahl des Arbeitsverzeichnisses |
-| 3. Category Selection | Skill-Kategorien zur Vorinstallation auswählen |
-| 4. Feature Intro | Überblick über App-Features |
+| 1. Auth | Check/guidance for `gh auth login` |
+| 2. Folder setup | Choose the working directory |
+| 3. Category selection | Choose skill categories to pre-install |
+| 4. Feature intro | Overview of app features |
 
 ---
 
-## 6. Laufzeitsicht
+## 6. Runtime view
 
-### 6.1 Chat-Anfrage (Happy Path, ACP)
+### 6.1 Chat request (happy path, ACP)
 
 ```
 User              Renderer            Preload          Main            AcpClient         copilot --acp
- │ tippt + Enter    │                    │                │                │                    │
+ │ types + Enter    │                    │                │                │                    │
  │─────────────────▶│                    │                │                │                    │
  │                  │ copilot.chat       │ ipcRenderer    │                │                    │
  │                  │ .send(tabId, ...)  │ .invoke(       │                │                    │
@@ -304,16 +303,16 @@ User              Renderer            Preload          Main            AcpClient
  │                  │ ◄── copilot:done ──┼────────────────┤                │                    │
 ```
 
-**Detaillierter Ablauf:**
-1. `sendMessage()` im Renderer sammelt: Text, aktive Skills, Modell, Session-ID, Deny-Tools, CWD, Autopilot-Flag
-2. IPC-Call `copilot:send` → `main.js` → `client.prompt(text, opts)`
-3. AcpClient sendet `session/prompt` an den laufenden `copilot --acp`-Prozess
-4. `session/update`-Notifications kommen als NDJSON-Stream zurück
-5. Events werden gemappt und via `sendToRenderer('copilot:event', tabId, event)` an den Renderer gesendet
-6. Bei Abschluss: `copilot:done`-Event → Tab-Status wird zurückgesetzt
-7. `refreshUsageDisplay()` ruft `silentCommand('/usage')` auf und berechnet Kosten-Delta
+**Detailed flow:**
+1. `sendMessage()` in the renderer collects: text, active skills, model, session ID, denied tools, CWD, autopilot flag
+2. IPC call `copilot:send` → `main.js` → `client.prompt(text, opts)`
+3. AcpClient sends `session/prompt` to the running `copilot --acp` process
+4. `session/update` notifications come back as an NDJSON stream
+5. Events are mapped and sent to the renderer via `sendToRenderer('copilot:event', tabId, event)`
+6. On completion: `copilot:done` event → the tab status is reset
+7. `refreshUsageDisplay()` calls `silentCommand('/usage')` and computes the cost delta
 
-### 6.2 Slash-Command (`/context`, `/compact`, `/clear`, `/usage`)
+### 6.2 Slash command (`/context`, `/compact`, `/clear`, `/usage`)
 
 ```
 Renderer
@@ -327,182 +326,194 @@ Main
      #contextQueryCollector = []
      session/prompt → { type: text, text: '/context' }
      │
-     ├── agent_message_chunk → collector.push(text)   [nicht an Renderer]
-     ├── agent_turn_start/end → unterdrückt
+     ├── agent_message_chunk → collector.push(text)   [not to the renderer]
+     ├── agent_turn_start/end → suppressed
      │
      ▼  Response
-     return collector.join('')   → z.B. "Context: 18% (36k/200k tokens)\n..."
+     return collector.join('')   → e.g. "Context: 18% (36k/200k tokens)\n..."
 ```
 
-**Kein PTY mehr:** Alle Slash-Commands laufen über `silentCommand()` als stille ACP-Requests. Das ist zuverlässiger als PTY-Bracketed-Paste und braucht kein `node-pty`.
+**No more PTY:** all slash commands run via `silentCommand()` as silent ACP requests. This is more reliable than PTY bracketed paste and needs no `node-pty`.
 
-### 6.3 Prozess-Neustart (Session-spezifische Tool-Denial)
+### 6.3 Process restart (session-specific tool denial)
 
 ```
-User deaktiviert Tool in Session-Tools-Popup
+User disables a tool in the session-tools popup
   │
   ▼  restartWithUpdatedDeniedTools()  [renderer/modules/session-tools.js]
      IPC: copilot:restartWithDeniedTools(tabId, mergedDeniedTools)
   │
   ▼  main.js
-     client.stop()                    → Prozess beenden
-     client.updateOptions(deniedTools)→ neue Deny-Liste setzen
-     client.start()                   → neuen Prozess spawnen
-     client.loadSession(sessionId)    → Session wiederherstellen
+     client.stop()                    → terminate the process
+     client.updateOptions(deniedTools)→ set the new deny list
+     client.start()                   → spawn a new process
+     client.loadSession(sessionId)    → restore the session
 ```
 
-### 6.4 App-Start
+### 6.4 App start
 
 ```
-1. main.js geladen
-2. initLogger()
-3. console.log/warn/error gehookt (→ Datei + DevConsole)
-4. folderConfig = readFolderConfig()
-5. _prefsManager = createPreferencesManager(...)
-6. app.whenReady() → BrowserWindow
-7. IPC-Handler registriert
-8. Renderer lädt index.html → app.js
-9. preferences:read → persistenter State
-10. Tabs aus openTabs wiederhergestellt
-11. Für jeden Tab: AcpClient erstellt + gestartet (session/new oder session/load)
-12. Onboarding prüfen → ggf. Wizard
+1. main.js loaded
+2. migrateLegacyData()  (copilot-desktop → agent-desktop, one-shot)
+3. initLogger()
+4. console.log/warn/error hooked (→ file + dev console)
+5. folderConfig = readFolderConfig()
+6. _prefsManager = createPreferencesManager(...)
+7. app.whenReady() → BrowserWindow
+8. IPC handlers registered
+9. renderer loads index.html → app.js
+10. preferences:read → persistent state
+11. tabs restored from openTabs
+12. for each tab: AcpClient created + started (session/new or session/load)
+13. check onboarding → wizard if needed
 ```
 
-### 6.5 IPC-Kommunikation
+### 6.5 IPC communication
 
-#### Namespace: `copilot` (Chat / ACP)
+#### Namespace: `copilot` (chat / ACP)
 
-| Channel | Typ | Beschreibung |
+| Channel | Type | Description |
 |---|---|---|
-| `copilot:send` | handle | Sendet Chat-Nachricht via ACP |
-| `copilot:stop` | on | ACP-Prozess für Tab stoppen |
-| `copilot:silentCommand` | handle | Slash-Command still ausführen, Text zurückgeben |
-| `copilot:restartWithDeniedTools` | handle | Prozess neu starten mit neuer Deny-Liste |
-| `copilot:getCwd` | handle | Aktuelles Arbeitsverzeichnis |
-| `copilot:openCwd` | handle | CWD im Explorer öffnen |
-| `copilot:getVersions` | handle | Versionen (App, CLI, Node, Electron) |
-| `copilot:getInstructions` | handle | `copilot-instructions.md` lesen |
-| `copilot:openLogDir` | handle | Log-Verzeichnis öffnen |
+| `copilot:send` | handle | Sends a chat message via ACP |
+| `copilot:stop` | on | Stop the ACP process for a tab |
+| `copilot:silentCommand` | handle | Run a slash command silently, return the text |
+| `copilot:restartWithDeniedTools` | handle | Restart the process with a new deny list |
+| `copilot:getCwd` | handle | Current working directory |
+| `copilot:openCwd` | handle | Open the CWD in the file explorer |
+| `copilot:getVersions` | handle | Versions (app, CLI, Node, Electron) |
+| `copilot:getInstructions` | handle | Read `copilot-instructions.md` |
+| `copilot:openLogDir` | handle | Open the log directory |
+
+#### Namespace: `providers` (direct APIs)
+
+| Channel | Description |
+|---|---|
+| `providers:status` | OS encryption available + which providers have a stored key |
+| `providers:setKey/deleteKey` | Store/remove an encrypted API key (never returns the key) |
+| `providers:listModels` | Dynamic model discovery per provider |
+| `providers:loadSessionHistory` | Persisted direct-API conversation history |
 
 #### Namespace: `sessions`
 
-| Channel | Typ | Beschreibung |
+| Channel | Type | Description |
 |---|---|---|
-| `sessions:create` | handle | Neue benannte Session erstellen |
-| `sessions:delete` | handle | Session-Ordner löschen |
-| `sessions:readCheckpoints` | handle | Checkpoint-Dateien lesen |
-| `sessions:readPlan` | handle | `plan.md` lesen |
+| `sessions:create` | handle | Create a new named session |
+| `sessions:delete` | handle | Delete the session folder |
+| `sessions:readCheckpoints` | handle | Read checkpoint files |
+| `sessions:readPlan` | handle | Read `plan.md` |
 
 #### Namespace: `todos` / `images` / `videos`
 
-| Channel | Beschreibung |
+| Channel | Description |
 |---|---|
-| `todos:list/add/update/delete/reorder` | CRUD + Reorder für Session-Todos |
-| `images:list/open/delete/openFolder` | Bilder-Management |
-| `videos:extractFrames` | Video-Frame-Extraktion |
+| `todos:list/add/update/delete/reorder` | CRUD + reorder for session todos |
+| `images:list/open/delete/openFolder` | Image management |
+| `videos:extractFrames` | Video frame extraction |
 
 #### Namespace: `preferences` / `instructions` / `folders` / `skills` / `agents` / `files` / `tests` / `window` / `log`
 
-| Channel | Beschreibung |
+| Channel | Description |
 |---|---|
 | `preferences:read/write` | Preferences I/O |
 | `instructions:read/write` | `copilot-instructions.md` I/O |
-| `folders:read/save/browse/browse-file` | Ordner-Konfiguration |
-| `skills:list/listProject/getDisabled/setDisabled` | Skills-Verwaltung |
-| `agents:list/listProject` | Sub-Agents |
-| `mcp:listProject` | MCP-Server aus `mcp.json` |
-| `files:processDropped` | Drag&Drop-Verarbeitung |
-| `tests:run/coverage/e2e` | Test-Runner |
-| `window:minimize/maximize/close` | Fenstersteuerung |
-| `log:write` | Log-Eintrag aus Renderer |
+| `folders:read/save/browse/browse-file` | Folder configuration |
+| `skills:list/listProject/getDisabled/setDisabled` | Skill management |
+| `agents:list/listProject` | Sub-agents |
+| `mcp:listProject` | MCP servers from `mcp.json` |
+| `files:processDropped` | Drag&drop processing |
+| `tests:run/coverage/e2e` | Test runner |
+| `window:minimize/maximize/close` | Window control |
+| `log:write` | Log entry from the renderer |
 
 #### Namespace: `onboarding` / `tutorial` / `dev`
 
-| Channel | Beschreibung |
+| Channel | Description |
 |---|---|
-| `onboarding:getStatus/setComplete/getCategories/installCategory` | First-Run-Wizard |
-| `tutorial:getFlags/setFlag` | Tutorial-Flags (Key-Whitelist: `tutorialSkillsShown`, `tutorialRenameShown`) |
-| `dev:setOnboardingComplete` | Onboarding zurücksetzen |
+| `onboarding:getStatus/setComplete/getCategories/installCategory` | First-run wizard |
+| `tutorial:getFlags/setFlag` | Tutorial flags (key whitelist: `tutorialSkillsShown`, `tutorialRenameShown`) |
+| `dev:setOnboardingComplete` | Reset onboarding |
 
 ---
 
-## 7. Verteilungssicht
+## 7. Deployment view
 
-| Umgebung | Komponenten | Persistenz |
+| Environment | Components | Persistence |
 |---|---|---|
-| **End-User-Desktop** (Win 11, Linux, macOS) | Electron-App, `copilot`-CLI (extern) | `app.getPath('userData')` (Theme, Tabs, Permissions, Cost-Log); `~/.agent-desktop/` (Logs, Folders); `~/.copilot/` (Sessions, Skills — CLI-verwaltet) |
-| **CI** | `node`, `npm test`, `npm run lint` | nichts persistent |
-| **Entwicklung** | `npm run dev` (Electron + DevTools), Jest-Watch | `preferences.test.json` separat |
+| **End-user desktop** (Win 11, Linux, macOS) | Electron app, `copilot` CLI (external) | `app.getPath('userData')` (theme, tabs, permissions, cost log); `~/.agent-desktop/` (logs, folders); `~/.copilot/` (sessions, skills — CLI-managed) |
+| **CI** | `node`, `npm test`, `npm run lint` | nothing persistent |
+| **Development** | `npm run dev` (Electron + DevTools), Jest watch | `preferences.test.json` separately |
 
-### 7.1 Pfad-Konventionen
+### 7.1 Path conventions
 
-| Zweck | Windows | Linux/macOS |
+| Purpose | Windows | Linux/macOS |
 |---|---|---|
 | Preferences | `%APPDATA%\agent-desktop\preferences.json` | `~/.config/agent-desktop/preferences.json` |
 | Logs | `~/.agent-desktop/logs/` | `~/.agent-desktop/logs/` |
-| Folders-Config | `~/.agent-desktop/folders.json` | `~/.agent-desktop/folders.json` |
-| Copilot Sessions | `%USERPROFILE%\.copilot\session-state\` | `~/.copilot/session-state/` |
+| Folders config | `~/.agent-desktop/folders.json` | `~/.agent-desktop/folders.json` |
+| Copilot sessions | `%USERPROFILE%\.copilot\session-state\` | `~/.copilot/session-state/` |
 
-### 7.2 Persistenz im Detail
+### 7.2 Persistence in detail
 
-| Daten | Speicherort | Verantwortlich |
+| Data | Location | Owner |
 |---|---|---|
-| Preferences (Theme, Tabs, Settings, Cost-Log) | `userData/preferences.json` (+ `.bak`) | `src/preferences.js` |
-| Folders-Config, Onboarding, Tutorial-Flags | `~/.agent-desktop/folders.json` | `src/scanners.js`, `main.js` |
-| Sessions | `~/.copilot/session-state/<uuid>/` | CLI (Read-only) |
-| Todos | `~/.copilot/session-state/<uuid>/todos.json` | `src/sessions.js` |
+| Preferences (theme, tabs, settings, cost log) | `userData/preferences.json` (+ `.bak`) | `src/preferences.js` |
+| Folders config, onboarding, tutorial flags | `~/.agent-desktop/folders.json` | `src/scanners.js`, `main.js` |
+| Sessions | `~/.copilot/session-state/<uuid>/` | CLI (read-only) |
+| Todos | `<cwd>/todo/todos.md` | `src/todos.js` |
 | Logs | `~/.agent-desktop/logs/agent-desktop-<YYYY-MM-DD>.log` | `src/logger.js` |
-| Cost-Log | `userData/preferences.json` (Key: `costLog`) | `renderer/app.js` |
+| Cost log | `userData/preferences.json` (key: `costLog`) | `renderer/app.js` |
+| Encrypted API keys | `userData/provider-keys.enc` | `src/secure-store.js` |
 
 ---
 
-## 8. Querschnittliche Konzepte
+## 8. Cross-cutting concepts
 
-### 8.1 Sicherheit
+### 8.1 Security
 
-| Einstellung | Wert | Bedeutung |
+| Setting | Value | Meaning |
 |---|---|---|
-| `contextIsolation` | `true` | Renderer hat keinen direkten Node.js-Zugriff |
-| `nodeIntegration` | `false` | Sicherste Electron-Konfiguration |
+| `contextIsolation` | `true` | The renderer has no direct Node.js access |
+| `nodeIntegration` | `false` | The safest Electron configuration |
 
-- **DOMPurify** sanitisiert jeden gerenderten CLI-Output vor DOM-Injection.
-- **`safeSessionPath()`** schützt gegen Path-Traversal bei Session-IDs.
-- Alle IPC-Calls gehen ausschließlich über `contextBridge.exposeInMainWorld`.
+- **DOMPurify** sanitizes every rendered CLI output before DOM injection.
+- **`safeSessionPath()`** protects against path traversal in session IDs.
+- All IPC calls go exclusively through `contextBridge.exposeInMainWorld`.
+- **API keys** are encrypted via the OS keychain (`safeStorage`) and never returned to the renderer.
 
-### 8.2 Tool-Permissions
+### 8.2 Tool permissions
 
-- **Globale Deny-List** (`settings.deniedTools`): gilt für alle Sessions
-- **Admin Deny-List** (`settings.adminDeniedTools`): nicht vom User änderbar
-- **Session Deny-List** (`tab.sessionDeniedTools`): per Session; Änderungen triggern Prozess-Neustart
-- Alle Listen werden beim Spawn zu `--deny-tool=<name>`-Flags zusammengeführt
+- **Global deny list** (`settings.deniedTools`): applies to all sessions
+- **Admin deny list** (`settings.adminDeniedTools`): not user-editable
+- **Session deny list** (`tab.sessionDeniedTools`): per session; changes trigger a process restart
+- All lists are merged into `--deny-tool=<name>` flags at spawn
 
-### 8.3 Kosten-Tracking
+### 8.3 Cost tracking
 
-Die App berechnet geschätzte AI Credits aus dem Token-Verbrauch:
+The app computes estimated AI Credits from token usage:
 
 ```javascript
 credits = (input * priceInput + cache * priceCache + output * priceOutput) / 1_000_000
 ```
 
-**Modellpreise (Credits pro 1M Tokens):**
+**Model prices (credits per 1M tokens):**
 
-| Modell | Input | Cache | Output |
+| Model | Input | Cache | Output |
 |---|---|---|---|
 | claude-sonnet-4.6 | 300C | 30C | 1500C |
 | claude-opus-4.6 / 4.8 | 500C | 50C | 2500C |
 
-Token-Daten kommen aus `/usage` (via `silentCommand`). Pro Prompt wird das Delta gespeichert (`recordCostEntry`). Die Kosten-Historie ist im Settings-Tab „Kosten" als gestapeltes Balkendiagramm visualisiert (Tag/Woche, aufgeschlüsselt nach Session).
+Token data comes from `/usage` (via `silentCommand`). The delta per prompt is stored (`recordCostEntry`), priced at the model actually used for that prompt. The cost history is visualized on the cost page as a stacked bar chart (day/week, broken down by session). Direct-API providers return real token counts and are billed in USD; Copilot is billed in AI Credits (100 AIC = $1).
 
-### 8.4 Logging & Diagnose
+### 8.4 Logging & diagnostics
 
-- `src/logger.js` schreibt nach `~/.agent-desktop/logs/` (tägliche Rotation, 7 Tage).
-- `console.log/warn/error` im Main-Prozess sind monkey-gepatched: Logs gehen zusätzlich in Datei und DevConsole-Panel.
+- `src/logger.js` writes to `~/.agent-desktop/logs/` (daily rotation, 7 days).
+- `console.log/warn/error` in the main process are monkey-patched: logs additionally go to the file and the dev-console panel.
 
-### 8.5 Theme-System
+### 8.5 Theme system
 
-Drei Themes über CSS Custom Properties (`:root`, `[data-theme="dark"]`, `[data-theme="gebit"]`).
+Three themes via CSS custom properties (`:root`, `[data-theme="dark"]`, `[data-theme="gebit"]`).
 
-### 8.6 Per-Tab State
+### 8.6 Per-tab state
 
 ```javascript
 {
@@ -512,8 +523,8 @@ Drei Themes über CSS Custom Properties (`:root`, `[data-theme="dark"]`, `[data-
   mode: "agent",
   sessionDeniedTools: [{ name: "shell(git push)", enabled: true }],
   _lastUsageTokens: { input: 17500, output: 13, cache: 0 },
-  _lastCreditTotal: 5.2,
-  _sessionName: "Mein Projekt",
+  _billingModel: "claude-sonnet-4.6",
+  _sessionName: "My project",
   inputText: "",
   inputRichHtml: "",
 }
@@ -521,52 +532,55 @@ Drei Themes über CSS Custom Properties (`:root`, `[data-theme="dark"]`, `[data-
 
 ---
 
-## 9. Architekturentscheidungen (ADR-Light)
+## 9. Architecture decisions (ADR-light)
 
-| # | Entscheidung | Alternative | Konsequenz |
+| # | Decision | Alternative | Consequence |
 |---|---|---|---|
-| 1 | Electron statt Tauri/Wails | Tauri | Schnellere Entwicklung, JS überall, größeres Binary |
-| 2 | **ACP statt JSONL-Spawn + PTY** | Weiter `--output-format json --stream on` + PTY | Ein langlebiger Prozess/Tab, Slash-Commands via `silentCommand()`, kein PTY/node-pty, Session-Persistenz durch `session/load` |
-| 3 | **`silentCommand()` statt PTY für Slash-Commands** | PTY mit Bracketed-Paste | Deterministisch, testbar, kein fragiles String-Matching auf TUI-Output |
-| 4 | **Prozess-Neustart für `--deny-tool`-Änderungen** | Runtime-API (existiert nicht in ACP) | Sauber, aber kurze Unterbrechung; Session wird via `session/load` wiederhergestellt |
-| 5 | Preferences in `app.getPath('userData')` | `__dirname` (war Bug) | Funktioniert in gepackten Builds; einmalige Migration war nötig |
-| 6 | PATH-Augmentation für Linux/macOS | User muss `.bashrc` anpassen | Pragmatisch, deckt 95% der Fälle ab |
-| 7 | Markdown-Init im Preload | Im Renderer | `marked`/`hljs`/`DOMPurify` einmal geladen |
-| 8 | Cost-Log in `preferences.json` (Key `costLog`) | Eigene Datei | Kein zusätzliches File-I/O; bereits vorhandene Persistenz-Infrastruktur genutzt |
-| 9 | Tutorial-Flags in `folders.json` | `preferences.json` | `folders.json` existiert bereits; Flags sollen bei Preferences-Export *nicht* mitgehen |
-| 10 | Onboarding-Wizard mit Tab-Locking | Separate Window | Single-Window-UX; Auto-Unlock nach 180 s als Safety-Net |
+| 1 | Electron instead of Tauri/Wails | Tauri | Faster development, JS everywhere, larger binary |
+| 2 | **ACP instead of JSONL spawn + PTY** | Keep `--output-format json --stream on` + PTY | One long-lived process/tab, slash commands via `silentCommand()`, no PTY/node-pty, session persistence via `session/load` |
+| 3 | **`silentCommand()` instead of PTY for slash commands** | PTY with bracketed paste | Deterministic, testable, no fragile string matching on TUI output |
+| 4 | **Process restart for `--deny-tool` changes** | Runtime API (doesn't exist in ACP) | Clean, but a short interruption; the session is restored via `session/load` |
+| 5 | Preferences in `app.getPath('userData')` | `__dirname` (was a bug) | Works in packaged builds; a one-time migration was needed |
+| 6 | PATH augmentation for Linux/macOS | User must edit `.bashrc` | Pragmatic, covers 95% of cases |
+| 7 | Markdown init in the preload | In the renderer | `marked`/`hljs`/`DOMPurify` loaded once |
+| 8 | Cost log in `preferences.json` (key `costLog`) | Own file | No extra file I/O; reuses existing persistence infrastructure |
+| 9 | Tutorial flags in `folders.json` | `preferences.json` | `folders.json` already exists; flags should *not* travel with a preferences export |
+| 10 | Onboarding wizard with tab locking | Separate window | Single-window UX; auto-unlock after 180s as a safety net |
+| 11 | **Multi-provider via a shared event vocabulary** | Provider-specific renderer paths | The renderer stays backend-agnostic; new providers only re-emit the same events |
+| 12 | **Rename `copilot-desktop` → `agent-desktop` with data migration** | Keep the internal name | Provider-neutral identity; one-shot Windows-safe migration (DPAPI keeps keys) |
 
 ---
 
-## 10. Risiken und technische Schulden
+## 10. Risks and technical debt
 
-| # | Risiko / Schuld | Auswirkung | Mitigation |
+| # | Risk / debt | Impact | Mitigation |
 |---|---|---|---|
-| R-1 | **`renderer/app.js` ist ~2.5k Zeilen prozedural** | Schwer zu navigieren | Schrittweise Modularisierung in `renderer/modules/` begonnen |
-| R-2 | **ACP ist eine inoffizielle API** | CLI-Update kann Protokoll ändern | `acp-client.js` kapselt alle ACP-Details; Änderungen lokalisiert |
-| R-3 | **`/usage` gibt „AI Units" statt „AI Credits"** | Credit-Anzeige basiert auf Token-Berechnung, nicht auf offizieller Zahl | Tracking ob ACP künftig Credits liefert; Token-Berechnung als Fallback |
-| R-4 | **Kein automatisierter E2E-Smoke-Test für Chat-Roundtrip** | Regressionen fallen erst manuell auf | Playwright-Stub in `e2e/` vorhanden |
-| R-5 | **`--deny-tool`-Neustart sichtbar für User** | Kurze Unterbrechung beim Ändern der Session-Tools | Verbesserbar durch Loading-Indicator; akzeptabler Trade-off |
-| R-6 | **Keine CI-Pipeline** | Tests müssen lokal laufen | TODO: GitHub-Actions-Workflow |
+| R-1 | **`renderer/app.js` is ~2.5k lines, procedural** | Hard to navigate | Gradual modularization into `renderer/modules/` started |
+| R-2 | **ACP is an unofficial API** | A CLI update can change the protocol | `acp-client.js` encapsulates all ACP details; changes stay localized |
+| R-3 | **`/usage` reports "AI Units" instead of "AI Credits"** | The credit display is based on token calculation, not the official number | Track whether ACP will provide credits in the future; token calculation as fallback |
+| R-4 | **No automated E2E smoke test for the chat roundtrip** | Regressions surface only manually | Playwright stub present in `e2e/` |
+| R-5 | **`--deny-tool` restart visible to the user** | Short interruption when changing session tools | Improvable via a loading indicator; acceptable trade-off |
+| R-6 | **No CI pipeline** | Tests must run locally | TODO: GitHub Actions workflow |
+| R-7 | **Direct-API providers not runtime-tested** | Alpha/Beta labelled; possible runtime bugs | Manual E2E with real keys pending |
 
 ---
 
-## 11. Glossar
+## 11. Glossary
 
-| Begriff | Bedeutung |
+| Term | Meaning |
 |---|---|
-| **Main Process** | Electron-Hauptprozess mit Node.js-Zugriff |
-| **Renderer Process** | Chromium-basierter UI-Prozess ohne Node.js-Zugriff |
-| **IPC** | Inter-Process Communication zwischen Main und Renderer |
-| **Context Bridge** | Electron-Mechanismus zum sicheren Exponieren von APIs an den Renderer |
-| **Copilot CLI** | Das `copilot`-Binary aus `gh extension install github/gh-copilot` |
-| **ACP** | Agent Communication Protocol — JSON-RPC über NDJSON auf stdio (`copilot --acp`) |
-| **NDJSON** | Newline-Delimited JSON: ein JSON-Objekt pro Zeile, streamingfreundlich |
-| **AcpClient** | Klasse in `src/acp-client.js`, die einen `copilot --acp`-Prozess pro Tab verwaltet |
-| **silentCommand** | AcpClient-Methode für Slash-Commands (`/context`, `/usage`, …), die nichts an die UI schickt |
-| **session/load** | ACP-Methode zum Wiederherstellen einer Session nach Prozess-Neustart |
-| **Skill** | YAML-/Markdown-Beschreibung in `~/.copilot/skills/` |
-| **Sub-Agent** | Spezialisierter Agent in `~/.copilot/agents/` |
-| **Cost-Log** | In `preferences.json` gespeicherte Liste von Credits-Delta-Einträgen pro Prompt |
-| **userData** | Electron-App-spezifischer Schreibort: `app.getPath('userData')` |
-| **buildEnv** | Helper in `src/main-helpers.js` für PATH-Augmentation auf Linux/macOS |
+| **Main process** | Electron main process with Node.js access |
+| **Renderer process** | Chromium-based UI process without Node.js access |
+| **IPC** | Inter-process communication between main and renderer |
+| **Context bridge** | Electron mechanism to safely expose APIs to the renderer |
+| **Copilot CLI** | The `copilot` binary from `gh extension install github/gh-copilot` |
+| **ACP** | Agent Communication Protocol — JSON-RPC over NDJSON on stdio (`copilot --acp`) |
+| **NDJSON** | Newline-delimited JSON: one JSON object per line, streaming-friendly |
+| **AcpClient** | Class in `src/acp-client.js` that manages one `copilot --acp` process per tab |
+| **silentCommand** | AcpClient method for slash commands (`/context`, `/usage`, …) that sends nothing to the UI |
+| **session/load** | ACP method to restore a session after a process restart |
+| **Skill** | YAML/Markdown description in `~/.copilot/skills/` |
+| **Sub-agent** | Specialized agent in `~/.copilot/agents/` |
+| **Cost log** | List of credit-delta entries per prompt stored in `preferences.json` |
+| **userData** | Electron app-specific write location: `app.getPath('userData')` |
+| **buildEnv** | Helper in `src/main-helpers.js` for PATH augmentation on Linux/macOS |

@@ -1,424 +1,422 @@
-# 📘 Agent Desktop – Benutzerhandbuch
+# 📘 Agent Desktop – User Guide
 
-**Version 0.32.0** · Electron-basierte Desktop-Anwendung für GitHub Copilot CLI
+**Version 1.0.0** · Electron-based desktop app for multiple LLM providers
 
 ---
 
-## Inhaltsverzeichnis
+## Table of contents
 
-1. [Überblick](#überblick)
-2. [Erste Schritte](#erste-schritte)
-   - [Voraussetzungen](#voraussetzungen)
+1. [Overview](#overview)
+2. [Getting started](#getting-started)
+   - [Requirements](#requirements)
    - [Installation](#installation)
-   - [Onboarding-Wizard](#onboarding-wizard)
-   - [Erster Chat](#erster-chat)
-3. [Benutzeroberfläche](#benutzeroberfläche)
+   - [Onboarding wizard](#onboarding-wizard)
+   - [First chat](#first-chat)
+3. [User interface](#user-interface)
    - [Titlebar](#titlebar)
    - [Sidebar](#sidebar)
-   - [Hauptbereich](#hauptbereich)
-   - [Session-Statusbar](#session-statusbar)
-4. [Features im Detail](#features-im-detail)
-   - [Multi-Session Management](#multi-session-management)
+   - [Main area](#main-area)
+   - [Session statusbar](#session-statusbar)
+4. [Features in detail](#features-in-detail)
+   - [Multi-session management](#multi-session-management)
    - [Chat](#chat)
-   - [Tutorial-Popups](#tutorial-popups)
-   - [Datei Drag & Drop](#datei-drag--drop)
+   - [Tutorial popups](#tutorial-popups)
+   - [File drag & drop](#file-drag--drop)
    - [Skills](#skills)
    - [Agents](#agents)
-   - [MCP-Server](#mcp-server-sidebar)
+   - [MCP servers](#mcp-servers-sidebar)
    - [Todos](#todos)
-   - [Session-Actions](#session-actions)
-   - [Session Resume](#session-resume)
+   - [Session actions](#session-actions)
+   - [Session resume](#session-resume)
    - [Settings](#settings)
    - [Themes](#themes)
-5. [Tastenkombinationen](#tastenkombinationen)
+5. [Keyboard shortcuts](#keyboard-shortcuts)
 
 ---
 
-## Überblick
+## Overview
 
-Agent Desktop verpackt mehrere LLM-Provider (primär GitHub Copilot CLI, dazu Anthropic, Gemini, OpenAI, GLM, Ollama) in eine moderne Chat-Oberfläche. Statt auf der Kommandozeile zu arbeiten, interagierst du über eine grafische Anwendung – inklusive Multi-Session-Tabs, einer Sidebar für Sessions, Skills und Todos, Kontext-Überwachung und Kosten-Tracking.
+Agent Desktop wraps multiple LLM providers (primarily the GitHub Copilot CLI, plus Anthropic, Gemini, OpenAI, GLM, Ollama) in a modern chat interface. Instead of working on the command line, you interact through a graphical application — including multi-session tabs, a sidebar for sessions, skills and todos, context monitoring, and cost tracking.
 
 ---
 
-## Erste Schritte
+## Getting started
 
-### Voraussetzungen
+### Requirements
 
-| Anforderung | Details |
+| Requirement | Details |
 |---|---|
-| Betriebssystem | Windows 11 (primär), Linux, macOS |
-| Lizenz | GitHub Copilot (aktives Abonnement) |
-| Runtime | Node.js 18 oder höher |
-| CLI | GitHub CLI mit installierter Copilot Extension |
+| Operating system | Windows 11 (primary), Linux, macOS |
+| License | GitHub Copilot (active subscription) — only for the Copilot provider |
+| Runtime | Node.js 18 or higher |
+| CLI | GitHub CLI with the Copilot extension installed (optional; only for Copilot) |
 
 ### Installation
 
 ```powershell
 git clone https://github.com/matthias-schneider_gebit/agent-desktop.git
 cd agent-desktop
-.\setup.ps1    # oder manuell: npm install
+.\setup.ps1    # or manually: npm install
 npm start
 ```
 
-> **Tipp:** Das Setup-Skript `setup.ps1` installiert automatisch alle Abhängigkeiten.
+> **Tip:** the setup script `setup.ps1` installs all dependencies automatically.
 
-### Onboarding-Wizard
+### Onboarding wizard
 
-Beim **ersten App-Start** führt dich ein 4-stufiger Onboarding-Wizard durch die Einrichtung:
+On the **first app start**, a 4-step onboarding wizard guides you through setup:
 
-| Schritt | Inhalt |
+| Step | Content |
 |---|---|
-| **1. GitHub Auth-Check** | Prüft `gh auth status` und leitet bei Bedarf `gh auth login` ein |
-| **2. Ordner-Einrichtung** | Erstellt das Verzeichnis `~/.agent-desktop/` mit allen nötigen Unterordnern |
-| **3. Starter Agents & Skills** | Auswahl aus 6 Kategorien – jede per Toggle aktivierbar/deaktivierbar |
-| **4. Feature-Einführung** | 3-Slide-Carousel mit den wichtigsten App-Features |
+| **1. GitHub auth check** | Checks `gh auth status` and initiates `gh auth login` if needed |
+| **2. Folder setup** | Creates the `~/.agent-desktop/` directory with all required subfolders |
+| **3. Starter agents & skills** | Choice from 6 categories — each togglable on/off |
+| **4. Feature intro** | 3-slide carousel of the most important app features |
 
-> **Tab-Unlock Fallback:** Falls ein Schritt nicht automatisch abgeschlossen wird, erscheint nach 30 Sekunden ein manueller Unlock-Button. Nach 180 Sekunden wird der nächste Schritt automatisch freigeschaltet.
+> **Tab-unlock fallback:** if a step doesn't complete automatically, a manual unlock button appears after 30 seconds. After 180 seconds the next step is unlocked automatically.
 
-> **Onboarding zurücksetzen:** Im Developer-Modus (Settings) kann der Wizard jederzeit erneut gestartet werden.
+> **Reset onboarding:** in developer mode (Settings) the wizard can be restarted at any time.
 
-### Erster Chat
+### First chat
 
-1. **App starten** – Ein leerer Tab „Neuer Chat" öffnet sich automatisch.
-2. **Nachricht eingeben** und mit **Enter** absenden.
-3. Copilot antwortet im Stream-Modus – du siehst die Antwort in Echtzeit erscheinen.
-4. Die Session wird automatisch erstellt und erscheint in der Sidebar.
+1. **Start the app** — an empty "New chat" tab opens automatically.
+2. **Type a message** and send it with **Enter**.
+3. The provider responds in streaming mode — you see the answer appear in real time.
+4. The session is created automatically and appears in the sidebar.
 
 ---
 
-## Benutzeroberfläche
+## User interface
 
-Die Oberfläche besteht aus vier Hauptbereichen: Titlebar, Sidebar, Hauptbereich und Statusbar.
+The interface consists of four main areas: titlebar, sidebar, main area, and statusbar.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  🟢 Agent Desktop                    v1.0.0         _ □ ✕     │  ← Titlebar
 ├────────────┬────────────────────────────────────────────────────┤
-│            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab-Bar
+│            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab bar
 │  Sessions  ├────────────────────────────────────────────────────┤
-│            │  🧠 Sonnet  🤖 Agent  📊 18%  🔧 Tools   ~12.5C  │  ← Session-Actions
+│            │  🧠 Sonnet  🤖 Agent  📊 18%  🔧 Tools   ~12.5C  │  ← Session actions
 │  Skills    ├────────────────────────────────────────────────────┤
 │            │                                                    │
-│  Todos     │                  Chat-Bereich                      │
+│  Todos     │                  Chat area                         │
 │            │                                                    │
 │  Images    ├────────────────────────────────────────────────────┤
-│            │  📤 [  Nachricht eingeben…                    ] ➤  │  ← Chat-Eingabe
+│            │  📤 [  Type a message…                        ] ➤  │  ← Chat input
 │  ⚙️ ◀      ├────────────────────────────────────────────────────┤
-│            │  🔌 3  🛠 5  📂 ~/Projekte                        │  ← Statusbar
+│            │  🔌 3  🛠 5  📂 ~/Projects                        │  ← Statusbar
 └────────────┴────────────────────────────────────────────────────┘
 ```
 
 ### Titlebar
 
-Die App verwendet eine frameless Titlebar im Custom-Design:
+The app uses a custom, frameless titlebar:
 
-- **Links:** App-Icon und Titel „Agent Desktop"
-- **Mitte:** Version-Badge
-- **Rechts:** Fenster-Steuerung – Minimieren, Maximieren, Schließen
+- **Left:** app icon and title "Agent Desktop"
+- **Center:** version badge
+- **Right:** window controls — minimize, maximize, close
 
 ### Sidebar
 
-Die Sidebar befindet sich am linken Rand und ist über den **Collapse-Button** (◀) im Footer ein- und ausklappbar. Sie enthält vier Bereiche:
+The sidebar is on the left edge and can be collapsed/expanded via the **collapse button** (◀) in the footer. It contains four sections:
 
 #### 📂 Sessions
 
-- **Suchfeld** zum Filtern nach Session-Namen.
-- **Session-Karten** zeigen Name, Datum und Checkpoint-Anzahl.
-- **Klick** auf eine Karte öffnet die Session in einem neuen Tab.
-- **Rechtsklick** oder **Hover** zeigt Optionen zum Umbenennen oder Löschen.
+- **Search field** to filter by session name.
+- **Session cards** show name, date, and checkpoint count.
+- **Click** a card to open the session in a new tab.
+- **Right-click** or **hover** shows options to rename or delete.
 
-> **Hinweis:** Nur benannte Sessions werden in der Sidebar angezeigt. Unbenannte Sessions existieren nur als offene Tabs.
+> **Note:** only named sessions are shown in the sidebar. Unnamed sessions exist only as open tabs.
 
 #### 🧠 Skills
 
-- Liste aller verfügbaren KI-Skills mit Icon, Name und Beschreibung.
-- **Toggle-Schalter** zum Aktivieren und Deaktivieren pro Session.
-- **⊘-Button** deaktiviert einen Skill global in der Copilot CLI (`~/.copilot/settings.json`).
-- Aktive Skills werden automatisch als Prompt-Präfix in jede Nachricht injiziert.
+- List of all available AI skills with icon, name, and description.
+- **Toggle switch** to enable/disable per session.
+- **⊘ button** disables a skill globally in the Copilot CLI (`~/.copilot/settings.json`).
+- Active skills are automatically injected as a prompt prefix into every message.
 
 #### ✅ Todos
 
-> Dieser Bereich ist nur sichtbar, wenn eine Session geladen ist.
+> This section is only visible when a session is loaded.
 
-- **Eingabefeld** „Neues Todo…" mit ➕-Button oder `Enter`.
-- **Todo-Liste** mit Checkboxen und 🗑️-Löschen-Buttons.
-- **Drag & Drop** zum Umsortieren.
-- 🔄 **Sync:** Sendet die ersten 5 offenen Todos als Prompt an Copilot.
+- **Input field** "New todo…" with a ➕ button or `Enter`.
+- **Todo list** with checkboxes and 🗑️ delete buttons.
+- **Drag & drop** to reorder.
+- 🔄 **Sync:** sends the first 5 open todos as a prompt.
 
 #### 🖼️ Images
 
-- **Thumbnail-Galerie** der Bilder aus dem konfigurierten Bilder-Ordner.
-- **Klick** öffnet die Lightbox-Ansicht.
-- 🗑️ **Löschen** und **„Ordner öffnen"**-Button.
+- **Thumbnail gallery** of images from the configured images folder.
+- **Click** opens the lightbox view.
+- 🗑️ **Delete** and an **"Open folder"** button.
 
 #### Footer
 
-- **Collapse-Button** (◀) – Sidebar ein-/ausklappen.
-- ⚙️ **Settings-Button** – Öffnet die Einstellungen.
+- **Collapse button** (◀) — collapse/expand the sidebar.
+- ⚙️ **Settings button** — opens the settings.
 
-### Hauptbereich
+### Main area
 
-#### Tab-Bar
+#### Tab bar
 
-- Jeder Tab entspricht einer eigenen Chat-Session.
-- ➕ **Neuer Tab** – Erstellt eine neue, leere Session.
-- **Doppelklick** auf einen Tab-Titel zum Umbenennen.
-- ✕ **Schließen-Button** pro Tab.
-- **Status-Badge** „Working" während Copilot antwortet.
+- Each tab corresponds to its own chat session.
+- ➕ **New tab** — creates a new, empty session.
+- **Double-click** a tab title to rename it.
+- ✕ **Close button** per tab.
+- **Status badge** "Working" while the provider is responding.
 
-#### Session-Actions Bar
+#### Session actions bar
 
-Direkt unter der Tab-Bar steuert du die aktive Session:
+Directly below the tab bar you control the active session:
 
-| Element | Beschreibung |
+| Element | Description |
 |---|---|
-| **🔌 Provider** | Wählt das Backend pro Tab: *GitHub Copilot* oder *Anthropic API* (Gemini/OpenAI vorbereitet). API-Provider benötigen einen Key (Einstellungen → API-Provider) |
-| **🧠 Modell-Name** | Öffnet Dropdown zur Modellauswahl (zeigt nur Modelle des gewählten Providers; pro Tab, persistent) |
-| **🤖 Modus** | Öffnet Dropdown zur Modus-/Agent-Auswahl |
-| **📊 XX%** | Kontext-Dropdown — zeigt Auslastung, öffnet Detail-Panel oder führt Compact/Clear aus |
-| **🔧 Tools** | Öffnet Popup für session-spezifische Tool-Sperren |
-| **📈** | Öffnet die Kosten-Page (Kostenauflistung als eigene Vollbild-Seite) |
-| **~XX.XC** | Geschätzte AI Credits für diese Session (immer sichtbar, `~0C` vor dem ersten Prompt) |
+| **🔌 Provider** | Selects the backend per tab: *GitHub Copilot* or a direct API (Anthropic, Gemini, OpenAI, GLM, Ollama). API providers need a key (Settings → API providers) |
+| **🧠 Model name** | Opens the model dropdown (shows only the selected provider's models; per tab, persistent) |
+| **🤖 Mode** | Opens the mode/agent selection dropdown |
+| **📊 XX%** | Context dropdown — shows usage, opens a detail panel, or runs compact/clear |
+| **🔧 Tools** | Opens a popup for session-specific tool denials |
+| **📈** | Opens the cost page (cost listing as a dedicated full-screen page) |
+| **~XX.XC** | Estimated AI Credits for this session (always visible, `~0C` before the first prompt) |
 
-#### Chat-Bereich
+#### Chat area
 
-- **User-Nachrichten** erscheinen rechts, **Copilot-Antworten** links.
-- Nachrichten werden als **Markdown** gerendert mit Syntax-Highlighting.
-- **„Thinking"-Abschnitte** zeigen den Denkprozess der KI (aufklappbar).
-- **Tool-Calls** werden als aufklappbare Karten dargestellt.
-- **Skill-Tags** zeigen, welche Skills beim Senden aktiv waren.
-- **Chat-Suche** über `Strg+F`.
-- **Scroll-to-Bottom Button** springt ans Ende des Chats.
+- **User messages** appear on the right, **assistant responses** on the left.
+- Messages are rendered as **Markdown** with syntax highlighting.
+- **"Thinking" sections** show the AI's reasoning (collapsible).
+- **Tool calls** are shown as collapsible cards.
+- **Skill tags** show which skills were active when sending.
+- **Chat search** via `Ctrl+F`.
+- A **scroll-to-bottom button** jumps to the end of the chat.
 
-#### Chat-Eingabe
+#### Chat input
 
-- **Export-Button** – Chat als HTML oder Text exportieren.
-- **Textarea** mit Placeholder „Nachricht eingeben…"
-- **Rich-Text-Toggle** (✏️) – Wechselt zum Rich-Text-Editor.
-- **Senden-Button** (oder `Enter`).
-- `Shift+Enter` für Zeilenumbruch (Textarea-Modus).
+- **Export button** — export the chat as HTML or text.
+- **Textarea** with the placeholder "Type a message…"
+- **Rich-text toggle** (✏️) — switches to the rich-text editor.
+- **Send button** (or `Enter`).
+- `Shift+Enter` for a line break (textarea mode).
 
-##### Rich-Text-Editor
+##### Rich-text editor
 
-Klick auf den ✏️-Button aktiviert den Rich-Text-Modus:
+Clicking the ✏️ button enables rich-text mode:
 
-- **Formatierungs-Toolbar**: **B**old, *I*talic, Aufzählung (UL), Nummerierung (OL).
-- **Senden:** `Strg+Enter` (Enter = Zeilenumbruch).
-- Formatierung wird beim Senden automatisch zu Markdown konvertiert.
+- **Formatting toolbar**: **B**old, *I*talic, bullet list (UL), numbered list (OL).
+- **Send:** `Ctrl+Enter` (Enter = line break).
+- Formatting is automatically converted to Markdown on send.
 
-### Session-Statusbar
+### Session statusbar
 
-Am unteren Rand zeigt die Statusbar kontextuelle Informationen zur aktiven Session:
+At the bottom, the statusbar shows contextual information about the active session:
 
 | Icon | Information |
 |---|---|
-| 🔌 | Anzahl verbundener MCP-Server |
-| 🛠 | Anzahl aktiver Skills |
-| 📂 | Aktuelles Arbeitsverzeichnis (CWD) — klickbar zum Wechseln |
+| 🔌 | Number of connected MCP servers |
+| 🛠 | Number of active skills |
+| 📂 | Current working directory (CWD) — click to change |
 
 ---
 
-## Features im Detail
+## Features in detail
 
-### Multi-Session Management
+### Multi-session management
 
-| Aktion | Vorgehen |
+| Action | How to |
 |---|---|
-| **Neue Session** | ➕-Tab klicken → Nachricht senden → Session wird automatisch erstellt |
-| **Session fortsetzen** | In der Sidebar auf die Session-Karte klicken |
-| **Session umbenennen** | Doppelklick auf den Tab-Titel oder Rechtsklick in der Sidebar |
-| **Session löschen** | Hover über die Session-Karte → 🗑️ → Bestätigungsdialog |
-| **CWD wählen** | Klick auf 📂 in der Statusbar → Ordner-Auswahl-Dialog |
+| **New session** | Click the ➕ tab → send a message → the session is created automatically |
+| **Resume session** | Click the session card in the sidebar |
+| **Rename session** | Double-click the tab title or right-click in the sidebar |
+| **Delete session** | Hover the session card → 🗑️ → confirmation dialog |
+| **Choose CWD** | Click 📂 in the statusbar → folder picker dialog |
 
 ### Chat
 
-- Nachrichten werden als **Markdown** gerendert mit vollständigem Syntax-Highlighting.
-- **„Thinking"-Blöcke** — aufklappbar für mehr Transparenz.
-- **Tool-Calls** als aufklappbare Karten.
-- **Export:** HTML- oder Textdatei über den Export-Button.
-- **Suche:** `Strg+F` öffnet die Chat-Suche.
+- Messages are rendered as **Markdown** with full syntax highlighting.
+- **"Thinking" blocks** — collapsible for more transparency.
+- **Tool calls** as collapsible cards.
+- **Export:** HTML or text file via the export button.
+- **Search:** `Ctrl+F` opens the chat search.
 
-### Tutorial-Popups
+### Tutorial popups
 
-Bei bestimmten Aktionen erscheinen einmalige Tutorial-Popups:
+Certain actions show one-time tutorial popups:
 
-| Popup | Auslöser | Auto-Schließen |
+| Popup | Trigger | Auto-close |
 |---|---|---|
-| **„Skills neu laden"** | Erster Klick auf den Reload-Button | Bei erneutem Reload oder nach 30 Sekunden |
-| **„Tab umbenennen"** | Erster Doppelklick auf einen Tab-Titel | Nach Umbenennung oder nach 30 Sekunden |
+| **"Reload skills"** | First click on the reload button | On another reload or after 30 seconds |
+| **"Rename tab"** | First double-click on a tab title | After renaming or after 30 seconds |
 
-### Datei Drag & Drop
+### File drag & drop
 
-Ziehe Dateien direkt in den Chat-Bereich — die Dateipfade werden als Kontext an Copilot gesendet.
+Drag files directly into the chat area — the file paths are sent as context to the provider.
 
 ### Skills
 
-- Skills liegen als `SKILL.md`-Dateien in `~/.copilot/skills/`.
-- Per **Toggle-Schalter** in der Sidebar aktivieren/deaktivieren.
-- **⊘-Button** deaktiviert Skills CLI-weit (`~/.copilot/settings.json`).
-- **Projekt-Skills** (`Projekt`-Badge): aus `.github/skills/` im aktiven CWD.
+- Skills are `SKILL.md` files in `~/.copilot/skills/`.
+- Enable/disable via the **toggle switch** in the sidebar.
+- The **⊘ button** disables skills CLI-wide (`~/.copilot/settings.json`).
+- **Project skills** (`Project` badge): from `.github/skills/` in the active CWD.
 
 ### Agents
 
-- **Sidebar-Badge** zeigt die Gesamtanzahl geladener Agents.
-- **Projekt-Agents** (`Projekt`-Badge): aus `.github/agents/` im aktiven CWD.
+- The **sidebar badge** shows the total number of loaded agents.
+- **Project agents** (`Project` badge): from `.github/agents/` in the active CWD.
 
-### MCP-Server (Sidebar)
+### MCP servers (sidebar)
 
-- **Badge** zeigt `verbunden/gesamt`.
-- **Projekt-MCP** (`Projekt`-Badge): aus `.github/mcp.json` im aktiven CWD.
+- The **badge** shows `connected/total`.
+- **Project MCP** (`Project` badge): from `.github/mcp.json` in the active CWD.
 
 ### Todos
 
-| Aktion | Vorgehen |
+| Action | How to |
 |---|---|
-| **Neues Todo** | Text eingeben → ➕ oder `Enter` |
-| **Abhaken** | Checkbox klicken |
-| **Löschen** | 🗑️-Button |
-| **Sortieren** | Drag & Drop |
-| **Sync** | 🔄-Button → erste 5 offene Todos als Prompt |
+| **New todo** | Type text → ➕ or `Enter` |
+| **Check off** | Click the checkbox |
+| **Delete** | 🗑️ button |
+| **Reorder** | Drag & drop |
+| **Sync** | 🔄 button → first 5 open todos as a prompt |
 
-### Session-Actions
+### Session actions
 
-#### 🧠 Modell-Auswahl
+#### 🧠 Model selection
 
-Öffnet ein Dropdown zur tab-spezifischen Modellauswahl. Wird als `--model`-Argument übergeben.
+Opens a dropdown for tab-specific model selection. Passed as the `--model` argument.
 
-- Pro Tab; persistent über App-Neustarts
-- Standard: `claude-sonnet-4.6`
+- Per tab; persistent across app restarts
+- Default: `claude-sonnet-4.6`
 
-#### 🤖 Modus
+#### 🤖 Mode
 
-Wählt den Modus/Agent für den aktiven Tab (z.B. Agent, Autopilot).
+Selects the mode/agent for the active tab (e.g. Agent, Autopilot).
 
-#### 📊 Kontext-Dropdown
+#### 📊 Context dropdown
 
-Klick auf den Button (`📊 18%`) öffnet ein Dropdown mit drei Aktionen:
+Clicking the button (`📊 18%`) opens a dropdown with three actions:
 
-**Kontext anzeigen**
-- Detail-Panel mit Token-Auslastung, Kategorien und Prozent
-- Farbcodierung: 🟢 Grün (≤ 60 %), 🟡 Gelb (61–80 %), 🔴 Rot (> 80 %)
+**Show context**
+- Detail panel with token usage, categories, and percentage
+- Color coding: 🟢 green (≤ 60%), 🟡 yellow (61–80%), 🔴 red (> 80%)
 
 **Compact**
-- Fasst die bisherige Konversation zusammen und gibt Kontext frei
-- %-Anzeige aktualisiert sich danach automatisch
+- Summarizes the conversation so far and frees up context
+- The % display updates automatically afterwards
 
 **Clear**
-- Löscht den gesamten Session-Kontext
-- Nach dem Clear wird automatisch `/context` abgefragt — fällt der Wert auf 0%, steht im Button `📊 0%`
+- Clears the entire session context
+- After clearing, `/context` is queried automatically — if the value drops to 0%, the button shows `📊 0%`
 
-> **Tipp:** Wenn die Auslastung rot ist, nutze **Compact** oder **Clear**, um Platz zu schaffen.
+> **Tip:** when usage is red, use **Compact** or **Clear** to make room.
 
-#### 🔧 Session-Tools
+#### 🔧 Session tools
 
-Öffnet ein Popup für session-spezifische Tool-Sperren:
+Opens a popup for session-specific tool denials:
 
-- **Tool hinzufügen:** Shell-Befehl eingeben (ohne `shell(...)`) und ➕ klicken
-- **Toggle:** Sperre ein-/ausschalten
-- **Löschen:** 🗑️-Button
+- **Add tool:** enter a shell command (without `shell(...)`) and click ➕
+- **Toggle:** turn a denial on/off
+- **Delete:** 🗑️ button
 
-> **Hinweis:** Jede Änderung startet den ACP-Prozess automatisch neu. Die Session bleibt erhalten — es gibt keinen Datenverlust.
+> **Note:** every change restarts the ACP process automatically. The session is preserved — no data loss.
 
-#### Kostenanzeige (`~XX.XC`) und Kosten-Page (📈)
+#### Cost display (`~XX.XC`) and cost page (📈)
 
-Rechts in der Session-Leiste steht immer die geschätzte Credit-Summe der aktuellen Session (`~0C` vor dem ersten Prompt). Berechnet aus Token-Verbrauch × Modellpreis nach jedem Prompt; ein Tooltip zeigt den vollständigen `/usage`-Output.
+On the right of the session bar you always see the estimated credit total of the current session (`~0C` before the first prompt). Computed from token usage × model price after each prompt; a tooltip shows the full `/usage` output.
 
-Das **📈-Icon** daneben öffnet die **Kosten-Page** — eine eigene Vollbild-Seite (wie der Plugin-Marketplace, kein Modal) mit:
+The **📈 icon** next to it opens the **cost page** — a dedicated full-screen page (like the plugin marketplace, not a modal) with:
 
-- **Tages-/Wochenansicht** (Umschalter in der Kopfzeile)
-- **Gestapeltes Balkendiagramm**: jede Session hat eine eigene Farbe
-- **Aufschlüsselung**: Kosten pro Session + Gesamtsumme
-- **🗑️ Verlauf löschen** und **✕ Schließen** in der Kopfzeile
+- **Day/week view** (toggle in the header)
+- **Stacked bar chart**: each session has its own color
+- **Breakdown**: cost per session + grand total
+- **🗑️ Clear history** and **✕ Close** in the header
 
-### Session Resume
+### Session resume
 
-Beim Laden einer gespeicherten Session werden nur die **letzten Nachrichten** angezeigt — ohne den vollständigen Plan. Das sorgt für eine übersichtlichere Darstellung.
+Reopening a saved session restores its full history in the tab and scrolls to the latest message.
 
 ### Settings
 
-Die Settings erreichst du über das ⚙️-Symbol im Sidebar-Footer. Es gibt fünf Tabs:
+Open the settings via the ⚙️ icon in the sidebar footer. There are five tabs:
 
-#### UI-Tab
+#### UI tab
 
-| Einstellung | Optionen |
+| Setting | Options |
 |---|---|
 | **Theme** | Light, Dark, GEBIT |
-| **Chat-Schriftgröße** | 12–24 px (Schieberegler) |
-| **Benachrichtigungston** | An / Aus |
-| **Entwicklermodus** | Aktiviert Test-Runner (🧪) und Developer Console (🖥️) in der Sidebar |
+| **Chat font size** | 12–24 px (slider) |
+| **Notification sound** | On / Off |
+| **Developer mode** | Enables the test runner (🧪) and developer console (🖥️) in the sidebar |
 
-#### Copilot Config-Tab
+#### Configuration tab
 
-| Einstellung | Beschreibung |
+| Setting | Description |
 |---|---|
-| **Standard-Modell** | Modell für neue Tabs (überschreibbar pro Tab) |
-| **Verbotene Shell Tools (global)** | Shell-Befehle, die in allen Sessions blockiert werden |
-| **Zusätzliche Verzeichnisse** | Extra Pfade, die Copilot durchsuchen darf |
+| **Default model** | Model for new tabs (overridable per tab) |
+| **Denied shell tools (global)** | Shell commands blocked in all sessions |
+| **Additional directories** | Extra paths the CLI is allowed to search |
 
-#### API-Provider-Tab
+#### API providers tab
 
-Hier hinterlegst du API-Keys für die direkten LLM-Provider (z. B. Anthropic). Die Keys werden über
-den **OS-Schlüsselbund verschlüsselt** gespeichert und verlassen den Hauptprozess nicht.
+Here you store API keys for the direct LLM providers (e.g. Anthropic). The keys are stored **encrypted via the OS keychain** and never leave the main process.
 
-- Pro Provider ein maskiertes Key-Feld mit **Speichern**/**Löschen** und Status (hinterlegt/leer).
-- Sobald ein Key hinterlegt ist, lässt sich der Provider in der Session-Leiste (🔌) wählen.
-- Anthropic-Tabs laufen voll agentisch (eigene Tool-Schleife) mit exakter Token-Kostenabrechnung,
-  Prompt-Caching, automatischem Kontext-Compact und Session-Wiederaufnahme.
+- One masked key field per provider with **Save**/**Delete** and status (set/empty).
+- Once a key is set, the provider can be selected in the session bar (🔌).
+- Direct-API tabs run fully agentic (own tool loop) with exact token cost accounting, prompt caching, automatic context compaction, and session resume.
 
-#### Ordner-Tab
+#### Folders tab
 
-Konfiguriert die Standard-Verzeichnisse für Sessions, Skills, Agents, Plugins und Bilder.
+Configures the default directories for sessions, skills, agents, plugins, and images.
 
-#### Tastenkürzel-Tab
+#### Shortcuts tab
 
-Erlaubt das Anpassen aller konfigurierbaren Tastenkürzel. Klick auf **„Ändern"**, drücke die neue Kombination (`Esc` bricht ab). **„🔄 Alle zurücksetzen"** stellt alle Defaults wieder her.
+Allows customizing all configurable shortcuts. Click **"Change"**, press the new combination (`Esc` cancels). **"🔄 Reset all"** restores all defaults.
 
-> **Hinweis:** Der Kostenverlauf ist keine Settings-Einstellung mehr, sondern eine eigene Page — siehe [Kostenanzeige und Kosten-Page](#kostenanzeige-xxxc-und-kosten-page-) unter Session-Actions.
+> **Note:** the cost history is no longer a settings item but a dedicated page — see [Cost display and cost page](#cost-display-xxxc-and-cost-page-) under session actions.
 
-### Tastenkürzel-Hilfe
+### Shortcut help
 
-Das ⌨️-Symbol im Sidebar-Footer (oder `Ctrl+/`) öffnet ein Overlay mit allen aktuell aktiven Tastenkürzeln, gruppiert nach Kategorie. Geänderte Kürzel werden farblich hervorgehoben.
+The ⌨️ icon in the sidebar footer (or `Ctrl+/`) opens an overlay with all currently active shortcuts, grouped by category. Changed shortcuts are highlighted.
 
 ### Themes
 
-| Theme | Beschreibung |
+| Theme | Description |
 |---|---|
-| **Light** | Helles Standard-Theme |
-| **Dark** | Dunkles Theme |
-| **GEBIT** | Corporate Theme von GEBIT Solutions |
+| **Light** | Light default theme |
+| **Dark** | Dark theme |
+| **GEBIT** | Corporate theme by GEBIT Solutions |
 
-Wechsel über: **Settings → UI → Theme**.
+Switch via: **Settings → UI → Theme**.
 
 ---
 
-## Tastenkombinationen
+## Keyboard shortcuts
 
-Konfigurierbare Kürzel sind über **Settings → Tastenkürzel** anpassbar.
+Configurable shortcuts can be customized via **Settings → Shortcuts**.
 
-### Konfigurierbar
+### Configurable
 
-| Kürzel (Default) | Aktion | Kategorie |
+| Shortcut (default) | Action | Category |
 |---|---|---|
-| `Ctrl+T` | Neuer Tab | Tabs |
-| `Ctrl+W` | Tab schließen | Tabs |
-| `Ctrl+Tab` | Nächster Tab | Tabs |
-| `Ctrl+Shift+Tab` | Vorheriger Tab | Tabs |
-| `Ctrl+L` | Eingabe fokussieren | Chat |
-| `Ctrl+F` | Chat durchsuchen | Chat |
-| `Ctrl+E` | Chat exportieren | Chat |
-| `Ctrl+B` | Sidebar ein-/ausblenden | UI |
-| `Ctrl+/` | Tastenkürzel-Hilfe | UI |
+| `Ctrl+T` | New tab | Tabs |
+| `Ctrl+W` | Close tab | Tabs |
+| `Ctrl+Tab` | Next tab | Tabs |
+| `Ctrl+Shift+Tab` | Previous tab | Tabs |
+| `Ctrl+L` | Focus input | Chat |
+| `Ctrl+F` | Search chat | Chat |
+| `Ctrl+E` | Export chat | Chat |
+| `Ctrl+B` | Toggle sidebar | UI |
+| `Ctrl+/` | Shortcut help | UI |
 
-### Fest verdrahtet
+### Hard-wired
 
-| Kürzel | Aktion |
+| Shortcut | Action |
 |---|---|
-| `Ctrl+1` … `Ctrl+8` | Tab 1–8 direkt anspringen |
-| `Ctrl+9` | Letzter Tab |
-| `Enter` | Nachricht senden |
-| `Shift+Enter` | Zeilenumbruch in der Nachricht |
-| `Escape` | Aktion abbrechen / Overlay schließen |
+| `Ctrl+1` … `Ctrl+8` | Jump directly to tab 1–8 |
+| `Ctrl+9` | Last tab |
+| `Enter` | Send message |
+| `Shift+Enter` | Line break in the message |
+| `Escape` | Cancel action / close overlay |
 
 ---
 
-> **Agent Desktop v1.0.0** · Entwickelt für GEBIT Solutions
+> **Agent Desktop v1.0.0** · Built for GEBIT Solutions

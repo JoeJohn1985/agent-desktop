@@ -1,41 +1,41 @@
 # Release Notes v1.0.0
 
-**Erstes stabiles Release.** GitHub Copilot (CLI/ACP) ist der vollständig getestete Kern. Zusätzlich stehen Direkt-API-Provider bereit — nach Reifegrad gekennzeichnet: **Gemini = Beta** („Getestet nicht final"), **Anthropic/OpenAI/GLM/Ollama = Alpha** („Nicht getestet"). Copilot trägt kein Label.
+**First stable release.** GitHub Copilot (CLI/ACP) is the fully-tested core. In addition, direct-API providers are available — labelled by maturity: **Gemini = Beta** ("tested, not final"), **Anthropic/OpenAI/GLM/Ollama = Alpha** ("untested"). Copilot carries no label.
 
-## Was ist neu in 1.0?
+## What's new in 1.0?
 
-- **Dynamische Modell-Ermittlung** für alle Provider (live per `/models` bzw. ACP), inkl. Info-Meldung bei neu aufgetauchten Modellen.
-- **Reifegrad-Labels (Alpha/Beta)** je Provider mit Tooltip.
-- **Tab-Leiste überarbeitet**: aktiver Tab groß, übrige kompakt (Kürzel + Trenn-Ränder), Aktionen bei Hover, Schließen-✕ in der Ecke.
+- **Dynamic model discovery** for all providers (live via `/models` or ACP), including an info message when new models appear.
+- **Maturity labels (Alpha/Beta)** per provider with a tooltip.
+- **Reworked tab bar**: the active tab is large, the rest compact (short label + separator borders), actions on hover, close ✕ in the corner.
 
-### Behobene Fehler
-- Kosten werden je Nachricht mit dem **tatsächlich verwendeten Modell** abgerechnet (kein Fehlpreis mehr bei Modellwechsel zwischen Prompts).
-- **Tool-Aufrufe wieder sichtbar** (Copilot/ACP: korrektes Icon; MCP-Tools wie Playwright nicht mehr ausgeblendet); **keine dreifache** Ergebnis-Anzeige mehr.
-- Fehlender **Absatz zwischen Sätzen** behoben; nach Session-Laden wird **ans Ende gescrollt**.
+### Bug fixes
+- Cost is billed per message using the **model actually used** (no more mispricing when switching models between prompts).
+- **Tool calls visible again** (Copilot/ACP: correct icon; MCP tools like Playwright no longer hidden); **no more triple** result display.
+- Fixed a missing **paragraph break between sentences**; reopening a session now **scrolls to the bottom**.
 
 ---
 
 # Release Notes v0.32.0
 
-## Was ist neu?
+## What's new?
 
-### Mehrere LLM-Provider — Anthropic API direkt nutzen 🔌
+### Multiple LLM providers — use the Anthropic API directly 🔌
 
-Neben der GitHub Copilot CLI kann jetzt **pro Tab** die **Anthropic-API direkt** verwendet werden — mit vollem Agent-Funktionsumfang.
+Alongside the GitHub Copilot CLI, the **Anthropic API** can now be used **directly, per tab** — with the full agent feature set.
 
-- **Provider-Auswahl** in der Session-Leiste (`🔌 Provider`): Umschalten zwischen *GitHub Copilot* und *Anthropic API* (Gemini/OpenAI sind vorbereitet). Das Modell-Dropdown zeigt nur die Modelle des gewählten Providers.
-- **Voll agentisch**: Das API-Backend führt eine eigene Tool-Schleife aus — lesen/schreiben/bearbeiten von Dateien und Shell-Befehle (unter Windows über PowerShell), inkl. Streaming und adaptivem Thinking.
-- **Sichere API-Keys**: Neuer Einstellungen-Tab „API-Provider". Keys werden über den OS-Schlüsselbund verschlüsselt gespeichert und verlassen den Hauptprozess nie.
-- **Projekt-Kontext**: Skills, Agents und `copilot-instructions.md` werden als (gecachter) System-Prompt mitgegeben.
-- **Prompt-Caching**: Der wachsende Verlauf wird zwischengespeichert → deutlich geringere Kosten bei langen Sessions.
-- **Kontext-Management**: Auslastungsanzeige in Prozent und **automatisches Verdichten** ab 80 %.
-- **Session-Wiederaufnahme**: Verlauf wird gespeichert und beim erneuten Öffnen wieder angezeigt; das Gespräch läuft mit vollem Kontext weiter.
-- **Exakte Kosten**: Direkt-API liefert echte Token-Zahlen (inkl. Cache-Write zu 1,25× Input) statt Schätzung.
+- **Provider selection** in the session bar (`🔌 Provider`): switch between *GitHub Copilot* and *Anthropic API* (Gemini/OpenAI are prepared). The model dropdown shows only the selected provider's models.
+- **Fully agentic**: the API backend runs its own tool loop — read/write/edit files and shell commands (on Windows via PowerShell), incl. streaming and adaptive thinking.
+- **Secure API keys**: new "API providers" settings tab. Keys are encrypted via the OS keychain and never leave the main process.
+- **Project context**: skills, agents, and `copilot-instructions.md` are passed as a (cached) system prompt.
+- **Prompt caching**: the growing history is cached → significantly lower cost on long sessions.
+- **Context management**: usage shown as a percentage, with **automatic compaction** above 80%.
+- **Session resume**: history is persisted and shown again on reopen; the conversation continues with full context.
+- **Exact cost**: the direct API returns real token counts (incl. cache-write at 1.25× input) instead of an estimate.
 
-> **Hinweis:** Für die Anthropic-API wird ein eigener API-Key benötigt (Einstellungen → API-Provider).
+> **Note:** the Anthropic API requires your own API key (Settings → API providers).
 
 ---
 
 ## Bug Fixes
 
-- **Copilot-Antworten brachen nach 60 s mit „Code 1" ab und liefen dann scheinbar endlos weiter**: Längere agentische Turns liefen in ein festes 60-Sekunden-Timeout des `session/prompt`-Requests — die Anzeige blieb auf „Running" hängen, obwohl die CLI noch arbeitete. Der Turn hat jetzt kein künstliches Timeout mehr (begrenzt durch Stop-Button und Prozess-Ende).
+- **Copilot responses aborted after 60s with "Code 1" and then seemed to run forever**: longer agentic turns hit a fixed 60-second timeout on the `session/prompt` request — the UI stayed stuck on "Running" while the CLI was still working. The turn no longer has an artificial timeout (bounded by the stop button and process exit).

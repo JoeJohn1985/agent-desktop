@@ -1,94 +1,94 @@
-# Konzept: Copilot-Angleichung & Provider-Neutralität
+# Concept: Copilot alignment & provider neutrality
 
-> **Umsetzungsstand (1.0.0, 2026-07-02):** Umgesetzt. Zusätzlich zur ursprünglich
-> geplanten reinen Anzeigenamens-Änderung wurde in 1.0 die **komplette interne
-> Identität** von `copilot-desktop` auf `agent-desktop` umbenannt (inkl.
-> `app.name`, `package.json`, Datenpfad `~/.agent-desktop`, Electron-`userData`)
-> — mit automatischer Datenmigration (`src/data-dir.js`; Windows behält per DPAPI
-> die verschlüsselten Keys). Die unten stehende Passage „interne IDs bleiben
-> unverändert" ist damit **überholt**. Provider-ID `copilot` und IPC-Kanäle
-> `copilot:*` bleiben bewusst bestehen.
+> **Implementation status (1.0.0, 2026-07-02):** Implemented. In addition to the
+> originally planned display-name-only change, 1.0 renamed the **entire internal
+> identity** from `copilot-desktop` to `agent-desktop` (incl. `app.name`,
+> `package.json`, data path `~/.agent-desktop`, Electron `userData`) — with
+> automatic data migration (`src/data-dir.js`; on Windows DPAPI keeps the
+> encrypted keys valid). The passage below stating "internal IDs stay unchanged"
+> is therefore **outdated**. The provider id `copilot` and the IPC channels
+> `copilot:*` are intentionally kept.
 
-**Status:** Umgesetzt in 1.0.0 · **Datum:** 2026-06-30
-**Ziel:** Die App von einer „Copilot-UI" zu einer provider-neutralen, lokalen Agent-Anwendung angleichen. Copilot bleibt technisch die CLI (keine API-Anbindung), wird aber für den Nutzer **wie ein Provider unter mehreren** behandelt.
+**Status:** Implemented in 1.0.0 · **Date:** 2026-06-30
+**Goal:** Align the app from a "Copilot UI" into a provider-neutral, local agent application. Copilot technically remains the CLI (no API binding) but is presented to the user **as one provider among several**.
 
-Entscheidungen (abgestimmt):
-- App wird **provider-neutral umbenannt** (Anzeigename).
-- Copilot-Setup/Login **zentral im Provider-Tab**.
-- App **ohne Copilot-CLI** voll nutzbar (Copilot optional).
-- **Erst Konzept, dann Umsetzung.**
-
----
-
-## ⚠️ Kritische Randbedingung: nur Anzeigename ändern
-
-Der Identifier `copilot-desktop` ist an **Nutzerdaten** gekoppelt:
-- `app.name` / Electron-userData-Pfad → `~/.copilot-desktop/` bzw. `%APPDATA%\copilot-desktop\`
-- **verschlüsselte API-Keys** (`safeStorage` ist an die App-Identität gebunden)
-- Preferences (`settings`, `namedSessions`, `costLog`, …), Logs, gelöschte Todos
-
-**Folge:** Ändert man den *internen* Namen/Pfad, verlieren alle Nutzer Keys, Einstellungen, Kosten-Historie und Session-Namen.
-→ **Wir ändern ausschließlich den sichtbaren Anzeigenamen.** Interne IDs (`copilot-desktop`, userData-Pfad, `package.json` `name`) bleiben **unverändert**.
-
-**Offen:** gewünschter **Anzeigename** (z.B. „Agent Desktop", „Local Agent", „GEBIT Agent" …). → bitte festlegen.
+Decisions (agreed):
+- The app is **renamed provider-neutrally** (display name).
+- Copilot setup/login is **centralized in the provider tab**.
+- The app is **fully usable without the Copilot CLI** (Copilot optional).
+- **Concept first, then implementation.**
 
 ---
 
-## Phase A — Rebranding (nur Anzeige, risikoarm)
+## ⚠️ Critical constraint: change display name only
 
-Ändern (nur Strings/Texte):
-- `renderer/index.html`: `<title>`, `.titlebar__title`, Onboarding-Titel, Settings-Hinweise
-- `main.js`: `BrowserWindow.title`, Startup-Log-Text (Anzeige); **NICHT** `app.name`, **NICHT** userData-Pfade
-- `renderer/app.js`: Onboarding-Texte (CWD/Folders/Login), die „Copilot Desktop"-Erwähnungen
-- `PROVIDER_LABELS.copilot` bleibt „GitHub Copilot" (das ist korrekt — der Provider *heißt* so)
-- Default-Tab-Label „🤖 Copilot" → neutral (z.B. „🤖 Neuer Tab") bzw. nach gewähltem Provider
+The identifier `copilot-desktop` is coupled to **user data**:
+- `app.name` / Electron userData path → `~/.copilot-desktop/` resp. `%APPDATA%\copilot-desktop\`
+- **encrypted API keys** (`safeStorage` is bound to the app identity)
+- preferences (`settings`, `namedSessions`, `costLog`, …), logs, deleted todos
 
-Bewusst **unverändert**: `package.json` `name`, `app.name`, alle `~/.copilot-desktop/`-Pfade, Logger-Dateinamen.
+**Consequence:** changing the *internal* name/path would make every user lose keys, settings, cost history, and session names.
+→ **We change only the visible display name.** Internal IDs (`copilot-desktop`, userData path, `package.json` `name`) stay **unchanged**.
 
----
-
-## Phase B — Copilot als Provider im „API-Provider"-Tab
-
-Copilot bekommt **eine Zeile wie die anderen Provider** in den Einstellungen → „API-Provider":
-- **Status-Erkennung** (neuer IPC `copilot:status`):
-  - CLI installiert? (`copilot --version` → ok/fehlt)
-  - eingeloggt? (vorhandene `auth:check`)
-- **Anzeige:** „● eingeloggt als <user>" / „○ CLI installiert, nicht eingeloggt" / „⚠ CLI nicht gefunden"
-- **Aktionen in der Zeile:** „Anmelden" (= bestehender Terminal-Login) · Install-Hinweis/Link, falls CLI fehlt
-- **Info-Tooltip** wie bei den anderen (Tools, MCP-Unterstützung als Alleinstellungsmerkmal)
-- Kein Key-Feld (Copilot nutzt CLI-Login statt Key) — die Zeile zeigt stattdessen den CLI-/Login-Status
-
-So managt der Nutzer **alle** Provider an **einem** Ort. Der Terminal-Login bleibt technisch, ist aber gleich präsentiert.
-
-Betroffen: `PROVIDER_SETTINGS` (+ `copilot`-Eintrag mit `type:'cli'`), `renderProvidersSettings`, neuer `copilot:status`-IPC, `refreshProviderStatus`.
+**Open:** the desired **display name** (e.g. "Agent Desktop", "Local Agent", "GEBIT Agent" …). → please decide.
 
 ---
 
-## Phase C — Copilot optional (Onboarding-Umbau)
+## Phase A — Rebranding (display only, low risk)
 
-Heute ist der **Copilot-Login ein Pflichtschritt**. Neu:
-- **Provider-Auswahl-Schritt** beim Erststart: „Womit möchtest du starten?" → Copilot **oder** ein API-Provider (Key eingeben) **oder** Ollama (lokal).
-- Copilot-Login-Schritt wird **überspringbar**; wer einen API-Provider wählt, braucht keine Copilot-CLI.
-- **Default-Provider** wird aus der Auswahl gesetzt (greift in das bereits gebaute `settings.defaultProvider`).
-- Folder-Setup bleibt (projekt-/cwd-Logik gilt für alle Provider).
+Change (strings/text only):
+- `renderer/index.html`: `<title>`, `.titlebar__title`, onboarding title, settings hints
+- `main.js`: `BrowserWindow.title`, startup log text (display); **NOT** `app.name`, **NOT** userData paths
+- `renderer/app.js`: onboarding texts (CWD/folders/login), the "Copilot Desktop" mentions
+- `PROVIDER_LABELS.copilot` stays "GitHub Copilot" (that's correct — the provider *is* called that)
+- Default tab label "🤖 Copilot" → neutral (e.g. "🤖 New tab") or based on the selected provider
 
-Betroffen: Onboarding-Wizard (`renderLoginStep` → `renderProviderStep`), Schritt-Reihenfolge, `getDefaultProvider`.
-
-Edge-Case: App-Funktionen, die **zwingend** die CLI brauchen (MCP, Skills/Agents-Ausführung via CLI), bleiben Copilot-only und werden bei Nicht-Copilot-Tabs ausgeblendet (MCP ist bereits so).
-
----
-
-## Reihenfolge & Risiko
-
-1. **Phase A (Rebranding)** — risikoarm, rein kosmetisch. Braucht nur den Namen.
-2. **Phase B (Copilot im Provider-Tab)** — mittel; neuer `copilot:status`-IPC, UI-Erweiterung.
-3. **Phase C (Onboarding/optional)** — größter Umbau; Onboarding-Flow + Erststart-Logik.
-
-Jede Phase einzeln committet, Tests/Lint grün. Keine Daten-Migration nötig (interne IDs bleiben).
+Intentionally **unchanged**: `package.json` `name`, `app.name`, all `~/.copilot-desktop/` paths, logger file names.
 
 ---
 
-## Offene Punkte für dich
-1. **Anzeigename** der App?
-2. Phasen-Reihenfolge ok (A → B → C)?
-3. Soll das Default-Tab-Label „🤖 Copilot" generisch werden (z.B. „🤖 Neuer Tab")?
+## Phase B — Copilot as a provider in the "API providers" tab
+
+Copilot gets **a row like the other providers** in Settings → "API providers":
+- **Status detection** (new IPC `copilot:status`):
+  - CLI installed? (`copilot --version` → ok/missing)
+  - logged in? (existing `auth:check`)
+- **Display:** "● logged in as <user>" / "○ CLI installed, not logged in" / "⚠ CLI not found"
+- **Actions in the row:** "Sign in" (= existing terminal login) · install hint/link if the CLI is missing
+- **Info tooltip** like the others (tools, MCP support as a unique selling point)
+- No key field (Copilot uses CLI login instead of a key) — the row shows the CLI/login status instead
+
+This way the user manages **all** providers in **one** place. The terminal login stays technically, but is presented identically.
+
+Affected: `PROVIDER_SETTINGS` (+ `copilot` entry with `type:'cli'`), `renderProvidersSettings`, new `copilot:status` IPC, `refreshProviderStatus`.
+
+---
+
+## Phase C — Copilot optional (onboarding rework)
+
+Today the **Copilot login is a mandatory step**. New:
+- **Provider selection step** on first start: "What would you like to start with?" → Copilot **or** an API provider (enter a key) **or** Ollama (local).
+- The Copilot login step becomes **skippable**; anyone choosing an API provider needs no Copilot CLI.
+- The **default provider** is set from the selection (feeds into the already-built `settings.defaultProvider`).
+- Folder setup stays (project/cwd logic applies to all providers).
+
+Affected: onboarding wizard (`renderLoginStep` → `renderProviderStep`), step order, `getDefaultProvider`.
+
+Edge case: app features that **strictly** require the CLI (MCP, skill/agent execution via the CLI) remain Copilot-only and are hidden for non-Copilot tabs (MCP is already handled this way).
+
+---
+
+## Order & risk
+
+1. **Phase A (rebranding)** — low risk, purely cosmetic. Only needs the name.
+2. **Phase B (Copilot in the provider tab)** — medium; new `copilot:status` IPC, UI extension.
+3. **Phase C (onboarding/optional)** — the largest change; onboarding flow + first-start logic.
+
+Each phase committed separately, tests/lint green. No data migration needed (internal IDs stay).
+
+---
+
+## Open items for you
+1. The app's **display name**?
+2. Phase order OK (A → B → C)?
+3. Should the default tab label "🤖 Copilot" become generic (e.g. "🤖 New tab")?

@@ -2,237 +2,236 @@
 
 ## [1.0.0] - 2026-07-02
 
-Erstes stabiles Release. Die Kernfunktion (GitHub Copilot CLI) ist vollständig
-getestet; die Direkt-API-Provider sind je nach Reifegrad als **Beta** (Gemini)
-bzw. **Alpha** (Anthropic, OpenAI, GLM, Ollama) gekennzeichnet.
+First stable release. The core feature (GitHub Copilot CLI) is fully tested; the
+direct-API providers are labelled by maturity as **Beta** (Gemini) or **Alpha**
+(Anthropic, OpenAI, GLM, Ollama).
 
 ### Added
-- **Dynamische Modell-Ermittlung für alle Provider** — Modelle werden per
-  `/models`-Endpoint (Anthropic, Gemini, OpenAI, GLM, Ollama) bzw. via ACP
-  (Copilot) live erkannt und persistiert. Taucht ein neues Modell auf, erscheint
-  eine Info. (`src/model-discovery.js`, IPC `providers:listModels`)
-- **Alpha-/Beta-Reifegrad-Labels** je Provider mit Tooltip (Beta: „Getestet
-  nicht final", Alpha: „Nicht getestet"); Copilot ohne Label.
-- **Diagnose-Logging** (unbekannte ACP-Events vollständig + roher `/usage`-Text)
-  zur Untersuchung von Subagent-/Usage-Signalen.
+- **Dynamic model discovery for all providers** — models are discovered live via
+  the `/models` endpoint (Anthropic, Gemini, OpenAI, GLM, Ollama) or via ACP
+  (Copilot) and persisted. When a new model appears, an info message is shown.
+  (`src/model-discovery.js`, IPC `providers:listModels`)
+- **Alpha/Beta maturity labels** per provider with a tooltip (Beta: "tested, not
+  final", Alpha: "untested"); Copilot has no label.
+- **Diagnostic logging** (full unknown ACP events + raw `/usage` text) to
+  investigate sub-agent / usage signals.
 
 ### Changed
-- **Interne Umbenennung `copilot-desktop` → `agent-desktop`** (App-Identität,
-  `app.name`, Datenverzeichnis `~/.agent-desktop`, Electron-`userData`). Beim
-  ersten Start migriert die App vorhandene Daten (Preferences, verschlüsselte
-  API-Keys, Sessions, Logs) automatisch aus der alten Identität — unter Windows
-  bleiben die Keys gültig (DPAPI). Provider-ID `copilot` und die IPC-Kanäle
-  bleiben bewusst unverändert (referenzieren die echte Copilot-Integration).
-  (`src/data-dir.js`)
-- **Tab-Leiste optimiert**: aktiver Tab groß (volles Label + Aktionen), übrige
-  kompakt (3-Zeichen-Kürzel, Trenn-Ränder, Aktionen nur bei Hover); App-Icon
-  entfernt; Schließen-✕ in der rechten Ecke.
+- **Internal rename `copilot-desktop` → `agent-desktop`** (app identity,
+  `app.name`, data directory `~/.agent-desktop`, Electron `userData`). On first
+  start the app automatically migrates existing data (preferences, encrypted
+  API keys, sessions, logs) from the old identity — on Windows the keys stay
+  valid (DPAPI). The provider id `copilot` and the IPC channels are intentionally
+  kept unchanged (they reference the real Copilot integration). (`src/data-dir.js`)
+- **Optimized tab bar**: active tab large (full label + actions), the rest
+  compact (3-char short label, separator borders, actions on hover only); app
+  icon removed; close ✕ in the right corner.
 
 ### Fixed
-- **Kosten je Nachricht mit dem tatsächlich verwendeten Modell** abgerechnet
-  (eingefroren beim Senden) — ein Modellwechsel zwischen zwei Prompts verrechnet
-  frühere Tokens nicht mehr zum neuen Preis.
-- **Tool-Aufrufe bei Copilot (ACP) sichtbar**: `kind` wird über
-  `tool_call_update` hinweg gemerkt (korrektes Icon statt versteckt); der
-  Tool-Aufruf wird zentral in `tool.execution_start` gerendert.
-- **MCP-Tool-Aufrufe** (z. B. Playwright) werden nicht mehr ausgeblendet
-  (generisches 🔧-Icon + sinnvolle Argument-Anzeige).
-- **Tool-Ergebnis nicht mehr dreifach** angezeigt (ACP-Status-Updates werden per
-  `toolCallId` dedupliziert und in-place aktualisiert).
-- **Fehlender Absatz zwischen Sätzen** an `report_intent`-Grenzen behoben.
-- **Nach dem Laden einer Session** wird ans Ende (letzter Dialogstand) gescrollt.
+- **Cost billed per message using the model actually used** (frozen at send time)
+  — switching models between two prompts no longer re-prices earlier tokens at
+  the new price.
+- **Tool calls visible for Copilot (ACP)**: `kind` is now remembered across
+  `tool_call_update` (correct icon instead of hidden); the tool call is rendered
+  centrally in `tool.execution_start`.
+- **MCP tool calls** (e.g. Playwright) are no longer hidden (generic 🔧 icon +
+  meaningful argument display).
+- **Tool result no longer shown three times** (ACP status updates are deduplicated
+  by `toolCallId` and updated in place).
+- **Missing paragraph break between sentences** at `report_intent` boundaries fixed.
+- **After loading a session** the view scrolls to the bottom (latest message).
 
-<!-- Die folgenden Einträge waren zuvor unter [Unreleased] und sind Teil von 1.0.0. -->
+<!-- The following entries were previously under [Unreleased] and are part of 1.0.0. -->
 
 ### Added
-- **Drei neue Provider: OpenAI, Ollama, GLM (Zhipu)** — voll agentisch über einen gemeinsamen OpenAI-kompatiblen Kern (Chat Completions + Function Calling, SSE-Streaming, dependency-frei). Ollama ist lokal & keyless; Base-URL pro Provider in den Einstellungen überschreibbar. (`src/providers/openai-compatible-provider.js` + `openai/ollama/glm-provider.js`)
-- **Standard-Provider + Standard-Modell pro Provider** in den Einstellungen; behebt zugleich den Bug, dass Copilot immer mit Haiku statt dem gewählten Modell startete
-- **Modell-Kennzeichnung** im Dropdown: 💲 kostenpflichtig / 🆓 kostenlos / AIC (Copilot-Abo)
-- **Kontext-Auslastung** aktualisiert sich nach jeder Nachricht automatisch (alle Provider)
-- **Kontingent-/Rate-Limit-Fehler** werden als verständliche Info statt rohem JSON angezeigt (Gemini/Anthropic/OpenAI)
+- **Three new providers: OpenAI, Ollama, GLM (Zhipu)** — fully agentic via a shared OpenAI-compatible core (chat completions + function calling, SSE streaming, dependency-free). Ollama is local & keyless; the base URL is overridable per provider in the settings. (`src/providers/openai-compatible-provider.js` + `openai/ollama/glm-provider.js`)
+- **Default provider + default model per provider** in the settings; also fixes the bug where Copilot always started with Haiku instead of the selected model
+- **Model labelling** in the dropdown: 💲 paid / 🆓 free / AIC (Copilot subscription)
+- **Context usage** updates automatically after every message (all providers)
+- **Quota / rate-limit errors** are shown as a readable message instead of raw JSON (Gemini/Anthropic/OpenAI)
 
 ### Changed
-- **Kosten in echtem USD** statt gemischter AI-Credits (Copilot 100 AIC = 1 $); **Kosten-Window nach Provider gruppierbar** (Umschalter Provider/Session)
-- **Git-basiertes Self-Update**: Die App prüft beim Start, periodisch (alle 6 h) und per Button in *Einstellungen → UI* über `git ls-remote --tags origin`, ob ein neuerer Release-Tag (`vX.Y.Z`) existiert (Vergleich mit lokaler `package.json`-Version, nur stabile Tags). Bei verfügbarem Update erscheint ein Banner „Neue Version verfügbar" mit „Herunterladen & Neustarten": sauberer Working Tree vorausgesetzt → `git pull --ff-only origin main`, bei geänderten Abhängigkeiten automatisch `npm install`, danach Neustart. Kein eingebettetes Token — nutzt die Git-Credentials des Nutzers (funktioniert auch beim privaten Repo). (`src/updater.js`, IPC `updates:check`/`updates:apply`)
-- **Gemini 3.5 Flash** zur Modellauswahl hinzugefügt (Preise vorläufig wie 2.5 Flash, bis offiziell bestätigt)
-- **Info-Tooltip je Provider** in den API-Provider-Einstellungen (ⓘ): listet verfügbare Tools und Besonderheiten pro Provider beim Hover
-- **Auth-Hinweis mit Login + Neustart**: Bei „Anmeldung erforderlich" öffnet ein Button ein sichtbares Terminal mit `copilot login`; danach „App neu starten"-Button (nötig, da die Auth beim Main-Prozess-Start übernommen wird)
+- **Cost in real USD** instead of mixed AI Credits (Copilot 100 AIC = $1); **cost window groupable by provider** (provider/session toggle)
+- **Git-based self-update**: on start, periodically (every 6h), and via a button in *Settings → UI*, the app checks via `git ls-remote --tags origin` whether a newer release tag (`vX.Y.Z`) exists (compared against the local `package.json` version, stable tags only). When an update is available a "New version available" banner appears with "Download & restart": given a clean working tree → `git pull --ff-only origin main`, automatic `npm install` if dependencies changed, then restart. No embedded token — uses the user's Git credentials (works with the private repo too). (`src/updater.js`, IPC `updates:check`/`updates:apply`)
+- **Gemini 3.5 Flash** added to the model selection (pricing provisionally like 2.5 Flash until officially confirmed)
+- **Info tooltip per provider** in the API-provider settings (ⓘ): lists available tools and specifics per provider on hover
+- **Auth hint with login + restart**: on "sign-in required", a button opens a visible terminal running `copilot login`; afterwards a "Restart app" button (needed because auth is picked up at main-process start)
 
 ### Changed
-- **Todos sind jetzt projekt- statt session-gebunden**: Sie werden als Markdown-Checkliste unter `<cwd>/todo/todos.md` gespeichert (mit unsichtbaren ID-Kommentaren für verlustfreie Round-Trips) statt in `<session>/todos.json`. Dadurch überlebt die Todo-Liste das Löschen einer Session und wird von allen Sessions im selben Verzeichnis geteilt. (`src/todos.js`, IPC `todos:*` nun cwd-basiert)
-- **Gemini: Live-Suche und Datei-Tools per Tab umschaltbar** statt kombiniert — Gemini 2.5 verbietet beides im selben Request (400 `INVALID_ARGUMENT`). Modus „🔍 Recherche" (Default) bzw. „📁 Dateien" ist jederzeit pro Tab wechselbar
-- **Session-Löschung in den Papierkorb** (`shell.trashItem`) statt unwiderruflichem `fs.rmSync`; zusätzlich wird eine nicht-leere `todos.json` vor dem Löschen nach `~/.copilot-desktop/deleted-todos/` gesichert
-- **Mehrzeilige Tooltips**: `.js-tooltip` nutzt jetzt `white-space: pre-line` (Zeilenumbrüche werden dargestellt)
+- **Todos are now project- instead of session-scoped**: stored as a markdown checklist under `<cwd>/todo/todos.md` (with invisible ID comments for lossless round-trips) instead of `<session>/todos.json`. This way the todo list survives session deletion and is shared by all sessions in the same directory. (`src/todos.js`, IPC `todos:*` now cwd-based)
+- **Gemini: live search and file tools togglable per tab** instead of combined — Gemini 2.5 forbids both in the same request (400 `INVALID_ARGUMENT`). The "🔍 Research" (default) or "📁 Files" mode can be switched per tab at any time
+- **Session deletion to the recycle bin** (`shell.trashItem`) instead of irreversible `fs.rmSync`; additionally a non-empty `todos.json` is backed up to `~/.agent-desktop/deleted-todos/` before deletion
+- **Multi-line tooltips**: `.js-tooltip` now uses `white-space: pre-line` (line breaks are rendered)
 
 ## [0.32.0] - 2026-06-24
 
 ### Added
-- **Multi-LLM-Provider: Anthropic API (voll agentisch)** — neben der Copilot CLI kann pro Tab jetzt die Anthropic-API direkt genutzt werden. Eigene Agent-Schleife mit lokaler Tool-Ausführung (`shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`), Streaming, adaptivem Thinking und Token-genauer Kostenabrechnung. (`src/providers/*`, `src/secure-store.js`)
-- **Multi-LLM-Provider: Google Gemini (recherche-orientiert)** — Gemini 2.5 Pro/Flash als Direkt-API. **Live-Google-Suche** (Grounding) mit automatischen Quellenangaben + Datei-Tools (lesen/schreiben/bearbeiten), aber ohne Shell und ohne Skills/Agents/Instructions. (`src/providers/gemini-provider.js`, `@google/genai`)
-- **Provider-Auswahl beim neuen Tab**: Klick auf „+" öffnet ein Provider-Dropdown (Copilot, Gemini, Anthropic, OpenAI); der Provider ist pro Tab fix. In der Session-Leiste wird der Provider als reine Anzeige neben den Kosten gezeigt
-- **Sichere API-Key-Speicherung** über den OS-Schlüsselbund (Electron `safeStorage`); neuer Einstellungen-Tab „API-Provider". Keys verlassen den Hauptprozess nicht
-- **Skills, Agents und `copilot-instructions.md`** werden für die Direkt-API als (gecachter) System-Prompt-Kontext injiziert
-- **Prompt-Caching** für die Anthropic-API (wachsender System-/Tool-/Historien-Präfix wird gecacht)
-- **Kontext-Management für Direkt-Provider**: `📊 %`-Anzeige + **automatisches Compact** ab 80 % Auslastung
-- **Session-Persistenz + Wiederanzeige** für Direkt-API-Sessions (Historie unter `~/.copilot-desktop/api-sessions/`)
-- **Cache-Write-Tokens** (1,25× Input) werden in der Kostenrechnung berücksichtigt
+- **Multi-LLM provider: Anthropic API (fully agentic)** — alongside the Copilot CLI, the Anthropic API can now be used directly per tab. Own agent loop with local tool execution (`shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`), streaming, adaptive thinking, and token-accurate cost accounting. (`src/providers/*`, `src/secure-store.js`)
+- **Multi-LLM provider: Google Gemini (research-oriented)** — Gemini 2.5 Pro/Flash as a direct API. **Live Google search** (grounding) with automatic source citations + file tools (read/write/edit), but no shell and no skills/agents/instructions. (`src/providers/gemini-provider.js`, `@google/genai`)
+- **Provider selection on new tab**: clicking "+" opens a provider dropdown (Copilot, Gemini, Anthropic, OpenAI); the provider is fixed per tab. The session bar shows the provider as a read-only indicator next to the cost
+- **Secure API-key storage** via the OS keychain (Electron `safeStorage`); new "API providers" settings tab. Keys never leave the main process
+- **Skills, agents, and `copilot-instructions.md`** are injected as (cached) system-prompt context for the direct API
+- **Prompt caching** for the Anthropic API (the growing system/tool/history prefix is cached)
+- **Context management for direct providers**: `📊 %` display + **automatic compaction** above 80% usage
+- **Session persistence + redisplay** for direct-API sessions (history under `~/.agent-desktop/api-sessions/`)
+- **Cache-write tokens** (1.25× input) are accounted for in the cost calculation
 
 ### Changed
-- `shell`-Tool der Direkt-API läuft unter Windows über **PowerShell** statt cmd.exe (plattformabhängig via `spawn`)
+- The direct-API `shell` tool runs on Windows via **PowerShell** instead of cmd.exe (platform-dependent via `spawn`)
 
 ### Fixed
-- **ACP `session/prompt`-Timeout (kritisch)**: Längere Copilot-Turns (> 60 s) liefen in ein festes 60-Sekunden-Timeout → „[Prozess beendet mit Code 1]", während die CLI weiterlief und die Antwort endlos weiterstreamte (Anzeige blieb auf „Running" hängen). `session/prompt` hat jetzt kein Timeout mehr (begrenzt durch Cancel/Prozess-Ende); stille Slash-Commands nutzen 180 s
-- **Verschmolzene Nachrichten**: Aufeinanderfolgende Antwort-Segmente um Tool-Aufrufe herum („… aufrufen:Jetzt …") wurden in eine Blase gerendert. Ein Tool-Aufruf schließt jetzt die Antwort-Blase → getrennte, lesbare Nachrichten (Copilot und Direkt-API)
-- **Provider-Dropdown**: fehlender Panel-Hintergrund/falsche Position beim „+"-Provider-Menü behoben (eigene Panel-Klasse, fixe Positionierung)
+- **ACP `session/prompt` timeout (critical)**: longer Copilot turns (> 60s) hit a fixed 60-second timeout → "[process exited with code 1]" while the CLI kept running and the response streamed on forever (the UI stayed stuck on "Running"). `session/prompt` no longer has a timeout (bounded by cancel/process exit); silent slash commands use 180s
+- **Merged messages**: consecutive response segments around tool calls ("… calling:Now …") were rendered into one bubble. A tool call now closes the response bubble → separate, readable messages (Copilot and direct API)
+- **Provider dropdown**: fixed missing panel background / wrong position on the "+" provider menu (dedicated panel class, fixed positioning)
 
 ## [0.31.0] - 2026-06-19
 
 ### Added
-- **Credit-Schätzung aus Token-Verbrauch**: `/usage` liefert Input/Output/Cache-Tokens, die App berechnet daraus geschätzte AI Credits (`~12.5C`) per Modellpreistabelle (Sonnet 4.6: 300/30/1500C, Opus 4.8: 500/50/2500C pro 1M Tokens)
-- **Kosten-Verlauf in Einstellungen**: Neuer Settings-Tab „Kosten" mit gestapeltem Balkendiagramm (Tages-/Wochenansicht), Aufschlüsselung nach Session, Gesamtsumme und Verlauf-Löschen-Button
-- **Cost-Log**: Delta-Kosten werden pro Prompt in `preferences.json` (Key `costLog`) persistiert; max. 5.000 Einträge
-- `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog` als testbare Pure-Funktionen in `src/renderer-logic.js`
-- **Haiku 4.5 Preise** in der Modellpreistabelle (Input 100C, Cache 10C, Output 500C pro 1M Tokens)
+- **Credit estimation from token usage**: `/usage` returns input/output/cache tokens, from which the app computes estimated AI Credits (`~12.5C`) via a model-price table (Sonnet 4.6: 300/30/1500C, Opus 4.8: 500/50/2500C per 1M tokens)
+- **Cost history in settings**: new "Cost" settings tab with a stacked bar chart (day/week view), breakdown by session, grand total, and a clear-history button
+- **Cost log**: delta cost per prompt is persisted in `preferences.json` (key `costLog`); max 5,000 entries
+- `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog` as testable pure functions in `src/renderer-logic.js`
+- **Haiku 4.5 pricing** in the model-price table (input 100C, cache 10C, output 500C per 1M tokens)
 
 ### Changed
-- **Kosten als eigene Page statt Settings-Tab**: Die Kostenauflistung öffnet sich jetzt wie der Plugin-Marketplace als eigene Vollbild-Page (mehr Platz für wachsende Daten) — erreichbar über ein 📈-Icon in der Session-Leiste. Der „Kosten"-Tab in den Einstellungen entfällt
-- **AIC-Anzeige immer sichtbar**: Die Credit-Anzeige zeigt vor dem ersten Prompt `~0C` statt leer zu sein
-- Session-Leiste zeigt jetzt `~X.XC` statt AIU (Fallback auf AIU/AIC wenn Modell-Preistabelle nicht greift)
-- `parseUsageTokens`, `parseUsageRequests`, `estimateCredits`, `MODEL_PRICING` aus `renderer/app.js` nach `src/renderer-logic.js` ausgelagert (testbar)
-- **Kosten-Panel nach `renderer/modules/costs.js` ausgelagert** — `renderer/app.js` verschlankt, Kosten-Log und Diagramm-Logik in eigenem Modul
-- **Cost-Tracking auch für Hintergrund-Tabs**: `refreshUsageDisplay` läuft jetzt nach jedem abgeschlossenen Prompt, nicht nur für den aktiven Tab
+- **Cost as its own page instead of a settings tab**: the cost listing now opens as a dedicated full-screen page like the plugin marketplace (more room for growing data) — reachable via a 📈 icon in the session bar. The "Cost" settings tab is removed
+- **AIC display always visible**: the credit display shows `~0C` before the first prompt instead of being empty
+- The session bar now shows `~X.XC` instead of AIU (falls back to AIU/AIC when the model price table doesn't apply)
+- `parseUsageTokens`, `parseUsageRequests`, `estimateCredits`, `MODEL_PRICING` moved from `renderer/app.js` to `src/renderer-logic.js` (testable)
+- **Cost panel moved to `renderer/modules/costs.js`** — `renderer/app.js` slimmed down, cost log and chart logic in their own module
+- **Cost tracking for background tabs too**: `refreshUsageDisplay` now runs after every completed prompt, not only for the active tab
 
 ### Fixed
-- **Kostenberechnung bei Modellwechsel**: Pro Prompt wird jetzt nur der **Token-Zuwachs** seit der letzten Messung mit dem aktuellen Modellpreis verrechnet (`estimateCreditsDelta`). Vorher wurde die kumulierte Token-Summe komplett mit dem aktuellen Preis bewertet, wodurch ein Modellwechsel die unter dem alten Modell verbrauchten Tokens rückwirkend umpreiste (zu hohe/niedrige Deltas, bei Wechsel auf günstigeres Modell teils 0). Negative Deltas (nach `/clear`/`/compact`) werden auf 0 geklemmt
-- **`require is not defined` im Renderer (kritisch)**: `renderer/app.js` nutzte `require('../src/renderer-logic')`, was im Renderer (nodeIntegration: false, kein Bundler) eine `ReferenceError` warf und die gesamte app.js-Ausführung abbrach (u.a. `toggleSection is not defined`). `renderer-logic.js` ist jetzt UMD-gewrappt (IIFE) und stellt `window.RendererLogic` bereit; app.js liest daraus statt via `require`
-- **Kosten-Panel zeigte keine Daten**: 3 falsch benannte CSS-Variablen (`--bg-secondary`/`--bg-primary`/`--border-color` → `--bg-hover`/`--bg-surface`/`--border`) — Canvas-Hintergrund und Trennlinien waren unsichtbar
-- **Y-Achsen-Gitterlinien im Light-Theme kaum sichtbar**: `drawCostsChart` las die nicht existente CSS-Variable `--border-color` statt `--border`
-- **Stille Fehler in `refreshUsageDisplay`**: `catch (_) {}` ersetzt durch Logging
-- `niceStep(0)` mit Guard abgesichert (vermied potenzielles `NaN` bei leerem Diagramm)
+- **Cost calculation on model switch**: per prompt, only the **token increment** since the last reading is now priced at the current model's rate (`estimateCreditsDelta`). Previously the cumulative token total was priced entirely at the current rate, so a model switch retroactively re-priced tokens consumed under the old model (too-high/low deltas, sometimes 0 when switching to a cheaper model). Negative deltas (after `/clear`/`/compact`) are clamped to 0
+- **`require is not defined` in the renderer (critical)**: `renderer/app.js` used `require('../src/renderer-logic')`, which threw a `ReferenceError` in the renderer (nodeIntegration: false, no bundler) and aborted all of app.js (e.g. `toggleSection is not defined`). `renderer-logic.js` is now UMD-wrapped (IIFE) and exposes `window.RendererLogic`; app.js reads from that instead of via `require`
+- **Cost panel showed no data**: 3 mis-named CSS variables (`--bg-secondary`/`--bg-primary`/`--border-color` → `--bg-hover`/`--bg-surface`/`--border`) — canvas background and separators were invisible
+- **Y-axis grid lines barely visible in the light theme**: `drawCostsChart` read the non-existent CSS variable `--border-color` instead of `--border`
+- **Silent errors in `refreshUsageDisplay`**: `catch (_) {}` replaced with logging
+- `niceStep(0)` guarded (avoided a potential `NaN` on an empty chart)
 
 ## [0.29.1] - 2026-06-18
 
 ### Fixed
-- **Modell-IDs in Pricing-Map**: Punkte statt Bindestriche (`claude-sonnet-4.6` nicht `claude-sonnet-4-6`) — Credits wurden nicht berechnet, stattdessen AIU angezeigt
+- **Model IDs in the pricing map**: dots instead of hyphens (`claude-sonnet-4.6` not `claude-sonnet-4-6`) — credits weren't computed, AIU was shown instead
 
 ## [0.29.0] - 2026-06-18
 
 ### Added
-- **Kontext-Button als Dropdown**: Der `📊 Kontext`-Button zeigt jetzt die aktuelle Auslastung in % direkt im Button (`📊 18%`) und öffnet per Klick ein Dropdown mit drei Aktionen:
-  - **Kontext anzeigen**: Detail-Panel mit Token-Auslastung (Kategorien, Prozent, farbcodiert)
-  - **Compact**: Fasst die Konversation zusammen und aktualisiert die %-Anzeige
-  - **Clear**: Löscht den Kontext, fragt danach erneut `/context` ab
-- **Tools-Button**: `🔧 Tools`-Button neben dem Kontext-Button — öffnet Popup für Session-spezifische Denied-Tools
-- **AIU-/Credit-Anzeige in der Leiste**: Rechts in der Session-Aktionsleiste wird der Verbrauch der aktuellen Session als Text angezeigt
-- **Session-spezifische Tool-Denial mit Prozess-Neustart**: Änderungen an der Session-Deny-Liste (Hinzufügen, Toggle, Löschen) starten den ACP-Prozess automatisch neu und laden die Session via `session/load` wieder
-- IPC-Handler `copilot:restartWithDeniedTools` in `main.js`
-- Preload-Bridge `copilot.chat.restartWithDeniedTools`
+- **Context button as a dropdown**: the `📊 Context` button now shows the current usage in % directly in the button (`📊 18%`) and opens a dropdown with three actions on click:
+  - **Show context**: detail panel with token usage (categories, percentage, color-coded)
+  - **Compact**: summarizes the conversation and updates the % display
+  - **Clear**: clears the context, then re-queries `/context`
+- **Tools button**: `🔧 Tools` button next to the context button — opens a popup for session-specific denied tools
+- **AIU/credit display in the bar**: on the right of the session action bar, the current session's usage is shown as text
+- **Session-specific tool denial with process restart**: changes to the session deny list (add, toggle, delete) automatically restart the ACP process and reload the session via `session/load`
+- IPC handler `copilot:restartWithDeniedTools` in `main.js`
+- Preload bridge `copilot.chat.restartWithDeniedTools`
 
 ### Changed
-- Session-Aktionsleiste umstrukturiert: Model → Agent → Kontext (Dropdown) → Tools | Verbrauch
-- Pin-Funktion für Session-Tools entfernt
+- Session action bar restructured: Model → Agent → Context (dropdown) → Tools | Usage
+- Pin function for session tools removed
 
 ### Fixed
-- **Mode-Dropdown öffnete sich nach oben**: Falscher CSS-Klassenname (`mode-dropdown--below` statt `model-dropdown--below`) — Dropdown öffnet jetzt korrekt nach unten
+- **Mode dropdown opened upwards**: wrong CSS class name (`mode-dropdown--below` instead of `model-dropdown--below`) — the dropdown now opens correctly downwards
 
 ## [0.28.0] - 2026-06-xx
 
 ### Added
-- **ACP-Backend-Migration**: Die gesamte Kommunikation mit der Copilot CLI läuft jetzt über `copilot --acp` (Agent Communication Protocol, JSON-RPC über NDJSON stdio)
-- `AcpClient` (`src/acp-client.js`): kapselt Session-Management, Prompt-Streaming, Event-Mapping und `silentCommand()`
-- **`silentCommand(command)`**: Slash-Commands (`/context`, `/usage`, `/compact`, `/clear`) werden als stille ACP-Requests ausgeführt — Ergebnis geht nicht in den Chat
-- IPC-Handler `copilot:silentCommand` in `main.js`
-- Preload-Bridge `copilot.chat.silentCommand`
-- `acpClients` Map in `main.js` (tabId → AcpClient)
+- **ACP backend migration**: all communication with the Copilot CLI now runs over `copilot --acp` (Agent Communication Protocol, JSON-RPC over NDJSON stdio)
+- `AcpClient` (`src/acp-client.js`): encapsulates session management, prompt streaming, event mapping, and `silentCommand()`
+- **`silentCommand(command)`**: slash commands (`/context`, `/usage`, `/compact`, `/clear`) run as silent ACP requests — the result does not go into the chat
+- IPC handler `copilot:silentCommand` in `main.js`
+- Preload bridge `copilot.chat.silentCommand`
+- `acpClients` map in `main.js` (tabId → AcpClient)
 
 ### Removed
-- **PTY-Terminal komplett entfernt**: Kein `node-pty`, kein `xterm.js`, kein Terminal-Panel mehr
-- `renderer/modules/terminal.js` gelöscht
-- `src/ipc/terminal-ipc.js` gelöscht
-- `src/main-helpers.js`: `collectPtyOutput`, `waitForReady`, `isCopilotTuiReady`, `detectCopilotPrompt`, `cleanupPty` entfernt
+- **PTY terminal fully removed**: no `node-pty`, no `xterm.js`, no terminal panel
+- `renderer/modules/terminal.js` deleted
+- `src/ipc/terminal-ipc.js` deleted
+- `src/main-helpers.js`: `collectPtyOutput`, `waitForReady`, `isCopilotTuiReady`, `detectCopilotPrompt`, `cleanupPty` removed
 
 ### Changed
-- Slash-Commands laufen nicht mehr über PTY-Bracketed-Paste, sondern über `silentCommand()`
-- Prozess-Management: ein langlebiger ACP-Prozess pro Tab (statt Spawn-per-Message)
+- Slash commands no longer run via PTY bracketed paste but via `silentCommand()`
+- Process management: one long-lived ACP process per tab (instead of spawn-per-message)
 
 ## [0.25.0] - 2026-05-21
 
 ### Added
-- **CWD pro Session**: Arbeitsverzeichnis kann per Klick auf 📂 in der Statusbar pro Tab/Session gewählt werden
-- CWD wird für benannte Sessions persistiert und beim Restore wiederhergestellt
+- **CWD per session**: the working directory can be chosen per tab/session by clicking 📂 in the statusbar
+- CWD is persisted for named sessions and restored on resume
 - `saveSessionCwd` / `getSessionCwd` in `src/named-sessions.js`
 
 ## [0.24.6] - 2026-05-28
 
 ### Added
-- **Application Icon**: `assets/icon.png` (512×512 RGBA) für Fenster, Titlebar, Tab-Bar und Dock
-- **Linux Desktop Integration**: `assets/copilot-desktop.desktop` mit `StartupWMClass=copilot-desktop`
-- **WM_CLASS fix**: `--class copilot-desktop` via Chromium switch auf Linux
+- **Application icon**: `assets/icon.png` (512×512 RGBA) for window, titlebar, tab bar, and dock
+- **Linux desktop integration**: `assets/copilot-desktop.desktop` with `StartupWMClass=copilot-desktop`
+- **WM_CLASS fix**: `--class copilot-desktop` via Chromium switch on Linux
 
 ## [0.24.0] - 2026-05-21
 
 ### Added
-- **Skills in CLI deaktivieren**: Toggle-Button pro Skill — Skills können in `~/.copilot/settings.json` deaktiviert werden
-- IPC-Handler `skills:getDisabled` und `skills:setDisabled`
-- **Sidebar-Collapse-State persistieren**: Eingeklappte Bereiche werden gespeichert
-- **Content-Sync Plain↔Rich**: Inhalt wird beim Modus-Wechsel übertragen
+- **Disable skills in the CLI**: toggle button per skill — skills can be disabled in `~/.copilot/settings.json`
+- IPC handlers `skills:getDisabled` and `skills:setDisabled`
+- **Persist sidebar collapse state**: collapsed sections are saved
+- **Content sync plain↔rich**: content is transferred on mode switch
 
 ### Fixed
-- Rich-Text Listen-Darstellung, Button-Reihenfolge Skill-Card, Content-Sync bei leerem Inhalt
+- Rich-text list rendering, skill-card button order, content sync on empty content
 
 ### Removed
-- Durchgestrichen-Button aus Rich-Text-Toolbar
+- Strikethrough button from the rich-text toolbar
 
 ## [0.23.0] - 2026-05-29
 
 ### Added
-- **Rich-Text-Editor Toggle**: ✏️/📝-Button — Plaintext oder Rich-Text-Modus. Toolbar mit Bold, Italic, UL, OL. HTML→Markdown beim Senden.
-- **Model-Dropdown Redesign**: Accent-Balken links + Hintergrund statt Häkchen
-- **Model-Reihenfolge**: Haiku → Sonnet → Opus 4.6 → Opus 4.7
+- **Rich-text editor toggle**: ✏️/📝 button — plaintext or rich-text mode. Toolbar with Bold, Italic, UL, OL. HTML→Markdown on send.
+- **Model dropdown redesign**: accent bar on the left + background instead of a checkmark
+- **Model order**: Haiku → Sonnet → Opus 4.6 → Opus 4.7
 
 ### Fixed
-- Model-Persistenz nach App-Restart, Model-Persistenz für neue Sessions
+- Model persistence after app restart, model persistence for new sessions
 
 ## [0.21.0] - 2026-05-14
 
 ### Added
-- JSDoc-Kommentare vollständig für alle Hauptdateien (main.js, preload.js, renderer/app.js, todos.js, scanners.js)
+- Full JSDoc comments for all main files (main.js, preload.js, renderer/app.js, todos.js, scanners.js)
 
 ## [0.20.5] - 2026-05-14
 
 ### Added
-- Tutorial-Flags in `folders.json` (Key-Whitelist: `tutorialSkillsShown`, `tutorialRenameShown`)
-- IPC-Handler `tutorial:getFlags` / `tutorial:setFlag`
-- Tutorial-Popups schließen automatisch nach 30 s (closed-Guard)
-- `tab:renamed` CustomEvent bei Tab-Umbenennung
+- Tutorial flags in `folders.json` (key whitelist: `tutorialSkillsShown`, `tutorialRenameShown`)
+- IPC handlers `tutorial:getFlags` / `tutorial:setFlag`
+- Tutorial popups auto-close after 30s (closed guard)
+- `tab:renamed` CustomEvent on tab rename
 
 ## [0.18.2] - 2026-05-12
 
 ### Added
-- First-Run Onboarding Wizard (4 Schritte: Auth, Ordner, Agents/Skills, Feature-Intro)
-- Tab-Unlock Fallback nach 180 s Inaktivität
+- First-run onboarding wizard (4 steps: auth, folders, agents/skills, feature intro)
+- Tab-unlock fallback after 180s inactivity
 
 ## [0.16.1] - 2025-06-17
 
 ### Added
-- Tab-Unlock Fallback bei hängenden Sub-Agents (30 s manuell, 180 s automatisch)
-- Activity-Tracking (`lastActivityAt`)
+- Tab-unlock fallback for hanging sub-agents (30s manual, 180s automatic)
+- Activity tracking (`lastActivityAt`)
 
 ## [0.16.0] - 2025-06-16
 
 ### Added
-- Plugin-Manager, Session-Wiederaufnahme (Plan + letzte Nachrichten als Chat-Nachrichten)
+- Plugin manager, session resume (plan + last messages as chat messages)
 
 ## [0.15.0] - 2025-06-15
 
 ### Added
-- Agents-Panel in Sidebar — scannt `~/.copilot/agents/*.agent.md`
+- Agents panel in the sidebar — scans `~/.copilot/agents/*.agent.md`
 - `src/agents.js`: `scanAgentsDirectory()`
 
 ## [0.14.4] - 2025-06-15
 
 ### Security
-- XSS-Fix in `openInstructionsEditor`
+- XSS fix in `openInstructionsEditor`
 
 ### Fixed
-- Model rollback bei Switch-Fehler, Event-Listener-Leak bei Window-Close
+- Model rollback on switch error, event-listener leak on window close

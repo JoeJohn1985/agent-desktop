@@ -1,72 +1,71 @@
 # Known Issues / TODO
 
-Liste bekannter Probleme und offener Punkte. Bitte beim Beheben den Eintrag entfernen oder mit `~~Strikethrough~~` markieren.
+List of known problems and open items. When fixing, please remove the entry or mark it with `~~strikethrough~~`.
 
-## Aktuelle Einschränkungen (v0.20.5)
+## Current limitations (v0.20.5)
 
-### Onboarding-Wizard: Tab-Unlock Fallback
+### Onboarding wizard: tab-unlock fallback
 
-Der Onboarding-Wizard setzt nach 180 Sekunden einen automatischen Unlock, falls ein Schritt hängt. In seltenen Fällen (z. B. langsame Netzwerkverbindung bei `gh auth login`) kann der Auto-Unlock greifen, bevor der Schritt tatsächlich abgeschlossen ist. Der manuelle Unlock-Button (nach 30s) ist in solchen Fällen die bessere Option.
-
----
-
-### Tutorial-Popups: Einmalige Anzeige nicht rücksetzbar
-
-Die Tutorial-Popups („Skills neu laden", „Tab umbenennen") werden pro Benutzer nur einmal angezeigt. Aktuell gibt es keine Möglichkeit, diese über die Settings zurückzusetzen — nur der Onboarding-Wizard kann im Developer-Modus erneut gestartet werden.
+The onboarding wizard applies an automatic unlock after 180 seconds if a step hangs. In rare cases (e.g. a slow network connection during `gh auth login`) the auto-unlock can trigger before the step is actually complete. The manual unlock button (after 30s) is the better option in such cases.
 
 ---
 
-### Session Resume: Ältere Nachrichten nicht sichtbar
+### Tutorial popups: one-time display not resettable
 
-Beim Laden einer gespeicherten Session werden nur die letzten Nachrichten angezeigt. Die vollständige Chat-History ist weiterhin in der Session-Datei vorhanden, wird aber nicht in der UI dargestellt. Ein manuelles Scrollen zur älteren History ist derzeit nicht möglich.
+The tutorial popups ("Reload skills", "Rename tab") are shown only once per user. There is currently no way to reset them via the settings — only the onboarding wizard can be restarted in developer mode.
+
+---
+
+### Session resume: older messages not visible
+
+When loading a saved session, only the most recent messages are shown. The full chat history is still present in the session file but is not rendered in the UI. Manually scrolling to the older history is currently not possible.
 
 ---
 
 ## Linux
 
-### ~~Preferences-Initialisierung auf Linux überprüfen~~ (gefixt in v0.15.6)
+### ~~Verify preferences initialization on Linux~~ (fixed in v0.15.6)
 
-Logik selbst war korrekt: `read()` ohne Datei liefert `{ ...PREFS_DEFAULTS }`, Renderer nutzt überall Fallbacks. Die eigentlichen Probleme — falscher Speicherpfad und nicht-versionierte Datei im Repo — sind unter "Erstinstallation" und "Repo-Hygiene" behandelt und in v0.15.6 gefixt.
+The logic itself was correct: `read()` without a file returns `{ ...PREFS_DEFAULTS }`, and the renderer uses fallbacks everywhere. The actual problems — wrong storage path and an unversioned file in the repo — are covered under "First install" and "Repo hygiene" and were fixed in v0.15.6.
 
 ---
 
-### ~~Slash-Befehle funktionieren auf Linux nicht zuverlässig~~ (gefixt in v0.15.5)
+### ~~Slash commands unreliable on Linux~~ (fixed in v0.15.5)
 
-`/context`, `/compact` und andere Slash-Operationen lieferten auf Linux keine bzw. fehlerhafte Antworten.
+`/context`, `/compact`, and other slash operations returned no or incorrect responses on Linux.
 
-**Ursache:** Beim Erststart in einem nicht-getrusteten Ordner zeigt die Copilot-CLI einen "Confirm folder trust"-Dialog (1=Yes, 2=Yes+remember, 3=No), der den TUI-Start blockiert. Erst nach Bestätigung erscheinen die Ready-Marker `/ commands` / `? help`. Vorher trafen Slash-Eingaben den Dialog statt das TUI.
+**Cause:** on first start in an untrusted folder, the Copilot CLI shows a "Confirm folder trust" dialog (1=Yes, 2=Yes+remember, 3=No) that blocks the TUI start. Only after confirmation do the ready markers `/ commands` / `? help` appear. Before that, slash input hit the dialog instead of the TUI.
 
 **Fix (v0.15.5):**
-- Neue Helfer `detectCopilotPrompt` / `isCopilotTuiReady` in `src/main-helpers.js` (rein, testbar).
-- `src/ipc/terminal-ipc.js`: gemeinsame `attachReadyDetection`-Funktion erkennt Trust-Prompt und sendet `2\r` (Yes, remember). Auch der bestehende Resume-Conflict-Auto-Confirm sendet jetzt korrekt `1\r` statt `1` ohne Enter.
-- Sowohl `terminal:spawn-background` als auch `terminal:spawn` verwenden die neue Detection.
-- 14 neue Unit-Tests in `__tests__/main-helpers.test.js`.
+- New helpers `detectCopilotPrompt` / `isCopilotTuiReady` in `src/main-helpers.js` (pure, testable).
+- `src/ipc/terminal-ipc.js`: a shared `attachReadyDetection` function detects the trust prompt and sends `2\r` (Yes, remember). The existing resume-conflict auto-confirm now also correctly sends `1\r` instead of `1` without Enter.
+- Both `terminal:spawn-background` and `terminal:spawn` use the new detection.
+- 14 new unit tests in `__tests__/main-helpers.test.js`.
 
 ---
 
-### ~~Erstinstallation: `preferences.json` wird neben `main.js` abgelegt~~ (gefixt in v0.15.6)
+### ~~First install: `preferences.json` written next to `main.js`~~ (fixed in v0.15.6)
 
-Bisher war `PREFS_PATH = path.join(__dirname, 'preferences.json')`. In gepackten Builds (Electron asar / System-Install nach `/opt/...`) ist `__dirname` schreibgeschützt → der erste `write()` schlug **still** fehl. Folge: Defaults beim Erststart, aber **keine Preference wurde je persistiert** — Theme, Tab-Layout, Sidebar-Breite gingen bei jedem Neustart verloren.
+Previously `PREFS_PATH = path.join(__dirname, 'preferences.json')`. In packaged builds (Electron asar / system install under `/opt/...`) `__dirname` is read-only → the first `write()` failed **silently**. Result: defaults on first start, but **no preference was ever persisted** — theme, tab layout, sidebar width were lost on every restart.
 
 **Fix (v0.15.6):**
-- `PREFS_PATH` jetzt unter `app.getPath('userData')` (Linux: `~/.config/copilot-desktop/`, Windows: `%APPDATA%\copilot-desktop\`, macOS: `~/Library/Application Support/copilot-desktop/`).
-- `createPreferencesManager` legt das Zielverzeichnis automatisch mit `mkdir -p` an.
-- Schreibfehler werfen jetzt einen aussagekräftigen Error mit `prefsPath` — `main.js` loggt ihn via `writeLog('error', ...)` statt stumm zu schlucken.
-- Migrations-Helfer `migrateFromIfExists(legacyPath)` kopiert eine alte `__dirname/preferences.json` (inkl. `.bak`) beim ersten Start nach v0.15.6 an den neuen Ort.
-- 8 neue Unit-Tests (Verzeichnis-Anlage, Fehler-Werfen, Migration).
+- `PREFS_PATH` is now under `app.getPath('userData')` (Linux: `~/.config/agent-desktop/`, Windows: `%APPDATA%\agent-desktop\`, macOS: `~/Library/Application Support/agent-desktop/`).
+- `createPreferencesManager` creates the target directory automatically with `mkdir -p`.
+- Write errors now throw a meaningful error with `prefsPath` — `main.js` logs it via `writeLog('error', ...)` instead of swallowing it silently.
+- Migration helper `migrateFromIfExists(legacyPath)` copies an old `__dirname/preferences.json` (incl. `.bak`) to the new location on first start after v0.15.6.
+- 8 new unit tests (directory creation, error throwing, migration).
 
 ---
 
-## Repo-Hygiene
+## Repo hygiene
 
-### ~~`preferences.json` aus dem Repo entfernen~~ (gefixt in v0.15.6)
+### ~~Remove `preferences.json` from the repo~~ (fixed in v0.15.6)
 
-`preferences.json` war benutzerspezifischer Laufzeit-State (Theme, offene Tabs, Sidebar-Breite usw.) und sollte nicht im Repo liegen.
+`preferences.json` was user-specific runtime state (theme, open tabs, sidebar width, etc.) and should not live in the repo.
 
 **Fix (v0.15.6):**
-- `preferences.json` und `preferences.json.bak` sind seit längerem in `.gitignore`.
-- Datei mit `git rm --cached preferences.json` aus dem Index entfernt (lokale Datei bleibt unangetastet).
-- Defaults kommen aus `PREFS_DEFAULTS` in `src/preferences.js` — keine Beispieldatei nötig.
+- `preferences.json` and `preferences.json.bak` have long been in `.gitignore`.
+- File removed from the index with `git rm --cached preferences.json` (the local file is left untouched).
+- Defaults come from `PREFS_DEFAULTS` in `src/preferences.js` — no example file needed.
 
-**Hintergrund:** Beim Commit auf `fix/linux-path` ging der lokale State (Theme `gebit`, offener Tab) kurzzeitig verloren, weil `preferences.json` versioniert war und sich beim `git checkout -- preferences.json` versehentlich resettete. Wiederherstellung war nur dank automatischem `.bak` möglich.
-
+**Background:** during a commit on `fix/linux-path`, local state (theme `gebit`, open tab) was briefly lost because `preferences.json` was versioned and accidentally reset on `git checkout -- preferences.json`. Recovery was only possible thanks to the automatic `.bak`.
