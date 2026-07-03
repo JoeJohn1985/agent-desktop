@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.1] - 2026-07-03
+
+### Fixed
+- **Default model per provider not applied/saved for Copilot**: the configured
+  default was validated only against the hardcoded `DEFAULT_MODELS` list, so a
+  Copilot (or any dynamically discovered) model chosen as default was rejected
+  and fell back to Sonnet 4.6 — which also made the settings dropdown look as if
+  the selection wasn't saved. `getDefaultModelForProvider` now validates against
+  the provider's actual model list (incl. discovered models).
+
 ## [1.0.0] - 2026-07-02
 
 First stable release. The core feature (GitHub Copilot CLI) is fully tested; the

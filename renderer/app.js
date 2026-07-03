@@ -1888,7 +1888,10 @@ const PROVIDER_DEFAULT_MODEL = {
  * the "+" menu and new-tab creation.
  */
 function getDefaultModelForProvider(provider) {
-  const valid = (id) => id && DEFAULT_MODELS.some(m => m.id === id && (m.provider || 'copilot') === provider);
+  // Validate against the provider's ACTUAL model list (incl. dynamically
+  // discovered Copilot/API models), not just the hardcoded DEFAULT_MODELS —
+  // otherwise a configured default that is a discovered model is wrongly rejected.
+  const valid = (id) => id && getModelsForProvider(provider).some(m => m.id === id);
   const configured = (getSettings().defaultModels || {})[provider];
   if (valid(configured)) return configured;
   if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
