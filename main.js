@@ -239,6 +239,8 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       // <local-command-stdout>, not via the ACP response.
       localCommandStdout: true,
       stripEnv: ['ANTHROPIC_API_KEY'],
+      // Off → auto-approve permission requests in the backend (no UI prompt).
+      autoApprovePermissions: !options.manualApproval,
       model: options.model,
       mcpServers: [],
     };
@@ -253,6 +255,7 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       allowAllPaths: options.allowAllPaths,
       // Manual approval → drop --allow-all so the CLI asks via request_permission.
       allowAll: !options.manualApproval,
+      autoApprovePermissions: !options.manualApproval,
       mcpServers: getAcpMcpServers(cwd),
     };
     // Always include global CWD as an additional path when using a different CWD
@@ -402,6 +405,31 @@ ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
     return { success: true, text };
   } catch (err) {
     console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/**
+ * @ipc copilot:setApproval — Switch a tab between manual approval and allow-all.
+ * Copilot needs a transparent process restart (--allow-all is a spawn flag);
+ * Claude Code applies live (backend reads autoApprovePermissions per request).
+ */
+ipcMain.handle('copilot:setApproval', async (_event, tabId, manualApproval) => {
+  const client = backends.get(tabId);
+  if (!client) return { success: false, error: 'Kein aktiver Client' };
+  const opts = { allowAll: !manualApproval, autoApprovePermissions: !manualApproval };
+  try {
+    if (client.__provider === 'copilot' && client.state !== 'dead' && client.sessionId) {
+      const sessionId = client.sessionId;
+      await client.stop();
+      client.updateOptions(opts);
+      await client.start();
+      await client.loadSession(sessionId);
+    } else {
+      client.updateOptions(opts);
+    }
+    return { success: true };
+  } catch (err) {
     return { success: false, error: err?.message || String(err) };
   }
 });

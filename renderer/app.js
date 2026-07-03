@@ -602,6 +602,8 @@ async function createTab(label, initialModel, provider) {
     _costUsd: 0,
     _sessionName: null,
     provider: tabProvider,
+    // Per-tab manual-approval toggle; new tabs inherit the global default.
+    manualApproval: getSettings().manualApproval === true,
     selectedModel: initialModel || getDefaultModelForProvider(tabProvider),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
@@ -1215,8 +1217,8 @@ function sendMessage() {
     allowedTools: [],
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
-    // When on, Copilot drops --allow-all and asks per action via the dropup.
-    manualApproval: settings.manualApproval === true,
+    // Per-tab: when on, drop --allow-all / auto-approve so the agent asks per action.
+    manualApproval: tab.manualApproval === true,
     addDirs: getEffectiveExtraDirs(),
     mode: tab.mode || DEFAULT_MODE_ID,
     // Empty → let the backend use its own default model (e.g. Claude Code before
@@ -2272,6 +2274,41 @@ function updateModelSelectBtn(tabId) {
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
+  updateApprovalBtn(tabId);
+}
+
+/**
+ * Reflect the active tab's manual-approval state on the toggle button.
+ * @param {string} [tabId]
+ */
+function updateApprovalBtn(tabId) {
+  const btn = document.getElementById('btnApprovalToggle');
+  if (!btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  // Only ACP backends (Copilot, Claude Code) use the permission flow.
+  const wrapper = btn.closest('.model-select-wrapper') || btn;
+  if (!tab || !isAcpProvider(getTabProvider(tab))) { wrapper.style.display = 'none'; return; }
+  wrapper.style.display = '';
+  const manual = tab?.manualApproval === true;
+  btn.textContent = manual ? '🔒 Bestätigen' : '🔓 Auto';
+  btn.classList.toggle('session-actions__btn--active', manual);
+  btn.setAttribute('data-tooltip', manual
+    ? 'Aktionen werden einzeln bestätigt (Dropup). Klick: alles erlauben'
+    : 'Alles erlauben — keine Rückfragen. Klick: Bestätigen aktivieren');
+}
+
+/** Flip the active tab's manual-approval mode and apply it to the backend. */
+async function toggleApproval(tabId) {
+  const id = tabId ?? activeTabId;
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.manualApproval = !tab.manualApproval;
+  if (tab.sessionId) saveSessionApproval(tab.sessionId, tab.manualApproval);
+  updateApprovalBtn(id);
+  if (tab.sessionId) {
+    // Copilot restarts transparently (spawn flag); Claude Code applies live.
+    try { await copilot.chat.setApproval(id, tab.manualApproval); } catch (_) { /* ignore */ }
+  }
 }
 
 /**
@@ -2345,6 +2382,8 @@ function initTabModelSelector() {
  * next sendMessage() call.
  */
 function initTabModeSelector() {
+  document.getElementById('btnApprovalToggle')?.addEventListener('click', () => toggleApproval(activeTabId));
+
   const btn = document.getElementById('btnModeSelect');
   if (!btn) return;
 
@@ -2819,6 +2858,21 @@ function getSessionCwd(sessionId) {
   return entry?.cwd ?? null;
 }
 
+/** Persist the per-session manual-approval flag in namedSessions. */
+function saveSessionApproval(sessionId, manualApproval) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].manualApproval = manualApproval === true;
+    setPref('namedSessions', all);
+  }
+}
+
+/** Read the per-session manual-approval flag (null when unset). */
+function getSessionApproval(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return typeof entry?.manualApproval === 'boolean' ? entry.manualApproval : null;
+}
+
 /**
  * Export the active tab's chat history as a Markdown file download.
  * Includes user messages, assistant responses, and tool call summaries.
@@ -3009,6 +3063,9 @@ async function resumeSession(sessionId) {
   // reading after reopening would be billed in full (re-charging the whole prior
   // session). Flag it so the next /usage read only establishes the baseline.
   tab._usageBaselinePending = true;
+  // Restore the per-session manual-approval flag (else the global default).
+  const savedApproval = getSessionApproval(sessionId);
+  tab.manualApproval = savedApproval != null ? savedApproval : (getSettings().manualApproval === true);
   // Restore the project directory so project-scoped todos load correctly.
   if (!tab.cwd) tab.cwd = getSessionCwd(sessionId) || null;
   // Update lastUsed timestamp

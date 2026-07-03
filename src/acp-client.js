@@ -603,6 +603,15 @@ class AcpClient extends EventEmitter {
   #handlePermissionRequest(id, params) {
     const options = Array.isArray(params.options) ? params.options : [];
     const tc = params.toolCall || {};
+    // Auto-approve (read live from options so a per-tab toggle works without a
+    // restart): pick an allow option and answer immediately, no UI prompt.
+    if (this.#options.autoApprovePermissions) {
+      const allow = options.find((o) => /allow/.test(o.kind || '')) || options[0];
+      if (allow && allow.optionId) {
+        this.#sendResponse(id, { outcome: { outcome: 'selected', optionId: allow.optionId } });
+        return;
+      }
+    }
     this.#openPermissions.add(id);
     this.#emitToRenderer({
       type: 'session.permission_request',
