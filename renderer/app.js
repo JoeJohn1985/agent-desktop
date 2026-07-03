@@ -1645,6 +1645,13 @@ function initCopilotIPC() {
         // to THIS tab's provider (Copilot or Claude Code) rather than assuming
         // Copilot, so each ACP provider gets its own discovered model list.
         applyDynamicModels(getTabProvider(tab), event.data.models);
+        // Adopt the backend's current model when the tab hasn't chosen one yet
+        // (e.g. Claude Code, where we don't force a default) so the 🧠 button
+        // shows the active model instead of being blank.
+        if (!tab.selectedModel && event.data.currentModelId) {
+          tab.selectedModel = event.data.currentModelId;
+          updateModelSelectBtn(tabId);
+        }
         break;
       }
 
@@ -1803,13 +1810,11 @@ const DEFAULT_MODELS = [
   { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot', tier: 'aic' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot', tier: 'aic' },
   // Claude Code (provider: 'claude-code') — billed via the Claude subscription
-  // (CLI login, no API key). Ids follow the Anthropic scheme; refined via the
-  // adapter's reported models. 'claude-opus-4-6' is confirmed working.
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'claude-code', tier: 'sub' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'claude-code', tier: 'sub' },
-  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'claude-code', tier: 'sub' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code', tier: 'sub' },
+  // (CLI login, no API key). The adapter uses ALIASES (default/sonnet/haiku),
+  // not full model ids; the real list is discovered via ACP and replaces these.
+  { id: 'default', label: 'Default (Opus 4.6)', short: 'Default', provider: 'claude-code', tier: 'sub' },
+  { id: 'sonnet', label: 'Sonnet (4.5)', short: 'Sonnet', provider: 'claude-code', tier: 'sub' },
+  { id: 'haiku', label: 'Haiku (4.5)', short: 'Haiku', provider: 'claude-code', tier: 'sub' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
