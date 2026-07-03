@@ -51,6 +51,7 @@ class AcpClient extends EventEmitter {
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
+  #openPermissions = new Set(); // JSON-RPC ids of permission requests awaiting a UI answer
   #localCmdBuf = '';       // stderr buffer while capturing a <local-command-stdout> block (Claude Code)
   #localCmdWaiter = null;  // resolver awaited by silentCommand until the block arrives
   #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
@@ -116,7 +117,10 @@ class AcpClient extends EventEmitter {
     if (this.#baseArgs) {
       args = [...this.#baseArgs];
     } else {
-      args = ['--acp', '--allow-all'];
+      // --allow-all makes the CLI auto-approve tools (no permission prompts). When
+      // manual approval is on we drop it so the CLI asks via session/request_permission.
+      args = ['--acp'];
+      if (this.#options.allowAll !== false) args.push('--allow-all');
       if (this.#options.model) args.push('--model', this.#options.model);
       if (this.#options.deniedTools) {
         for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
@@ -425,6 +429,7 @@ class AcpClient extends EventEmitter {
       return;
     }
     this.#cancelRequested = true;
+    this.#cancelOpenPermissions();
     this.#sendNotification('session/cancel', { sessionId: this.#sessionId });
   }
 
@@ -552,7 +557,8 @@ class AcpClient extends EventEmitter {
       return;
     }
 
-    // JSON-RPC Response (has id)
+    // JSON-RPC message with an id: either a response to OUR request, or a request
+    // FROM the agent (e.g. session/request_permission) that we must answer.
     if (msg.id !== undefined && msg.id !== null) {
       const pending = this.#pendingRequests.get(msg.id);
       if (pending) {
@@ -563,7 +569,9 @@ class AcpClient extends EventEmitter {
         } else {
           pending.resolve(msg.result);
         }
+        return;
       }
+      if (msg.method) { this.#handleAgentRequest(msg); }
       return;
     }
 
@@ -571,6 +579,73 @@ class AcpClient extends EventEmitter {
     if (msg.method === 'session/update' && msg.params) {
       this.#handleSessionUpdate(msg.params);
     }
+  }
+
+  /**
+   * Handles a JSON-RPC request initiated by the agent (bidirectional ACP). We
+   * answer session/request_permission (via the UI); anything else gets a
+   * method-not-found reply so the agent doesn't hang waiting.
+   */
+  #handleAgentRequest(msg) {
+    const { id, method, params } = msg;
+    if (method === 'session/request_permission') {
+      this.#handlePermissionRequest(id, params || {});
+      return;
+    }
+    console.log(`[acp:tab${this.#tabId}] agent request (unhandled): ${method} :: ${JSON.stringify(params || {}).slice(0, 400)}`);
+    this.#sendResponse(id, undefined, { code: -32601, message: `Method not handled: ${method}` });
+  }
+
+  /**
+   * Forwards a permission request to the renderer (dropup UI) and tracks it so
+   * the user's answer can be routed back via respondPermission().
+   */
+  #handlePermissionRequest(id, params) {
+    const options = Array.isArray(params.options) ? params.options : [];
+    const tc = params.toolCall || {};
+    this.#openPermissions.add(id);
+    this.#emitToRenderer({
+      type: 'session.permission_request',
+      data: {
+        requestId: id,
+        title: tc.title || tc.rawInput?.command || tc.kind || 'Aktion',
+        kind: tc.kind || '',
+        toolName: AcpClient.#mapToolKind(tc.kind, tc.title),
+        options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+      },
+    });
+  }
+
+  /**
+   * Answers a pending permission request with the chosen option (or cancels it
+   * when optionId is falsy). No-op if the request is unknown/already answered.
+   * @param {number|string} requestId
+   * @param {string} [optionId]
+   */
+  respondPermission(requestId, optionId) {
+    if (!this.#openPermissions.has(requestId)) return;
+    this.#openPermissions.delete(requestId);
+    const outcome = optionId
+      ? { outcome: 'selected', optionId }
+      : { outcome: 'cancelled' };
+    this.#sendResponse(requestId, { outcome });
+  }
+
+  /** Writes a JSON-RPC response (result or error) for an agent-initiated request. */
+  #sendResponse(id, result, error) {
+    try {
+      if (!this.#process?.stdin || this.#process.stdin.destroyed) return;
+      const payload = error ? { jsonrpc: '2.0', id, error } : { jsonrpc: '2.0', id, result };
+      this.#process.stdin.write(JSON.stringify(payload) + '\n');
+    } catch (_) { /* process gone */ }
+  }
+
+  /** Cancel all open permission requests (e.g. on stop/cancel) so nothing hangs. */
+  #cancelOpenPermissions() {
+    for (const id of this.#openPermissions) {
+      this.#sendResponse(id, { outcome: { outcome: 'cancelled' } });
+    }
+    this.#openPermissions.clear();
   }
 
   // ── Private: Event Mapping ───────────────────────────────────

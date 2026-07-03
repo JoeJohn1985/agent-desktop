@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('copilot', {
     restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('copilot:restartWithDeniedTools', tabId, deniedTools),
     /** @ipc copilot:silentCommand — Runs a slash command silently, returns {success, text}. */
     silentCommand: (tabId, command) => ipcRenderer.invoke('copilot:silentCommand', tabId, command),
+    /** @ipc copilot:respondPermission — Answers an ACP permission request. */
+    respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('copilot:respondPermission', tabId, requestId, optionId),
     /** @ipc copilot:getCwd @returns {Promise<string>} Current working directory */
     getCwd: () => ipcRenderer.invoke('copilot:getCwd'),
     /** @ipc copilot:openCwd — Opens the CWD in the system file explorer. @returns {Promise<void>} */

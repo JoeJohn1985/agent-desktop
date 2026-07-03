@@ -2170,6 +2170,61 @@ mark.chat-search-highlight--active {
   border-top: 1px solid var(--border);
   background: var(--bg-base);
 }
+
+/* Permission request dropup (ACP session/request_permission) */
+.permission-dropup {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+  animation: permissionRise 0.14s ease;
+}
+@keyframes permissionRise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.permission-dropup__head {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.permission-dropup__title {
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+.permission-dropup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.permission-dropup__btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.permission-dropup__btn:hover { background: var(--bg-base); }
+.permission-dropup__btn--allow {
+  border-color: var(--green, #40a02b);
+  color: var(--green, #40a02b);
+}
+.permission-dropup__btn--allow:hover { background: var(--green, #40a02b); color: #fff; }
+.permission-dropup__btn--reject {
+  border-color: var(--red, #d20f39);
+  color: var(--red, #d20f39);
+}
+.permission-dropup__btn--reject:hover { background: var(--red, #d20f39); color: #fff; }
+.permission-dropup__queue {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .chat-input {
   width: 100%;
   min-height: 36px;

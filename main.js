@@ -251,6 +251,8 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       deniedTools: options.deniedTools,
       addDirs: options.addDirs || [],
       allowAllPaths: options.allowAllPaths,
+      // Manual approval → drop --allow-all so the CLI asks via request_permission.
+      allowAll: !options.manualApproval,
       mcpServers: getAcpMcpServers(cwd),
     };
     // Always include global CWD as an additional path when using a different CWD
@@ -402,6 +404,15 @@ ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
     console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
     return { success: false, error: err?.message || String(err) };
   }
+});
+
+/** @ipc copilot:respondPermission — Answers an agent permission request (ACP). */
+ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId) => {
+  const client = backends.get(tabId);
+  if (client && typeof client.respondPermission === 'function') {
+    client.respondPermission(requestId, optionId);
+  }
+  return { success: true };
 });
 
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */

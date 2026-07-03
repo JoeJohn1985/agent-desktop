@@ -1215,6 +1215,8 @@ function sendMessage() {
     allowedTools: [],
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
+    // When on, Copilot drops --allow-all and asks per action via the dropup.
+    manualApproval: settings.manualApproval === true,
     addDirs: getEffectiveExtraDirs(),
     mode: tab.mode || DEFAULT_MODE_ID,
     // Empty → let the backend use its own default model (e.g. Claude Code before
@@ -1673,6 +1675,13 @@ function initCopilotIPC() {
         if (d.rateLimit) tab._subRateLimit = d.rateLimit;
         if (d.cost && typeof d.cost.amount === 'number') tab._subCostUsd = d.cost.amount;
         if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
+        break;
+      }
+
+      case 'session.permission_request': {
+        // The agent (Claude Code / Copilot) asks whether to run an action →
+        // queue it and show the dropup above the chat input.
+        enqueuePermissionRequest(tabId, event.data);
         break;
       }
 
@@ -2728,6 +2737,55 @@ function updateSubscriptionUsageDisplay(tab) {
   if (rl?.overageStatus) parts.push(`Overage: ${rl.overageStatus}${rl.overageDisabledReason ? ' (' + rl.overageDisabledReason + ')' : ''}`);
   if (typeof tab._subCostUsd === 'number') parts.push(`Token-Äquivalent: $${tab._subCostUsd.toFixed(4)}`);
   el.title = parts.join('\n') || 'Über dein Claude-Abo abgerechnet';
+}
+
+// ── Permission requests (ACP session/request_permission) ─────
+// The agent asks whether to run an action; we show a dropup above the chat
+// input with the offered options and route the answer back to the backend.
+const _permissionQueue = [];
+let _permissionActive = null;
+
+/** Queue an incoming permission request and show it if none is active. */
+function enqueuePermissionRequest(tabId, data) {
+  _permissionQueue.push({ tabId, ...data });
+  if (!_permissionActive) showNextPermission();
+}
+
+/** Render the next queued permission request (or hide the dropup when empty). */
+function showNextPermission() {
+  const el = document.getElementById('permissionDropup');
+  if (!el) return;
+  _permissionActive = _permissionQueue.shift() || null;
+  if (!_permissionActive) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const p = _permissionActive;
+  const tab = tabs.get(p.tabId);
+  const providerName = PROVIDER_SHORT[tab ? getTabProvider(tab) : 'copilot'] || 'Agent';
+  const icon = toolIcon(p.toolName) || '🔧';
+  const opts = (Array.isArray(p.options) && p.options.length) ? p.options : [
+    { optionId: 'allow', name: 'Erlauben', kind: 'allow_once' },
+    { optionId: 'reject', name: 'Ablehnen', kind: 'reject_once' },
+  ];
+  const btns = opts.map(o => {
+    const cls = /allow/.test(o.kind || '') ? 'permission-dropup__btn--allow'
+      : /reject/.test(o.kind || '') ? 'permission-dropup__btn--reject' : '';
+    return `<button class="permission-dropup__btn ${cls}" data-opt="${escapeAttr(o.optionId)}">${escapeHtml(o.name || o.optionId)}</button>`;
+  }).join('');
+  const more = _permissionQueue.length ? `<div class="permission-dropup__queue">+${_permissionQueue.length} weitere Anfrage(n)</div>` : '';
+  el.innerHTML = `
+    <div class="permission-dropup__head">🔐 <strong>${escapeHtml(providerName)}</strong> möchte ausführen: <span class="permission-dropup__title">${icon} ${escapeHtml(p.title || p.toolName || 'Aktion')}</span></div>
+    <div class="permission-dropup__actions">${btns}</div>${more}`;
+  el.querySelectorAll('.permission-dropup__btn').forEach(b => {
+    b.addEventListener('click', () => answerPermission(b.dataset.opt));
+  });
+  el.style.display = 'block';
+}
+
+/** Send the chosen option back to the backend and advance the queue. */
+function answerPermission(optionId) {
+  if (!_permissionActive) return;
+  const { tabId, requestId } = _permissionActive;
+  try { copilot.chat.respondPermission(tabId, requestId, optionId || null); } catch (_) { /* ignore */ }
+  showNextPermission();
 }
 
 // ── Cost Log + Cost Settings Panel → modules/costs.js ────────
@@ -4599,6 +4657,11 @@ function initSettings() {
   settDevMode.checked = savedSettings.devMode === true;
   applyDevMode(savedSettings.devMode === true);
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
+  const settManualApproval = document.getElementById('settManualApproval');
+  if (settManualApproval) {
+    settManualApproval.checked = savedSettings.manualApproval === true;
+    settManualApproval.addEventListener('change', () => saveSetting('manualApproval', settManualApproval.checked));
+  }
 
   // Default provider (#3) + default model per provider (#2).
   renderDefaultModelSettings();
