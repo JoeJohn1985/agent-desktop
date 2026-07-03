@@ -1998,7 +1998,7 @@ const _dynamicModels = {};
 
 /** Default cost tier for freshly-discovered models, by provider. */
 const PROVIDER_DEFAULT_TIER = {
-  copilot: 'aic', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
+  copilot: 'aic', 'claude-code': 'sub', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
 };
 
 /**

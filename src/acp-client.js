@@ -831,7 +831,14 @@ class AcpClient extends EventEmitter {
       if (opt && Array.isArray(opt.options)) {
         models = opt.options
           .filter((o) => o && o.value)
-          .map((o) => ({ id: o.value, name: o.name || o.value }));
+          .map((o) => {
+            // The version lives in the description ("Sonnet 5 · …"); the name is
+            // just "Sonnet". Prefer the version so the UI shows model numbers.
+            const version = String(o.description || '').split('·')[0].trim();
+            let name = version || o.name || o.value;
+            if (o.value === 'default' && version) name = `Default (${version})`;
+            return { id: o.value, name };
+          });
         currentModelId = opt.currentValue || null;
       }
     }
