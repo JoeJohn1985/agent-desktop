@@ -230,6 +230,8 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       cwd,
       command: 'npx',
       baseArgs: ['@zed-industries/claude-code-acp'],
+      // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
+      shell: true,
       stripEnv: ['ANTHROPIC_API_KEY'],
       model: options.model,
       mcpServers: [],

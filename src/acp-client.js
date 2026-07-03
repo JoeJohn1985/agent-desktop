@@ -26,6 +26,7 @@ class AcpClient extends EventEmitter {
   #copilotBin;
   #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
   #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
+  #shell = false;     // spawn via a shell — needed on Windows for .cmd/.bat (npx)
 
   // ── Process ──────────────────────────────────────────────────
   #process = null;
@@ -82,6 +83,7 @@ class AcpClient extends EventEmitter {
     this.#copilotBin = options.command || options.copilotBin || 'copilot';
     this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
     this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
+    this.#shell = options.shell === true;
     this.#options = options;
   }
 
@@ -129,7 +131,7 @@ class AcpClient extends EventEmitter {
     const proc = spawn(this.#copilotBin, args, {
       cwd: this.#cwd,
       env,
-      shell: false,
+      shell: this.#shell,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
