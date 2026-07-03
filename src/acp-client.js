@@ -814,16 +814,30 @@ class AcpClient extends EventEmitter {
    * @param {Object} result - session/new|load result
    */
   #emitAvailableModels(result) {
+    let models = [];
+    let currentModelId = null;
+
+    // Shape A (Copilot / old Claude Code adapter): result.models.availableModels
     const list = result?.models?.availableModels;
-    if (!Array.isArray(list) || !list.length) return;
-    const models = list
-      .filter((m) => m && m.modelId)
-      .map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+    if (Array.isArray(list) && list.length) {
+      models = list.filter((m) => m && m.modelId).map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+      currentModelId = result?.models?.currentModelId || null;
+    }
+
+    // Shape B (current Claude Code adapter): a configOptions entry id 'model'
+    // with { options:[{value,name,description}], currentValue }.
+    if (!models.length) {
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'model');
+      if (opt && Array.isArray(opt.options)) {
+        models = opt.options
+          .filter((o) => o && o.value)
+          .map((o) => ({ id: o.value, name: o.name || o.value }));
+        currentModelId = opt.currentValue || null;
+      }
+    }
+
     if (models.length) {
-      this.#emitToRenderer({
-        type: 'copilot.models_available',
-        data: { models, currentModelId: result?.models?.currentModelId || null },
-      });
+      this.#emitToRenderer({ type: 'copilot.models_available', data: { models, currentModelId } });
     }
   }
 
