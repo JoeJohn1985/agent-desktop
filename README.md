@@ -65,7 +65,7 @@ The app dynamically loads custom agents from `~/.copilot/agents/` (configurable 
 
 - **Windows 11** (other platforms and versions not tested)
 - **Node.js 18+** — [nodejs.org](https://nodejs.org/)
-- **GitHub Copilot CLI** — `gh extension install github/gh-copilot` (requires GitHub Copilot license)
+- **Optional — GitHub Copilot CLI** — only needed for the Copilot provider (`gh extension install github/gh-copilot`, requires a GitHub Copilot license). The direct-API providers (Anthropic, Gemini, OpenAI, GLM, Ollama) work without it — just add an API key in the settings.
 
 ## Getting Started
 
