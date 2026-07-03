@@ -1,5 +1,7 @@
 # Agent Desktop
 
+> Electron desktop app for multiple LLM providers (GitHub Copilot CLI, Anthropic, Gemini, OpenAI, GLM, Ollama) in one polished chat UI — named sessions, skills & agents, markdown, drag & drop, dynamic model discovery, USD cost tracking.
+
 > **Version 1.0** — erstes stabiles Release.
 
 **Agent Desktop** (Package: `agent-desktop`) is an Electron-based desktop app for working with multiple LLM providers through one polished chat interface. Its fully-tested core wraps the **GitHub Copilot CLI**; in addition, several **direct-API providers** can be used per tab:
