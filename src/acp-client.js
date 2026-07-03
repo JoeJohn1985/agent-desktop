@@ -737,6 +737,27 @@ class AcpClient extends EventEmitter {
         break;
       }
 
+      case 'usage_update': {
+        // Claude Code adapter: live context usage + subscription rate-limit + a
+        // USD cost equivalent. → drive the context % and the subscription display.
+        if (this.#contextQueryCollector) break;
+        this.#emitToRenderer({
+          type: 'session.usage_update',
+          data: {
+            used: update.used,
+            size: update.size,
+            rateLimit: update._meta?.['_claude/rateLimit'] || null,
+            cost: update.cost || null,
+          },
+        });
+        break;
+      }
+
+      case 'session_info_update': {
+        // Adapter-generated session title (e.g. from the first message). Not used yet.
+        break;
+      }
+
       default: {
         // DIAGNOSTIC: dump the FULL payload of unknown updates so we can spot any
         // subagent-/usage-/model-tagged signal the CLI might emit (e.g. per-turn

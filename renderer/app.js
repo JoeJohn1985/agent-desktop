@@ -713,9 +713,14 @@ function switchTab(tabId) {
     chatInput?.focus();
   }
 
-  updateUsageDisplay(activeTab?._lastUsageParsed ?? null, activeTab?._lastUsageTokens ?? null, activeTab?._lastUsageText ?? null);
-  if (activeTab?.sessionId && !activeTab.isProcessing) {
-    refreshUsageDisplay(tabId);
+  if (activeTab && isSubscriptionProvider(getTabProvider(activeTab))) {
+    // Subscription (Claude Code): show the plan quota, not a USD/credit cost.
+    updateSubscriptionUsageDisplay(activeTab);
+  } else {
+    updateUsageDisplay(activeTab?._lastUsageParsed ?? null, activeTab?._lastUsageTokens ?? null, activeTab?._lastUsageText ?? null);
+    if (activeTab?.sessionId && !activeTab.isProcessing) {
+      refreshUsageDisplay(tabId);
+    }
   }
 }
 
@@ -1655,6 +1660,22 @@ function initCopilotIPC() {
         break;
       }
 
+      case 'session.usage_update': {
+        // Claude Code live usage: context %, subscription rate-limit, USD cost.
+        const d = event.data || {};
+        // Pure-usage events report the context window (size ~200k); the cost-
+        // bearing event uses a different size — use it only for cost, not context.
+        if (!d.cost && d.size && d.used != null) {
+          const pct = Math.min(100, Math.round((d.used / d.size) * 100));
+          tab._contextPercent = pct;
+          if (tabId === activeTabId) updateContextButtonPct(pct);
+        }
+        if (d.rateLimit) tab._subRateLimit = d.rateLimit;
+        if (d.cost && typeof d.cost.amount === 'number') tab._subCostUsd = d.cost.amount;
+        if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
+        break;
+      }
+
       case 'session.tools_updated': {
         const modelName = event.data.model || '?';
         // Only set the model on first update — sub-agents send their own model
@@ -1768,9 +1789,8 @@ function initCopilotIPC() {
       // command at a time ("Cannot run command while busy" otherwise). Refresh
       // runs for background tabs too so cost tracking stays accurate.
       if (isSubscriptionProvider(getTabProvider(tab))) {
-        // Subscription (Claude Code): no per-token billing → skip /usage entirely
-        // (also avoids the local-command-stdout grace wait). Just refresh context.
-        refreshContextDisplay(tabId);
+        // Subscription (Claude Code): no per-token billing, and context + quota
+        // arrive live via usage_update → nothing to poll here.
       } else {
         refreshUsageDisplay(tabId).finally(() => {
           // /context is free for all providers. Direct-API tabs additionally
@@ -2681,6 +2701,33 @@ function updateUsageDisplay(parsed, tokens, fullText) {
   }
   el.textContent = display;
   el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';
+}
+
+/**
+ * Subscription usage display (Claude Code): shows the plan quota / rate-limit
+ * status in the session bar instead of a USD/credit cost — subscriptions have
+ * no per-token price. Fed by usage_update events.
+ * @param {Object} tab
+ */
+function updateSubscriptionUsageDisplay(tab) {
+  const el = document.getElementById('sessionUsage');
+  if (!el || !tab || getTabProvider(tab) !== 'claude-code') return;
+  const rl = tab._subRateLimit;
+  let txt = 'Abo';
+  let warn = false;
+  if (rl) {
+    if (rl.status && rl.status !== 'allowed') { txt = 'Abo · Limit erreicht'; warn = true; }
+    else if (rl.resetsAt) {
+      const mins = Math.max(0, Math.round((rl.resetsAt * 1000 - Date.now()) / 60000));
+      txt = `Abo · Reset in ${Math.floor(mins / 60)}h ${mins % 60}m`;
+    }
+  }
+  el.textContent = (warn ? '⚠️ ' : '') + txt;
+  const parts = [];
+  if (rl?.rateLimitType) parts.push(`Kontingent: ${rl.rateLimitType}`);
+  if (rl?.overageStatus) parts.push(`Overage: ${rl.overageStatus}${rl.overageDisabledReason ? ' (' + rl.overageDisabledReason + ')' : ''}`);
+  if (typeof tab._subCostUsd === 'number') parts.push(`Token-Äquivalent: $${tab._subCostUsd.toFixed(4)}`);
+  el.title = parts.join('\n') || 'Über dein Claude-Abo abgerechnet';
 }
 
 // ── Cost Log + Cost Settings Panel → modules/costs.js ────────
