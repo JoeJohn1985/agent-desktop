@@ -174,13 +174,16 @@ function saveOpenTabs() {
   tabs.forEach((tab) => {
     // Persist the chosen model with every tab so the provider survives a
     // restart even for tabs saved before their first message (no sessionId).
+    // The ProviderID must be persisted explicitly — it can't always be derived
+    // from the model (Claude Code and the Anthropic API share the same model ids).
+    const provider = getTabProvider(tab);
     if (tab.sessionId) {
-      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null });
+      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null, provider });
       // Persist denied tools in namedSessions
       saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
-    } else if (tab.selectedModel && tab.selectedModel !== getDefaultModelId()) {
-      // Unsent tab with a non-default (e.g. Gemini/Anthropic) provider chosen.
-      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel });
+    } else if (provider !== getDefaultProvider() || (tab.selectedModel && tab.selectedModel !== getDefaultModelId())) {
+      // Unsent tab with a non-default provider/model chosen.
+      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel, provider });
     }
   });
   setPref('openTabs', openTabs);
@@ -202,7 +205,7 @@ async function restoreOpenTabs() {
       // Resolve the model up front (entry first, then per-session map) so the
       // provider is correct from creation — including unsent tabs without id.
       const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
-      const tabId = await createTab(label, model);
+      const tabId = await createTab(label, model, t.provider);
       const tab = tabs.get(tabId);
       if (tab) {
         tab.sessionId = t.sessionId || null;
@@ -555,8 +558,14 @@ function showNotification(message, type = 'info') {
  * @param {string} [label='🤖 Chat'] - Display label for the tab.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label, initialModel) {
+async function createTab(label, initialModel, provider) {
   const tabLabel = label || '🤖 Chat';
+  // The ProviderID is the authoritative discriminator (it determines available
+  // models and provider-specific behaviour). Prefer the explicit arg; else derive
+  // from the model (legacy), else the configured default provider.
+  const tabProvider = provider
+    || (initialModel ? window.RendererLogic.getModelProvider(initialModel) : null)
+    || getDefaultProvider();
   const tabId = await copilot.chat.newTab();
 
   // Create stream output element
@@ -592,7 +601,8 @@ async function createTab(label, initialModel) {
     _lastUsageTokens: null,
     _costUsd: 0,
     _sessionName: null,
-    selectedModel: initialModel || getDefaultModelId(),
+    provider: tabProvider,
+    selectedModel: initialModel || getDefaultModelForProvider(tabProvider),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -1203,6 +1213,7 @@ function sendMessage() {
     addDirs: getEffectiveExtraDirs(),
     mode: tab.mode || DEFAULT_MODE_ID,
     model: tab.selectedModel || DEFAULT_MODEL_ID,
+    provider: getTabProvider(tab),
     cwd: tab.cwd || undefined,
     activeSkills: activeSkillDirs,
     activeAgents: activeAgentSlugs,
@@ -2061,10 +2072,14 @@ function getModelsForProvider(provider) {
  * the single source of truth; the provider is implied by it).
  */
 function getTabProvider(tab) {
-  return window.RendererLogic.getModelProvider(tab?.selectedModel || '') || 'copilot';
+  // The tab's explicit ProviderID is authoritative; fall back to deriving it from
+  // the model only for legacy tabs that predate the provider field.
+  return tab?.provider
+    || window.RendererLogic.getModelProvider(tab?.selectedModel || '')
+    || 'copilot';
 }
 
-const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
 
 /** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {

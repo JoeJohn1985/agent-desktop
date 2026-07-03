@@ -201,7 +201,9 @@ function createWindow() {
  */
 async function sendCopilotPrompt(tabId, prompt, options = {}) {
   const cwd = options.cwd || COPILOT_CWD;
-  const provider = getModelProvider(options.model || '');
+  // The explicit ProviderID from the renderer is authoritative; fall back to
+  // deriving it from the model only for legacy callers.
+  const provider = options.provider || getModelProvider(options.model || '');
 
   let client = backends.get(tabId);
 
@@ -212,30 +214,46 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
     client = null;
   }
 
-  if (provider !== 'copilot') {
+  // ACP-based backends: Copilot CLI and Claude Code (via the ACP adapter).
+  // Everything else is a direct-API backend.
+  const ACP_PROVIDERS = new Set(['copilot', 'claude-code']);
+  if (!ACP_PROVIDERS.has(provider)) {
     return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
   }
 
-  // ── Copilot CLI (ACP) path ───────────────────────────────────
-  const clientOptions = {
-    cwd,
-    copilotBin: COPILOT_BIN,
-    model: options.model,
-    mode: options.mode,
-    deniedTools: options.deniedTools,
-    addDirs: options.addDirs || [],
-    allowAllPaths: options.allowAllPaths,
-    mcpServers: getAcpMcpServers(cwd),
-  };
-
-  // Always include global CWD as additional path when using a different CWD
-  if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
-    clientOptions.addDirs.push(COPILOT_CWD);
+  // ── ACP path (Copilot / Claude Code) ─────────────────────────
+  let clientOptions;
+  if (provider === 'claude-code') {
+    // Claude Code via the Zed ACP adapter. Model is applied over ACP, not flags.
+    // Strip ANTHROPIC_API_KEY so it bills the Claude subscription, not the API.
+    clientOptions = {
+      cwd,
+      command: 'npx',
+      baseArgs: ['@zed-industries/claude-code-acp'],
+      stripEnv: ['ANTHROPIC_API_KEY'],
+      model: options.model,
+      mcpServers: [],
+    };
+  } else {
+    clientOptions = {
+      cwd,
+      copilotBin: COPILOT_BIN,
+      model: options.model,
+      mode: options.mode,
+      deniedTools: options.deniedTools,
+      addDirs: options.addDirs || [],
+      allowAllPaths: options.allowAllPaths,
+      mcpServers: getAcpMcpServers(cwd),
+    };
+    // Always include global CWD as an additional path when using a different CWD
+    if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
+      clientOptions.addDirs.push(COPILOT_CWD);
+    }
   }
 
   if (!client) {
     client = new AcpClient(tabId, sendToRenderer, clientOptions);
-    client.__provider = 'copilot';
+    client.__provider = provider;
     backends.set(tabId, client);
   } else {
     // Update options if they changed (e.g., model switch)
