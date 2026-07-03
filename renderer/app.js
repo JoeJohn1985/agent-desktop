@@ -1639,9 +1639,10 @@ function initCopilotIPC() {
       }
 
       case 'copilot.models_available': {
-        // The CLI reported which models this account can use → use them for the
-        // Copilot model dropdown instead of the hardcoded fallback list.
-        updateCopilotModels(event.data.models);
+        // The ACP backend reported which models this account can use → assign them
+        // to THIS tab's provider (Copilot or Claude Code) rather than assuming
+        // Copilot, so each ACP provider gets its own discovered model list.
+        applyDynamicModels(getTabProvider(tab), event.data.models);
         break;
       }
 
@@ -1759,11 +1760,12 @@ function initCopilotIPC() {
       // runs for background tabs too so cost tracking stays accurate.
       refreshUsageDisplay(tabId).finally(() => {
         // /context is free for all providers. Direct-API tabs additionally
-        // auto-compact when high; Copilot manages its own context window.
-        if (getTabProvider(tab) !== 'copilot') {
-          refreshApiContext(tabId);
-        } else {
+        // auto-compact when high; ACP backends (Copilot, Claude Code) manage
+        // their own context window.
+        if (isAcpProvider(getTabProvider(tab))) {
           refreshContextDisplay(tabId);
+        } else {
+          refreshApiContext(tabId);
         }
       });
     }
@@ -1827,6 +1829,7 @@ function modelTierBadge(model) {
 
 const PROVIDER_LABELS = {
   copilot: 'GitHub Copilot',
+  'claude-code': 'Claude Code',
   anthropic: 'Anthropic API',
   gemini: 'Google Gemini',
   openai: 'OpenAI',
@@ -1842,6 +1845,7 @@ const PROVIDER_ICON = '🔌';
 // direct-API providers. Gemini/OpenAI are listed but not yet selectable.
 const PROVIDERS = [
   { id: 'copilot', active: true },
+  { id: 'claude-code', active: true },
   { id: 'gemini', active: true },
   { id: 'anthropic', active: true },
   { id: 'openai', active: true },
@@ -1852,7 +1856,7 @@ const PROVIDERS = [
 // Maturity markers per provider. Beta = tested but not final; Alpha = untested.
 // Copilot is the primary, fully-tested provider and carries no badge.
 const BETA_PROVIDERS = new Set(['gemini']);
-const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+const ALPHA_PROVIDERS = new Set(['claude-code', 'anthropic', 'openai', 'glm', 'ollama']);
 
 /** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
 function providerStageBadge(provider) {
@@ -1886,6 +1890,7 @@ function getDefaultProvider() {
 // first list entry (Haiku) — see DEFAULT_MODEL_ID.
 const PROVIDER_DEFAULT_MODEL = {
   copilot: DEFAULT_MODEL_ID,        // claude-sonnet-4.6
+  'claude-code': 'claude-sonnet-5', // refined once ACP reports the real models
   anthropic: 'claude-opus-4-8',
   gemini: 'gemini-2.5-flash',
   openai: 'gpt-5.1',
@@ -2080,6 +2085,16 @@ function getTabProvider(tab) {
 }
 
 const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+
+/** ACP-based backends (CLI/adapter over stdio), as opposed to direct-API providers. */
+function isAcpProvider(provider) {
+  return provider === 'copilot' || provider === 'claude-code';
+}
+
+/** Whether a provider is billed via a subscription (no per-token USD cost). */
+function isSubscriptionProvider(provider) {
+  return provider === 'claude-code';
+}
 
 /** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {
@@ -2553,7 +2568,11 @@ async function refreshUsageDisplay(tabId) {
       // which may already point at a different model chosen for the next prompt.
       // This keeps a mid-session model switch from mis-pricing prior tokens.
       const modelId = tab._billingModel || tab.selectedModel || '';
-      const deltaUsd = estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
+      // Subscription providers (Claude Code) are covered by the plan — no USD
+      // billing yet (token-based accounting for add-on budgets comes later).
+      const deltaUsd = isSubscriptionProvider(getTabProvider(tab))
+        ? 0
+        : estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
       if (deltaUsd && deltaUsd > 0) {
         tab._costUsd = (tab._costUsd || 0) + deltaUsd;
         recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, getTabProvider(tab));
@@ -4366,7 +4385,7 @@ function openAddTabProviderMenu(btn) {
   };
 
   PROVIDERS.forEach(p => {
-    const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const hasKey = p.id === 'copilot' || p.id === 'claude-code' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
     const item = document.createElement('div');
     item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
     let badge = providerStageBadge(p.id);
@@ -4380,8 +4399,9 @@ function openAddTabProviderMenu(btn) {
       }
       close();
       const label = p.id === 'copilot' ? '🤖 Chat' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
-      createTab(label, getDefaultModelForProvider(p.id));
-      if (p.id !== 'copilot' && !hasKey) {
+      createTab(label, getDefaultModelForProvider(p.id), p.id);
+      // Direct-API providers need a key; Copilot and Claude Code use CLI login.
+      if (p.id !== 'copilot' && p.id !== 'claude-code' && !hasKey) {
         showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
       }
     });
@@ -4754,6 +4774,18 @@ const PROVIDER_SETTINGS = [
     ].join('\n'),
   },
   {
+    id: 'claude-code', active: true, cli: true,
+    info: [
+      'Claude Code – voll agentisch über das Abo (kein API-Key).',
+      '',
+      'Läuft über den ACP-Adapter (npx @zed-industries/claude-code-acp).',
+      'Abrechnung über dein Claude-Abo (Pro/Max) statt pro Token —',
+      'sofern kein ANTHROPIC_API_KEY gesetzt ist (wird bewusst entfernt).',
+      '',
+      'Voraussetzung: einmalig „claude" (Claude Code CLI) mit dem Abo einloggen.',
+    ].join('\n'),
+  },
+  {
     id: 'anthropic', active: true, placeholder: 'sk-ant-…',
     info: [
       'Claude – voll agentisch (direkte API).',
@@ -4907,8 +4939,9 @@ async function renderCopilotProviderRow(list, p) {
   row.className = 'providers-row';
   row.innerHTML = `
     <div class="providers-row__head">
-      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS.copilot)}</span>
+      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
       ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+      ${providerStageBadge(p.id).trim()}
       <span class="providers-row__status">… wird geprüft</span>
     </div>
     <div class="providers-row__controls"></div>`;
@@ -4916,6 +4949,18 @@ async function renderCopilotProviderRow(list, p) {
 
   const statusEl = row.querySelector('.providers-row__status');
   const controls = row.querySelector('.providers-row__controls');
+
+  // Claude Code: launched on demand via npx; billed through the subscription.
+  // Live auth detection (claude CLI + /status) is a TODO — show guidance for now.
+  if (p.id === 'claude-code') {
+    statusEl.textContent = 'ℹ Abo-Login über die „claude"-CLI';
+    statusEl.classList.add('is-set');
+    const hint = document.createElement('span');
+    hint.className = 'providers-row__hint';
+    hint.textContent = 'Einmalig die „claude"-CLI installieren und mit dem Abo einloggen. Kein API-Key nötig — für Claude Code wird ANTHROPIC_API_KEY bewusst entfernt.';
+    controls.appendChild(hint);
+    return;
+  }
 
   let status = { cliInstalled: false, authenticated: false, user: null };
   try { status = await window.copilot.auth.status(); } catch (_) { /* old build / offline */ }
