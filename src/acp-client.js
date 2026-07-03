@@ -10,6 +10,7 @@ const RESTART_WINDOW_MS = 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /compact …)
+const LOCAL_CMD_GRACE_MS = 2_000; // wait for a stderr <local-command-stdout> flush (Claude Code)
 const STOP_GRACE_MS = 5_000;
 
 /**
@@ -27,6 +28,7 @@ class AcpClient extends EventEmitter {
   #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
   #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
   #shell = false;     // spawn via a shell — needed on Windows for .cmd/.bat (npx)
+  #localCommandStdout = false; // adapter returns slash output on stderr (Claude Code)
 
   // ── Process ──────────────────────────────────────────────────
   #process = null;
@@ -49,6 +51,8 @@ class AcpClient extends EventEmitter {
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
+  #localCmdBuf = '';       // stderr buffer while capturing a <local-command-stdout> block (Claude Code)
+  #localCmdWaiter = null;  // resolver awaited by silentCommand until the block arrives
   #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
 
   // ── Recovery ─────────────────────────────────────────────────
@@ -84,6 +88,7 @@ class AcpClient extends EventEmitter {
     this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
     this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
     this.#shell = options.shell === true;
+    this.#localCommandStdout = options.localCommandStdout === true;
     this.#options = options;
   }
 
@@ -143,9 +148,22 @@ class AcpClient extends EventEmitter {
 
     // stderr → error events to renderer
     proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString('utf-8').trim();
+      const raw = chunk.toString('utf-8');
+      const text = raw.trim();
       if (text) {
         console.warn(`[acp:tab${this.#tabId}:stderr]`, text);
+      }
+      // Some ACP adapters (Claude Code) return slash-command output on stderr,
+      // wrapped in <local-command-stdout>…</local-command-stdout>, instead of the
+      // normal ACP response. Capture it while a silentCommand is in flight.
+      if (this.#contextQueryCollector) {
+        this.#localCmdBuf += raw;
+        const m = this.#localCmdBuf.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
+        if (m) {
+          this.#contextQueryCollector.push(m[1]);
+          this.#localCmdBuf = '';
+          if (this.#localCmdWaiter) { const w = this.#localCmdWaiter; this.#localCmdWaiter = null; w(); }
+        }
       }
     });
 
@@ -425,14 +443,28 @@ class AcpClient extends EventEmitter {
     this.#state = 'busy';
     this.#promptDone = false;
     this.#contextQueryCollector = [];
+    this.#localCmdBuf = '';
     try {
       await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
       }, SLASH_COMMAND_TIMEOUT_MS);
+      // If nothing arrived via the ACP response, give adapters that emit slash
+      // output on stderr (Claude Code) a moment to flush a <local-command-stdout>
+      // block. Other backends return immediately.
+      if (this.#localCommandStdout && !this.#contextQueryCollector.join('')) {
+        await new Promise((resolve) => {
+          this.#localCmdWaiter = resolve;
+          setTimeout(() => {
+            if (this.#localCmdWaiter) { this.#localCmdWaiter = null; resolve(); }
+          }, LOCAL_CMD_GRACE_MS);
+        });
+      }
       return this.#contextQueryCollector.join('');
     } finally {
       this.#contextQueryCollector = null;
+      this.#localCmdBuf = '';
+      this.#localCmdWaiter = null;
       this.#promptDone = true;
       this.#state = this.#process ? 'ready' : 'dead';
     }

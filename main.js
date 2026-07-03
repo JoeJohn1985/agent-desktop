@@ -232,6 +232,9 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       baseArgs: ['@zed-industries/claude-code-acp'],
       // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
       shell: true,
+      // The adapter returns slash-command output (/context) on stderr wrapped in
+      // <local-command-stdout>, not via the ACP response.
+      localCommandStdout: true,
       stripEnv: ['ANTHROPIC_API_KEY'],
       model: options.model,
       mcpServers: [],

@@ -1760,16 +1760,21 @@ function initCopilotIPC() {
       // Run /usage first, then /context — the backend handles only one silent
       // command at a time ("Cannot run command while busy" otherwise). Refresh
       // runs for background tabs too so cost tracking stays accurate.
-      refreshUsageDisplay(tabId).finally(() => {
-        // /context is free for all providers. Direct-API tabs additionally
-        // auto-compact when high; ACP backends (Copilot, Claude Code) manage
-        // their own context window.
-        if (isAcpProvider(getTabProvider(tab))) {
-          refreshContextDisplay(tabId);
-        } else {
-          refreshApiContext(tabId);
-        }
-      });
+      if (isSubscriptionProvider(getTabProvider(tab))) {
+        // Subscription (Claude Code): no per-token billing → skip /usage entirely
+        // (also avoids the local-command-stdout grace wait). Just refresh context.
+        refreshContextDisplay(tabId);
+      } else {
+        refreshUsageDisplay(tabId).finally(() => {
+          // /context is free for all providers. Direct-API tabs additionally
+          // auto-compact when high; ACP backends (Copilot) manage their own.
+          if (isAcpProvider(getTabProvider(tab))) {
+            refreshContextDisplay(tabId);
+          } else {
+            refreshApiContext(tabId);
+          }
+        });
+      }
     }
   });
 }
