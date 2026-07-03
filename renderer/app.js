@@ -1212,7 +1212,9 @@ function sendMessage() {
     allowAllPaths: settings.allowAllPaths === true,
     addDirs: getEffectiveExtraDirs(),
     mode: tab.mode || DEFAULT_MODE_ID,
-    model: tab.selectedModel || DEFAULT_MODEL_ID,
+    // Empty → let the backend use its own default model (e.g. Claude Code before
+    // we know its real model ids). Don't force a Copilot id onto other providers.
+    model: tab.selectedModel || undefined,
     provider: getTabProvider(tab),
     cwd: tab.cwd || undefined,
     activeSkills: activeSkillDirs,
@@ -1912,7 +1914,11 @@ function getDefaultModelForProvider(provider) {
   if (valid(configured)) return configured;
   if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
-  return m ? m.id : DEFAULT_MODEL_ID;
+  if (m) return m.id;
+  // No known model for this provider yet (e.g. Claude Code before ACP discovery).
+  // Return '' so the backend uses its own default instead of a foreign model id
+  // (forcing a Copilot id like claude-sonnet-4.6 makes Claude Code reject it).
+  return '';
 }
 
 /** Persist the default model for one provider. */
