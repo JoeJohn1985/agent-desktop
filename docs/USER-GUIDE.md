@@ -54,8 +54,8 @@ Agent Desktop verpackt mehrere LLM-Provider (primär GitHub Copilot CLI, dazu An
 ### Installation
 
 ```powershell
-git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
-cd github-copilot-desktop
+git clone https://github.com/matthias-schneider_gebit/agent-desktop.git
+cd agent-desktop
 .\setup.ps1    # oder manuell: npm install
 npm start
 ```

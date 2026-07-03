@@ -78,8 +78,8 @@ The app dynamically loads custom agents from `~/.copilot/agents/` (configurable 
 ### Setup (one-time)
 
 ```powershell
-git clone https://github.com/matthias-schneider_gebit/github-copilot-desktop.git
-cd github-copilot-desktop
+git clone https://github.com/matthias-schneider_gebit/agent-desktop.git
+cd agent-desktop
 pwsh setup.ps1
 ```
 
