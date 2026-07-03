@@ -24,6 +24,8 @@ class AcpClient extends EventEmitter {
   #options;      // CLI options (model, deniedTools, addDirs, etc.)
   #cwd;
   #copilotBin;
+  #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
+  #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
 
   // ── Process ──────────────────────────────────────────────────
   #process = null;
@@ -57,7 +59,16 @@ class AcpClient extends EventEmitter {
    * @param {Function} sendToRenderer - Function to send IPC messages (channel, ...args)
    * @param {Object} [options={}] - Configuration
    * @param {string} [options.cwd] - Working directory
-   * @param {string} [options.copilotBin='copilot'] - Path to copilot binary
+   * @param {string} [options.copilotBin='copilot'] - Path to the copilot binary
+   * @param {string} [options.command] - ACP process command (overrides copilotBin;
+   *   e.g. 'npx' for the Claude Code adapter). Defaults to the copilot binary.
+   * @param {string[]} [options.baseArgs] - Fixed spawn args for a non-Copilot ACP
+   *   adapter (e.g. ['@zed-industries/claude-code-acp']). When set, the
+   *   Copilot-specific flag builder (--acp/--model/--deny-tool/…) is skipped;
+   *   model/deny are applied via ACP instead.
+   * @param {string[]} [options.stripEnv] - Env vars to remove from the child
+   *   process (e.g. ['ANTHROPIC_API_KEY'] so Claude Code bills the subscription,
+   *   not the API).
    * @param {string} [options.model] - Model override
    * @param {string[]} [options.deniedTools] - Tools to deny
    * @param {string[]} [options.addDirs] - Additional allowed directories
@@ -68,7 +79,9 @@ class AcpClient extends EventEmitter {
     this.#tabId = tabId;
     this.#sendToRenderer = sendToRenderer;
     this.#cwd = options.cwd || process.cwd();
-    this.#copilotBin = options.copilotBin || 'copilot';
+    this.#copilotBin = options.command || options.copilotBin || 'copilot';
+    this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
+    this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
     this.#options = options;
   }
 
@@ -90,19 +103,32 @@ class AcpClient extends EventEmitter {
     this.#appliedModel = null;
     this.#appliedMode = null;
 
-    const args = ['--acp', '--allow-all'];
-    if (this.#options.model) args.push('--model', this.#options.model);
-    if (this.#options.deniedTools) {
-      for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
+    // Non-Copilot ACP adapters (e.g. Claude Code) get their fixed args verbatim;
+    // model/deny are applied over ACP, not via CLI flags. Copilot uses its flags.
+    let args;
+    if (this.#baseArgs) {
+      args = [...this.#baseArgs];
+    } else {
+      args = ['--acp', '--allow-all'];
+      if (this.#options.model) args.push('--model', this.#options.model);
+      if (this.#options.deniedTools) {
+        for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
+      }
+      if (this.#options.addDirs) {
+        for (const d of this.#options.addDirs) args.push('--add-dir', d);
+      }
+      if (this.#options.allowAllPaths) args.push('--allow-all-paths');
     }
-    if (this.#options.addDirs) {
-      for (const d of this.#options.addDirs) args.push('--add-dir', d);
-    }
-    if (this.#options.allowAllPaths) args.push('--allow-all-paths');
+
+    // Build the child env, removing any keys the backend must not see. Critical
+    // for Claude Code: an inherited ANTHROPIC_API_KEY would switch billing from
+    // the subscription to pay-per-token API usage.
+    const env = { ...process.env, NO_COLOR: '1' };
+    for (const key of this.#stripEnv) delete env[key];
 
     const proc = spawn(this.#copilotBin, args, {
       cwd: this.#cwd,
-      env: { ...process.env, NO_COLOR: '1' },
+      env,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
