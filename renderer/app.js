@@ -4807,7 +4807,7 @@ const PROVIDER_SETTINGS = [
     info: [
       'Claude Code – voll agentisch über das Abo (kein API-Key).',
       '',
-      'Läuft über den ACP-Adapter (npx @zed-industries/claude-code-acp).',
+      'Läuft über den ACP-Adapter (npx @agentclientprotocol/claude-agent-acp).',
       'Abrechnung über dein Claude-Abo (Pro/Max) statt pro Token —',
       'sofern kein ANTHROPIC_API_KEY gesetzt ist (wird bewusst entfernt).',
       '',

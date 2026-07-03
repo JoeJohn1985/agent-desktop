@@ -229,7 +229,10 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
     clientOptions = {
       cwd,
       command: 'npx',
-      baseArgs: ['@zed-industries/claude-code-acp'],
+      // Current adapter (the old @zed-industries/claude-code-acp is deprecated and
+      // pins an older SDK that lacks newer models like Sonnet 5). Use -y so npx
+      // installs it non-interactively on first run.
+      baseArgs: ['-y', '@agentclientprotocol/claude-agent-acp'],
       // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
       shell: true,
       // The adapter returns slash-command output (/context) on stderr wrapped in
