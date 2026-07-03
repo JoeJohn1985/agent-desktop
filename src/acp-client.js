@@ -227,6 +227,11 @@ class AcpClient extends EventEmitter {
       console.error(`[acp:tab${this.#tabId}] session/new: no sessionId in result`, JSON.stringify(result));
     }
     this.#captureModes(result);
+    // DIAGNOSTIC: what models/config does this ACP backend report? Needed to
+    // curate the Claude Code model list with real ids.
+    try {
+      console.log(`[acp:tab${this.#tabId}] session/new models :: ${JSON.stringify(result?.models ?? result?.configOptions ?? {}).slice(0, 1500)}`);
+    } catch (_) { /* ignore */ }
     this.#emitCurrentModel(result);
     this.#emitAvailableModels(result);
     return result;

@@ -1797,6 +1797,14 @@ const DEFAULT_MODELS = [
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot', tier: 'aic' },
   { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot', tier: 'aic' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot', tier: 'aic' },
+  // Claude Code (provider: 'claude-code') — billed via the Claude subscription
+  // (CLI login, no API key). Ids follow the Anthropic scheme; refined via the
+  // adapter's reported models. 'claude-opus-4-6' is confirmed working.
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'claude-code', tier: 'sub' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'claude-code', tier: 'sub' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'claude-code', tier: 'sub' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code', tier: 'sub' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
@@ -1824,6 +1832,7 @@ const MODEL_TIER_BADGE = {
   paid: '<span class="model-tier model-tier--paid" data-tooltip="Direkt kostenpflichtig (Abrechnung pro Token beim Provider)">💲 kostenpflichtig</span>',
   free: '<span class="model-tier model-tier--free" data-tooltip="Im kostenlosen Kontingent des Providers nutzbar">🆓 kostenlos</span>',
   aic: '<span class="model-tier model-tier--aic" data-tooltip="Abrechnung über dein GitHub-Copilot-Abo / AI Credits">AIC</span>',
+  sub: '<span class="model-tier model-tier--aic" data-tooltip="Über dein Claude-Abo abgerechnet (kein Token-Preis)">Abo</span>',
 };
 function modelTierBadge(model) {
   return model && model.tier ? (MODEL_TIER_BADGE[model.tier] || '') : '';
@@ -1912,6 +1921,10 @@ function getDefaultModelForProvider(provider) {
   const valid = (id) => id && getModelsForProvider(provider).some(m => m.id === id);
   const configured = (getSettings().defaultModels || {})[provider];
   if (valid(configured)) return configured;
+  // Claude Code: don't force a model — let the ACP adapter use its own default
+  // (the subscription default) unless the user explicitly configured one. Forcing
+  // an id we're unsure about would make the adapter reject the prompt.
+  if (provider === 'claude-code') return '';
   if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
   if (m) return m.id;
@@ -1928,7 +1941,7 @@ function saveDefaultModelForProvider(provider, modelId) {
   saveSetting('defaultModels', map);
 }
 
-const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)' };
+const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)', sub: ' (Abo)' };
 
 /** Render the "default provider" + "default model per provider" settings controls. */
 function renderDefaultModelSettings() {
