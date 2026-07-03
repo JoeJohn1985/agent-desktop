@@ -1207,6 +1207,9 @@ function sendMessage() {
   const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
 
   const sendTabId = activeTabId;
+  // Claude Code manages its own skills/agents — don't prepend the app's Copilot
+  // skill/agent prompt prefixes (they'd be meaningless there).
+  if (getTabProvider(tab) === 'claude-code') { agentPrefix = ''; skillPrefix = ''; }
   // Freeze the model this prompt actually runs on. The token delta measured after
   // completion must be priced at THIS model — not tab.selectedModel, which the
   // user may switch (for the next prompt) before /usage is read.
@@ -1908,8 +1911,8 @@ const PROVIDERS = [
 
 // Maturity markers per provider. Beta = tested but not final; Alpha = untested.
 // Copilot is the primary, fully-tested provider and carries no badge.
-const BETA_PROVIDERS = new Set(['gemini']);
-const ALPHA_PROVIDERS = new Set(['claude-code', 'anthropic', 'openai', 'glm', 'ollama']);
+const BETA_PROVIDERS = new Set(['gemini', 'claude-code']);
+const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
 
 /** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
 function providerStageBadge(provider) {
@@ -2275,6 +2278,22 @@ function updateModelSelectBtn(tabId) {
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
   updateApprovalBtn(tabId);
+  updateProviderSpecificControls(tabId);
+}
+
+/**
+ * Hide Copilot-specific controls that don't apply to Claude Code: the mode
+ * dropdown (Claude Code has its own modes — wiring pending) and the session
+ * tools deny-list (Claude Code governs permissions via its mode, not --deny-tool).
+ * @param {string} [tabId]
+ */
+function updateProviderSpecificControls(tabId) {
+  const tab = tabs.get(tabId ?? activeTabId);
+  const isClaudeCode = tab && getTabProvider(tab) === 'claude-code';
+  const modeWrap = document.getElementById('btnModeSelect')?.closest('.model-select-wrapper');
+  const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
+  if (modeWrap) modeWrap.style.display = isClaudeCode ? 'none' : '';
+  if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
 }
 
 /**
@@ -2644,9 +2663,6 @@ async function refreshUsageDisplay(tabId) {
   try {
     const result = await window.copilot.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
-    // DIAGNOSTIC: raw /usage output — to check whether it breaks down tokens by
-    // model/subagent or only reports a single session-wide aggregate.
-    console.log(`[usage-raw tab${tabId}]\n${result.text}`);
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
@@ -5982,6 +5998,7 @@ async function renderCwdStep(body, btnNext) {
 function renderProviderStep(body, btnNext) {
   const choices = [
     { id: 'copilot', label: '🔌 GitHub Copilot', sub: 'CLI-Login, MCP-Unterstützung' },
+    { id: 'claude-code', label: '🟣 Claude Code', sub: 'CLI-Login, über dein Claude-Abo' },
     { id: 'anthropic', label: '🟣 Anthropic', sub: 'API-Key (Claude)' },
     { id: 'gemini', label: '🔷 Google Gemini', sub: 'API-Key, Live-Suche' },
     { id: 'openai', label: '🟢 OpenAI', sub: 'API-Key (GPT)' },
@@ -6024,6 +6041,10 @@ function renderProviderStep(body, btnNext) {
 
 /** Render the provider-specific sub-area (Copilot login / API key / Ollama info). */
 async function renderProviderDetail(container, provider) {
+  if (provider === 'claude-code') {
+    container.innerHTML = '<div class="onboarding-login__status">🟣 Claude Code läuft über deine <strong>Claude Code CLI</strong> und dein <strong>Abo</strong> — kein API-Key nötig. Installiere die „claude"-CLI und melde dich einmalig an (<code>claude</code> → Login). Danach kannst du fortfahren.</div>';
+    return;
+  }
   if (provider === 'copilot') {
     container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Prüfe Copilot-Status…</div>';
     let status = { cliInstalled: false, authenticated: false, user: null };

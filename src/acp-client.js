@@ -10,6 +10,7 @@ const RESTART_WINDOW_MS = 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /compact …)
+const DEBUG_ACP = process.env.ACP_DEBUG === '1'; // verbose diagnostics (models dump, unhandled events)
 const LOCAL_CMD_GRACE_MS = 2_000; // wait for a stderr <local-command-stdout> flush (Claude Code)
 const STOP_GRACE_MS = 5_000;
 
@@ -249,11 +250,11 @@ class AcpClient extends EventEmitter {
       console.error(`[acp:tab${this.#tabId}] session/new: no sessionId in result`, JSON.stringify(result));
     }
     this.#captureModes(result);
-    // DIAGNOSTIC: what models/config does this ACP backend report? Needed to
-    // curate the Claude Code model list with real ids.
-    try {
-      console.log(`[acp:tab${this.#tabId}] session/new models :: ${JSON.stringify(result?.models ?? result?.configOptions ?? {}).slice(0, 1500)}`);
-    } catch (_) { /* ignore */ }
+    if (DEBUG_ACP) {
+      try {
+        console.log(`[acp:tab${this.#tabId}] session/new models :: ${JSON.stringify(result?.models ?? result?.configOptions ?? {}).slice(0, 1500)}`);
+      } catch (_) { /* ignore */ }
+    }
     this.#emitCurrentModel(result);
     this.#emitAvailableModels(result);
     return result;
@@ -843,12 +844,15 @@ class AcpClient extends EventEmitter {
       }
 
       default: {
-        // DIAGNOSTIC: dump the FULL payload of unknown updates so we can spot any
-        // subagent-/usage-/model-tagged signal the CLI might emit (e.g. per-turn
-        // token usage or a delegated sub-agent). Truncated to keep logs sane.
-        let dump;
-        try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
-        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
+        // Unknown update — only dump the full payload under ACP_DEBUG to keep
+        // normal logs clean; otherwise just note the type.
+        if (DEBUG_ACP) {
+          let dump;
+          try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
+          console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
+        } else {
+          console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType}`);
+        }
         break;
       }
     }
