@@ -316,7 +316,36 @@ class AcpClient extends EventEmitter {
   /** Captures the available session modes from a session/new|load result. */
   #captureModes(result) {
     const modes = result?.modes?.availableModes;
-    if (Array.isArray(modes) && modes.length) this.#availableModes = modes;
+    if (Array.isArray(modes) && modes.length) {
+      this.#availableModes = modes;
+    } else {
+      // Current Claude Code adapter reports modes via a configOptions entry.
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'mode');
+      if (opt && Array.isArray(opt.options)) {
+        this.#availableModes = opt.options.filter((o) => o && o.value).map((o) => ({ id: o.value, name: o.name || o.value }));
+      }
+    }
+    this.#emitAvailableModes(result);
+  }
+
+  /** Emit the session modes (both ACP shapes) so the renderer can offer them. */
+  #emitAvailableModes(result) {
+    let modes = [];
+    let currentModeId = null;
+    const list = result?.modes?.availableModes;
+    if (Array.isArray(list) && list.length) {
+      modes = list.map((m) => ({ id: m.id, name: m.name || m.id, description: m.description || '' }));
+      currentModeId = result?.modes?.currentModeId || null;
+    } else {
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'mode');
+      if (opt && Array.isArray(opt.options)) {
+        modes = opt.options.filter((o) => o && o.value).map((o) => ({ id: o.value, name: o.name || o.value, description: o.description || '' }));
+        currentModeId = opt.currentValue || null;
+      }
+    }
+    if (modes.length) {
+      this.#emitToRenderer({ type: 'session.modes_available', data: { modes, currentModeId } });
+    }
   }
 
   /**
@@ -345,8 +374,9 @@ class AcpClient extends EventEmitter {
     try {
       await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
       this.#appliedMode = modeId;
+      if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] session/set_mode(${modeId}) ok`);
     } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/set_mode(${shortId}) failed:`, err.message);
+      console.warn(`[acp:tab${this.#tabId}] session/set_mode(${shortId} → ${modeId}) failed:`, err.message);
     }
   }
 

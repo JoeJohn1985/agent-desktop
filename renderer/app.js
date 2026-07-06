@@ -1667,6 +1667,24 @@ function initCopilotIPC() {
         break;
       }
 
+      case 'session.modes_available': {
+        // The ACP backend reported its session modes → assign them to this tab's
+        // provider (Claude Code has its own permission modes).
+        const provider = getTabProvider(tab);
+        const mapped = (event.data.modes || [])
+          .filter(m => m && m.id)
+          .map(m => ({ id: m.id, short: m.name || m.id, label: m.name || m.id, desc: m.description || '' }));
+        if (mapped.length) {
+          _dynamicModes[provider] = mapped;
+          // Adopt the backend's current mode when the tab's mode isn't valid here.
+          if (!mapped.some(m => m.id === tab.mode)) {
+            tab.mode = event.data.currentModeId || mapped[0].id;
+          }
+          updateModeSelectBtn(tabId);
+        }
+        break;
+      }
+
       case 'session.usage_update': {
         // Claude Code live usage: context %, subscription rate-limit, USD cost.
         const d = event.data || {};
@@ -2232,6 +2250,17 @@ const SESSION_MODES = [
   { id: 'autopilot', label: 'Autopilot', short: '🚀 Autopilot', desc: 'Autonom bis Task-Abschluss (experimentell)' },
 ];
 
+// Session modes discovered per provider via ACP (Claude Code reports its own
+// permission modes: default/acceptEdits/plan/bypassPermissions/…).
+const _dynamicModes = {};
+
+/** Modes selectable for a provider (discovered list wins; Copilot has a static one). */
+function getModesForProvider(provider) {
+  const dyn = _dynamicModes[provider];
+  if (dyn && dyn.length) return dyn;
+  return provider === 'copilot' ? SESSION_MODES : [];
+}
+
 /**
  * Update the tab-header mode select button to reflect the active tab's mode.
  * @param {string} [tabId]
@@ -2240,11 +2269,12 @@ function updateModeSelectBtn(tabId) {
   const btn = document.getElementById('btnModeSelect');
   if (!btn) return;
   const tab = tabs.get(tabId ?? activeTabId);
+  const modes = getModesForProvider(tab ? getTabProvider(tab) : 'copilot');
   const modeId = tab?.mode || DEFAULT_MODE_ID;
-  const found = SESSION_MODES.find(m => m.id === modeId);
+  const found = modes.find(m => m.id === modeId);
   btn.textContent = found ? found.short : '🤖 Agent';
-  // Highlight when not in the default Agent mode.
-  btn.classList.toggle('session-actions__btn--active', modeId !== DEFAULT_MODE_ID);
+  // Highlight when not on the provider's first/default mode.
+  btn.classList.toggle('session-actions__btn--active', !!found && modes[0] && found.id !== modes[0].id);
 }
 
 /**
@@ -2282,17 +2312,15 @@ function updateModelSelectBtn(tabId) {
 }
 
 /**
- * Hide Copilot-specific controls that don't apply to Claude Code: the mode
- * dropdown (Claude Code has its own modes — wiring pending) and the session
- * tools deny-list (Claude Code governs permissions via its mode, not --deny-tool).
+ * Hide the session tools deny-list for Claude Code (it governs permissions via
+ * its mode/permission prompts, not --deny-tool). The mode dropdown IS shown for
+ * Claude Code — it carries the provider's own discovered modes.
  * @param {string} [tabId]
  */
 function updateProviderSpecificControls(tabId) {
   const tab = tabs.get(tabId ?? activeTabId);
   const isClaudeCode = tab && getTabProvider(tab) === 'claude-code';
-  const modeWrap = document.getElementById('btnModeSelect')?.closest('.model-select-wrapper');
   const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
-  if (modeWrap) modeWrap.style.display = isClaudeCode ? 'none' : '';
   if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
 }
 
@@ -2423,11 +2451,12 @@ function initTabModeSelector() {
     const openedForTabId = activeTabId;
     const tab = tabs.get(openedForTabId);
     const currentMode = tab?.mode || DEFAULT_MODE_ID;
+    const modes = getModesForProvider(getTabProvider(tab));
 
     const dropdown = document.createElement('div');
     dropdown.className = 'model-dropdown model-dropdown--below mode-dropdown';
 
-    SESSION_MODES.forEach(m => {
+    modes.forEach(m => {
       const isActive = currentMode === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');

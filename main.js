@@ -242,6 +242,7 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       // Off → auto-approve permission requests in the backend (no UI prompt).
       autoApprovePermissions: !options.manualApproval,
       model: options.model,
+      mode: options.mode,
       mcpServers: [],
     };
   } else {
