@@ -472,23 +472,6 @@ ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId)
   return { success: true };
 });
 
-/** @ipc copilot:listSessions — Lists the ACP backend's sessions (Claude Code resume picker). */
-ipcMain.handle('copilot:listSessions', async (_event, tabId, cwd) => {
-  try {
-    let client = backends.get(tabId);
-    if (!client) {
-      client = new AcpClient(tabId, sendToRenderer, claudeCodeClientOptions(cwd || COPILOT_CWD));
-      client.__provider = 'claude-code';
-      backends.set(tabId, client);
-    }
-    if (client.state === 'dead') await client.start();
-    const r = await client.listSessions();
-    return { success: true, sessions: (r && r.sessions) || [] };
-  } catch (err) {
-    return { success: false, error: err?.message || String(err), sessions: [] };
-  }
-});
-
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
 ipcMain.handle('copilot:newTab', () => {
   return nextTabId++;

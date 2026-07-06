@@ -1681,6 +1681,7 @@ function initCopilotIPC() {
           .map(m => ({ id: m.id, short: m.name || m.id, label: m.name || m.id, desc: m.description || '' }));
         if (mapped.length) {
           _dynamicModes[provider] = mapped;
+          setPref('dynamicModes', _dynamicModes); // survive restarts → dropdown filled pre-prompt
           // Adopt the backend's current mode when the tab's mode isn't valid here.
           if (!mapped.some(m => m.id === tab.mode)) {
             tab.mode = event.data.currentModeId || mapped[0].id;
@@ -2115,6 +2116,14 @@ function initCopilotModels() {
     const legacy = getPref('copilotModels', null);
     if (Array.isArray(legacy) && legacy.length) _dynamicModels.copilot = legacy;
   }
+  // Restore discovered session modes per provider so the mode dropdown has content
+  // before the first prompt (e.g. Claude Code's modes after a restart).
+  const storedModes = getPref('dynamicModes', null);
+  if (storedModes && typeof storedModes === 'object' && !Array.isArray(storedModes)) {
+    for (const [prov, list] of Object.entries(storedModes)) {
+      if (Array.isArray(list) && list.length) _dynamicModes[prov] = list;
+    }
+  }
 }
 
 /**
@@ -2329,76 +2338,6 @@ function updateProviderSpecificControls(tabId) {
   const isClaudeCode = tab && getTabProvider(tab) === 'claude-code';
   const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
   if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
-  const sessionsWrap = document.getElementById('claudeSessionsWrapper');
-  if (sessionsWrap) sessionsWrap.style.display = isClaudeCode ? '' : 'none';
-}
-
-/** Wire the "🕘 Sessions" button (Claude Code resume picker). */
-function initClaudeSessionsBtn() {
-  const btn = document.getElementById('btnClaudeSessions');
-  if (btn) btn.addEventListener('click', () => openClaudeSessionsDropdown(btn));
-}
-
-/** Open a dropup listing the Claude Code backend's sessions to resume. */
-async function openClaudeSessionsDropdown(btn) {
-  document.getElementById('claudeSessionsDropdown')?.remove();
-  const tab = tabs.get(activeTabId);
-  if (!tab) return;
-  const dd = document.createElement('div');
-  dd.id = 'claudeSessionsDropdown';
-  dd.className = 'model-dropdown claude-sessions-dropdown';
-  dd.innerHTML = '<div class="model-dropdown__item model-dropdown__item--disabled">Lade Sessions…</div>';
-  document.body.appendChild(dd);
-  const r = btn.getBoundingClientRect();
-  Object.assign(dd.style, {
-    position: 'fixed', left: r.left + 'px', bottom: (window.innerHeight - r.top + 6) + 'px',
-    maxHeight: '340px', overflowY: 'auto', zIndex: '1000', minWidth: '280px',
-  });
-
-  let res;
-  try { res = await copilot.chat.listSessions(activeTabId, tab.cwd || undefined); } catch (_) { res = { success: false }; }
-  if (!document.body.contains(dd)) return;
-
-  const sessions = (res && res.success && Array.isArray(res.sessions)) ? res.sessions : [];
-  if (!sessions.length) {
-    dd.innerHTML = `<div class="model-dropdown__item model-dropdown__item--disabled">${res && res.error ? escapeHtml('Fehler: ' + res.error) : 'Keine Sessions gefunden'}</div>`;
-  } else {
-    const sorted = sessions.slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
-    const trunc = (p) => (p && p.length > 42 ? '…' + p.slice(-42) : (p || ''));
-    dd.innerHTML = sorted.slice(0, 40).map((s, i) => {
-      const title = s.title || String(s.sessionId).slice(0, 8);
-      const when = s.updatedAt ? new Date(s.updatedAt).toLocaleString('de-DE') : '';
-      return `<div class="model-dropdown__item claude-sessions__item" data-idx="${i}">
-        <div class="claude-sessions__title">${escapeHtml(title)}</div>
-        <div class="claude-sessions__meta">${escapeHtml(trunc(s.cwd))}${when ? ' · ' + escapeHtml(when) : ''}</div>
-      </div>`;
-    }).join('');
-    dd.querySelectorAll('.claude-sessions__item').forEach(el => {
-      el.addEventListener('click', () => { resumeClaudeSession(sorted[Number(el.dataset.idx)]); dd.remove(); });
-    });
-  }
-  const close = (ev) => {
-    if (!dd.contains(ev.target) && ev.target !== btn) { dd.remove(); document.removeEventListener('click', close, true); }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 0);
-}
-
-/** Resume a Claude Code session in a new tab (history rendering is a follow-up). */
-async function resumeClaudeSession(s) {
-  if (!s || !s.sessionId) return;
-  const label = '🔌 ' + (s.title || 'Claude Code');
-  const tabId = await createTab(label, undefined, 'claude-code');
-  const tab = tabs.get(tabId);
-  if (!tab) return;
-  tab.sessionId = s.sessionId;
-  tab.cwd = s.cwd || null;
-  tab._sessionName = s.title || null;
-  updateModelSelectBtn(tabId);
-  const note = document.createElement('div');
-  note.className = 'stream-session-context';
-  note.innerHTML = `<div class="stream-session-context__footer">🕘 Claude-Code-Session „${escapeHtml(s.title || String(s.sessionId).slice(0, 8))}" fortgesetzt — der bisherige Verlauf wird noch nicht angezeigt, das Gespräch läuft aber mit vollem Kontext weiter.</div>`;
-  tab.streamEl.insertBefore(note, tab.statusEl);
-  saveOpenTabs();
 }
 
 /**
@@ -6755,7 +6694,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTooltips();
   initTabModelSelector();
   initTabModeSelector();
-  initClaudeSessionsBtn();
   initGeminiModeToggle();
   initContextInfo();
   initOnboarding();
