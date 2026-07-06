@@ -2209,6 +2209,34 @@ function isSubscriptionProvider(provider) {
   return provider === 'claude-code';
 }
 
+// Which app features each provider actually supports. Unsupported ones are hidden
+// from the UI while a tab of that provider is active. (Claude Code brings its own
+// skills/agents/MCP; Gemini is context-light with no session persistence.)
+const PROVIDER_CAPABILITIES = {
+  copilot:       { skills: true,  agents: true,  mcp: true,  sessions: true },
+  'claude-code': { skills: false, agents: false, mcp: false, sessions: true },
+  anthropic:     { skills: true,  agents: true,  mcp: false, sessions: true },
+  gemini:        { skills: false, agents: false, mcp: false, sessions: false },
+  openai:        { skills: true,  agents: true,  mcp: false, sessions: true },
+  glm:           { skills: true,  agents: true,  mcp: false, sessions: true },
+  ollama:        { skills: true,  agents: true,  mcp: false, sessions: true },
+};
+
+/** Whether a provider supports a given app feature (default true if unknown). */
+function providerSupports(provider, feature) {
+  const caps = PROVIDER_CAPABILITIES[provider] || PROVIDER_CAPABILITIES.copilot;
+  return caps[feature] !== false;
+}
+
+/** Show/hide sidebar sections based on the active provider's capabilities. */
+function updateSidebarForProvider(provider) {
+  const sections = { sessions: 'sessionsSection', skills: 'skillsSection', agents: 'agentsSection', mcp: 'mcpSection' };
+  for (const [feature, id] of Object.entries(sections)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = providerSupports(provider, feature) ? '' : 'none';
+  }
+}
+
 /** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {
   const el = document.getElementById('sessionProvider');
@@ -2350,9 +2378,12 @@ function updateModelSelectBtn(tabId) {
  */
 function updateProviderSpecificControls(tabId) {
   const tab = tabs.get(tabId ?? activeTabId);
-  const isClaudeCode = tab && getTabProvider(tab) === 'claude-code';
+  const provider = tab ? getTabProvider(tab) : 'copilot';
+  const isClaudeCode = provider === 'claude-code';
   const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
   if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
+  // Hide sidebar sections the active provider doesn't support (skills/agents/MCP/sessions).
+  updateSidebarForProvider(provider);
 }
 
 /**

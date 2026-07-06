@@ -35,7 +35,7 @@
       <!-- Scrollable sections wrapper -->
       <div class="sidebar__sections">
       <!-- Sessions Section -->
-      <div class="sidebar__section" data-icon="📂">
+      <div class="sidebar__section" id="sessionsSection" data-icon="📂">
         <div class="sidebar__header" onclick="toggleSection('sessions')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="sessionsChevron">▾</span> 📂 Sessions</span>
           <span class="sidebar__badge" id="sessionCount" data-tooltip="Anzahl Sessions">0</span>
@@ -49,7 +49,7 @@
       </div>
 
       <!-- Skills Section -->
-      <div class="sidebar__section" data-icon="🛠️">
+      <div class="sidebar__section" id="skillsSection" data-icon="🛠️">
         <div class="sidebar__header" onclick="toggleSection('skills')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
           <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadSkills()" data-tooltip="Skills neu laden" aria-label="Skills neu laden">↻</button>
@@ -62,7 +62,7 @@
       </div>
 
       <!-- Agents Section -->
-      <div class="sidebar__section" data-icon="🤖">
+      <div class="sidebar__section" id="agentsSection" data-icon="🤖">
         <div class="sidebar__header" onclick="toggleSection('agents')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
           <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadAgents()" data-tooltip="Agents neu laden" aria-label="Agents neu laden">↻</button>
@@ -74,7 +74,7 @@
       </div>
 
       <!-- MCP-Server Sektion -->
-      <div class="sidebar__section" data-icon="🔌">
+      <div class="sidebar__section" id="mcpSection" data-icon="🔌">
         <div class="sidebar__header" onclick="toggleSection('mcp')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="mcpChevron">▾</span> 🔌 MCP-Server</span>
           <span class="sidebar__badge" id="mcpCount" data-tooltip="Verbunden / Gesamt"></span>
