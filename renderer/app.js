@@ -5193,14 +5193,28 @@ async function renderCopilotProviderRow(list, p) {
   const controls = row.querySelector('.providers-row__controls');
 
   // Claude Code: launched on demand via npx; billed through the subscription.
-  // Live auth detection (claude CLI + /status) is a TODO — show guidance for now.
+  // Live-detect the CLI; the subscription login itself can't be checked
+  // non-interactively, so we point the user to `claude` for it.
   if (p.id === 'claude-code') {
-    statusEl.textContent = 'ℹ Abo-Login über die „claude"-CLI';
-    statusEl.classList.add('is-set');
+    let cc = { installed: false };
+    try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+    if (cc.installed) {
+      statusEl.textContent = '● „claude"-CLI installiert' + (cc.version ? ` (v${cc.version})` : '');
+      statusEl.classList.add('is-set');
+    } else {
+      statusEl.textContent = '⚠ „claude"-CLI nicht gefunden';
+    }
     const hint = document.createElement('span');
     hint.className = 'providers-row__hint';
-    hint.textContent = 'Einmalig die „claude"-CLI installieren und mit dem Abo einloggen. Kein API-Key nötig — für Claude Code wird ANTHROPIC_API_KEY bewusst entfernt.';
+    hint.textContent = cc.installed
+      ? 'Melde dich einmalig mit dem Abo an (Terminal: „claude" → Login). Kein API-Key nötig — ANTHROPIC_API_KEY wird für Claude Code entfernt.'
+      : 'Installiere die „claude"-CLI (npm i -g @anthropic-ai/claude-code) und melde dich mit dem Abo an.';
     controls.appendChild(hint);
+    const recheck = document.createElement('button');
+    recheck.className = 'action-btn';
+    recheck.textContent = 'Status prüfen';
+    recheck.addEventListener('click', () => renderProvidersSettings());
+    controls.appendChild(recheck);
     return;
   }
 

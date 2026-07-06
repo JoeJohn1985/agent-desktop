@@ -86,6 +86,8 @@ contextBridge.exposeInMainWorld('copilot', {
     silentCommand: (tabId, command) => ipcRenderer.invoke('copilot:silentCommand', tabId, command),
     /** @ipc copilot:respondPermission — Answers an ACP permission request. */
     respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('copilot:respondPermission', tabId, requestId, optionId),
+    /** @ipc claudecode:status — {installed, version} for the Claude Code CLI. */
+    claudeCodeStatus: () => ipcRenderer.invoke('claudecode:status'),
     /** @ipc copilot:setApproval — Toggle a tab between manual approval and allow-all. */
     setApproval: (tabId, manualApproval) => ipcRenderer.invoke('copilot:setApproval', tabId, manualApproval),
     /** @ipc copilot:getCwd @returns {Promise<string>} Current working directory */

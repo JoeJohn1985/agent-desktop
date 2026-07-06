@@ -435,6 +435,24 @@ ipcMain.handle('copilot:setApproval', async (_event, tabId, manualApproval) => {
   }
 });
 
+/** @ipc claudecode:status — Whether the Claude Code CLI is installed (via `claude --version`). */
+ipcMain.handle('claudecode:status', async () => {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      const proc = spawn('claude', ['--version'], { shell: true, windowsHide: true });
+      let out = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.on('error', () => finish({ installed: false }));
+      proc.on('close', (code) => finish({ installed: code === 0, version: out.trim() }));
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ installed: false }); }, 6000);
+    } catch (_) {
+      finish({ installed: false });
+    }
+  });
+});
+
 /** @ipc copilot:respondPermission — Answers an agent permission request (ACP). */
 ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId) => {
   const client = backends.get(tabId);
