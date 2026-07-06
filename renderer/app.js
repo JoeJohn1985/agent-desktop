@@ -1754,6 +1754,15 @@ function initCopilotIPC() {
             tab.cwd = event.cwd;
             loadTodos(tab.cwd);
           }
+          // Carry a name over to the freshly-created session (folder change on a
+          // named Claude Code tab replaced the old session with this new one).
+          if (tab._renameOnNextSession) {
+            setSessionName(event.sessionId, tab._renameOnNextSession);
+            tab._sessionName = tab._renameOnNextSession;
+            tab.label = '🤖 ' + tab._renameOnNextSession;
+            tab._renameOnNextSession = null;
+            renderTabs();
+          }
           // Persist selected model for this new session
           if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
           // Persist CWD for this session
@@ -3091,19 +3100,71 @@ function renderSessions(list) {
 async function pickSessionCwd(sessionId) {
   const selected = await copilot.folders.browse();
   if (!selected) return;
-  saveSessionCwd(sessionId, selected);
 
+  // If the session is open in a tab, route through changeTabCwd (Claude Code
+  // replaces the session with a fresh one in the new folder). Otherwise just
+  // update the stored cwd.
+  let handled = false;
   for (const [tabId, tab] of tabs) {
-    if (tab.sessionId === sessionId) {
-      tab.cwd = selected;
-      if (tabId === activeTabId) {
-        loadProjectSkillsAndAgents(selected);
-        loadTodos(selected); // todos are project-scoped → follow the new cwd
-      }
-    }
+    if (tab.sessionId === sessionId) { await changeTabCwd(tabId, tab, selected); handled = true; }
   }
+  if (!handled) saveSessionCwd(sessionId, selected);
 
   await loadSessions();
+}
+
+/**
+ * Change a tab's working directory. Claude Code sessions are bound to their
+ * folder, so changing the folder on a Claude Code tab starts a FRESH session in
+ * the new folder (the old session stays in Claude Code's own store). Other
+ * providers just switch the cwd on the same session.
+ * @param {number} tabId
+ * @param {Object} tab
+ * @param {string} newCwd
+ */
+async function changeTabCwd(tabId, tab, newCwd) {
+  if (getTabProvider(tab) === 'claude-code' && tab.sessionId) {
+    const oldId = tab.sessionId;
+    const name = tab._sessionName || getSessionName(oldId) || null;
+    // Drop our named reference to the old session — this tab now starts anew.
+    deleteNamedSessionEntry(oldId);
+    try { await copilot.chat.resetBackend(tabId); } catch (_) { /* ignore */ }
+    tab.sessionId = null;
+    tab.cwd = newCwd;
+    tab._renameOnNextSession = name; // re-apply the name to the new session
+    clearTabStream(tab);
+    const note = document.createElement('div');
+    note.className = 'stream-session-context';
+    note.innerHTML = `<div class="stream-session-context__footer">📁 Neuer Ordner gewählt — es wird eine <strong>neue</strong> Claude-Code-Session in <code>${escapeHtml(newCwd)}</code> gestartet (die alte bleibt in Claude Code erhalten).</div>`;
+    tab.streamEl.insertBefore(note, tab.statusEl);
+    saveOpenTabs();
+  } else {
+    tab.cwd = newCwd;
+    if (tab.sessionId) saveSessionCwd(tab.sessionId, newCwd);
+  }
+  if (tabId === activeTabId) {
+    loadProjectSkillsAndAgents(newCwd);
+    loadTodos(newCwd); // todos are project-scoped → follow the new cwd
+  }
+}
+
+/** Remove all message bubbles from a tab's stream, keeping the status line. */
+function clearTabStream(tab) {
+  for (const el of [...tab.streamEl.children]) {
+    if (el !== tab.statusEl) el.remove();
+  }
+  tab._responseEl = null;
+  tab._responseRaw = '';
+  tab._toolResultEls = new Map();
+}
+
+/** Delete a named-session entry (used when a Claude Code session is replaced). */
+function deleteNamedSessionEntry(sessionId) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    delete all[sessionId];
+    setPref('namedSessions', all);
+  }
 }
 
 /**

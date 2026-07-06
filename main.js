@@ -472,6 +472,17 @@ ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId)
   return { success: true };
 });
 
+/** @ipc copilot:resetBackend — Destroys a tab's backend so the next prompt starts fresh
+ *  (e.g. Claude Code changing folder → a new session in the new cwd). */
+ipcMain.handle('copilot:resetBackend', async (_event, tabId) => {
+  const client = backends.get(tabId);
+  if (client) {
+    try { await client.destroy(); } catch (_) { /* ignore */ }
+    backends.delete(tabId);
+  }
+  return { success: true };
+});
+
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
 ipcMain.handle('copilot:newTab', () => {
   return nextTabId++;
