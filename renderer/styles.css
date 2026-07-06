@@ -856,6 +856,19 @@ body {
 }
 .tab__short { flex-shrink: 0; }
 .tab__app-icon { width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
+.tab__provider-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-secondary); }
+
+/* Provider brand icons (inline SVG, monochrome via currentColor) */
+.provider-icon { width: 14px; height: 14px; display: inline-block; vertical-align: middle; flex-shrink: 0; }
+.provider-icon--letter {
+  width: 14px; height: 14px; line-height: 14px; text-align: center;
+  font-size: 9px; font-weight: 700; border-radius: 3px;
+  background: var(--bg-hover); color: var(--text-muted);
+}
+.model-dropdown__provider-icon, .providers-row__icon {
+  display: inline-flex; align-items: center; margin-right: 6px;
+  color: var(--text-secondary); vertical-align: middle;
+}
 .tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
 .tab--active {
   color: var(--text-primary);
@@ -2227,13 +2240,10 @@ mark.chat-search-highlight--active {
 }
 
 .session-card__provider {
-  margin-left: 6px;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-hover);
-  color: var(--text-muted);
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--text-secondary);
   vertical-align: middle;
 }
 

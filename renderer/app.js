@@ -784,18 +784,13 @@ function renderTabs() {
       el.appendChild(badge);
     }
 
-    const hasBotIcon = tab.label.startsWith('🤖');
-    const fullLabel = tab.label.replace(/^🤖\s*/, '');
+    const fullLabel = tab.label.replace(/^(🤖|🔌)\s*/, '');
 
-    // For default/Copilot chat tabs (🤖 prefix), show the app icon in place of
-    // the robot emoji.
-    if (hasBotIcon) {
-      const appIcon = document.createElement('img');
-      appIcon.className = 'tab__app-icon';
-      appIcon.src = '../assets/icon.png';
-      appIcon.alt = '';
-      el.appendChild(appIcon);
-    }
+    // Provider brand icon before the tab name (instead of the app logo).
+    const iconWrap = document.createElement('span');
+    iconWrap.className = 'tab__provider-icon';
+    iconWrap.innerHTML = providerIconHtml(getTabProvider(tab));
+    el.appendChild(iconWrap);
 
     // Short label (first 3 chars) shown only when the tab is collapsed — CSS
     // truncation looked cut-off, so we render the exact short text ourselves.
@@ -2199,6 +2194,11 @@ function getTabProvider(tab) {
 
 const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
 
+/** Inline brand-icon HTML for a provider (via provider-icons.js). */
+function providerIconHtml(provider, cls) {
+  return window.ProviderIcons ? window.ProviderIcons.iconSvg(provider, cls) : '';
+}
+
 /** ACP-based backends (CLI/adapter over stdio), as opposed to direct-API providers. */
 function isAcpProvider(provider) {
   return provider === 'copilot' || provider === 'claude-code';
@@ -2215,7 +2215,7 @@ function updateProviderSelectBtn(tabId) {
   if (!el) return;
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = getTabProvider(tab);
-  el.innerHTML = `${escapeHtml(`${PROVIDER_ICON} ${PROVIDER_SHORT[provider] || provider}`)}${providerStageBadge(provider)}`;
+  el.innerHTML = `${providerIconHtml(provider)} ${escapeHtml(PROVIDER_SHORT[provider] || provider)}${providerStageBadge(provider)}`;
   // Subtle accent for non-default (direct-API) providers.
   el.classList.toggle('session-actions__provider--api', provider !== 'copilot');
   updateGeminiModeBtn(tabId);
@@ -3058,16 +3058,15 @@ function renderSessions(list) {
     const title = s.name;
     const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
     const cwdBtnClass = s.cwd ? 'session-card__cwd-btn' : 'session-card__cwd-btn session-card__cwd-btn--empty';
-    // Tag non-Copilot sessions so the source backend is clear in the sidebar.
+    // Show the source provider's brand icon on each session card.
     const provider = getSessionProvider(s.id) || 'copilot';
-    const provTag = provider === 'claude-code'
-      ? '<span class="session-card__provider" data-tooltip="Claude Code (Abo)">🟣 Claude</span>' : '';
+    const provIcon = `<span class="session-card__provider" data-tooltip="${escapeAttr(PROVIDER_SHORT[provider] || provider)}">${providerIconHtml(provider)}</span>`;
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
-            <div class="session-card__title">${escapeHtml(title)}${provTag}</div>
+            <div class="session-card__title">${provIcon}${escapeHtml(title)}</div>
           </div>
           <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
           <button class="${cwdBtnClass}" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}" aria-label="Arbeitsverzeichnis ändern">📁</button>
@@ -4730,7 +4729,7 @@ function openAddTabProviderMenu(btn) {
     let badge = providerStageBadge(p.id);
     if (!p.active) badge += ' <span class="model-dropdown__hint">in Vorbereitung</span>';
     else if (!hasKey) badge += ' <span class="model-dropdown__hint">Key nötig</span>';
-    item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
+    item.innerHTML = `<span class="model-dropdown__provider-icon">${providerIconHtml(p.id)}</span><span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
     item.addEventListener('click', () => {
       if (!p.active) {
         showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
@@ -5220,7 +5219,7 @@ async function renderProvidersSettings() {
       </div>` : '';
     row.innerHTML = `
       <div class="providers-row__head">
-        <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+        <span class="providers-row__name"><span class="providers-row__icon">${providerIconHtml(p.id)}</span>${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
         ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
         ${providerStageBadge(p.id).trim()}
         <span class="providers-row__status ${hasKey || p.keyless ? 'is-set' : ''}">${status}</span>
