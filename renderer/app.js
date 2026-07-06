@@ -881,6 +881,10 @@ function startTabRename(tabId, tabEl, labelSpan) {
       if (tab.sessionId) {
         // Existing session — save name in preferences (CLI-safe)
         setSessionName(tab.sessionId, newName);
+        // Persist provider/cwd now that the session has a namedSessions entry.
+        saveSessionProvider(tab.sessionId, getTabProvider(tab));
+        if (tab.cwd) saveSessionCwd(tab.sessionId, tab.cwd);
+        if (tab.selectedModel) saveSessionModel(tab.sessionId, tab.selectedModel);
       } else {
         // No session yet — create one
         try {
@@ -894,6 +898,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
             // would lose its provider and fall back to Copilot on resume.
             if (tab.selectedModel) saveSessionModel(newId, tab.selectedModel);
             if (tab.cwd) saveSessionCwd(newId, tab.cwd);
+            saveSessionProvider(newId, getTabProvider(tab));
             saveOpenTabs();
           }
         } catch (e) {
@@ -1746,6 +1751,8 @@ function initCopilotIPC() {
           if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
+          // Persist provider so a resumed session uses the right backend.
+          saveSessionProvider(event.sessionId, getTabProvider(tab));
           saveOpenTabs();
           // Show todos panel (project-scoped by cwd) for this session
           if (!activeSessionId) {
@@ -2973,6 +2980,21 @@ function getSessionCwd(sessionId) {
   return entry?.cwd ?? null;
 }
 
+/** Persist the provider (ProviderID) of a named session so resume uses the right backend. */
+function saveSessionProvider(sessionId, provider) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].provider = provider;
+    setPref('namedSessions', all);
+  }
+}
+
+/** Get the persisted provider for a session (null → treat as Copilot). */
+function getSessionProvider(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return entry?.provider || null;
+}
+
 /** Persist the per-session manual-approval flag in namedSessions. */
 function saveSessionApproval(sessionId, manualApproval) {
   const all = getNamedSessions();
@@ -3082,12 +3104,16 @@ function renderSessions(list) {
     const title = s.name;
     const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
     const cwdBtnClass = s.cwd ? 'session-card__cwd-btn' : 'session-card__cwd-btn session-card__cwd-btn--empty';
+    // Tag non-Copilot sessions so the source backend is clear in the sidebar.
+    const provider = getSessionProvider(s.id) || 'copilot';
+    const provTag = provider === 'claude-code'
+      ? '<span class="session-card__provider" data-tooltip="Claude Code (Abo)">🟣 Claude</span>' : '';
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
-            <div class="session-card__title">${escapeHtml(title)}</div>
+            <div class="session-card__title">${escapeHtml(title)}${provTag}</div>
           </div>
           <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
           <button class="${cwdBtnClass}" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}" aria-label="Arbeitsverzeichnis ändern">📁</button>
@@ -3156,7 +3182,11 @@ async function resumeSession(sessionId) {
   const customName = getSessionName(sessionId);
   const label = '🤖 ' + (customName || sessionId.substring(0, 8));
 
-  const tabId = await createTab(label);
+  // Resume with the session's own provider (Copilot vs Claude Code — they share
+  // model ids, so the ProviderID must come from the stored session, not the model).
+  const provider = getSessionProvider(sessionId) || 'copilot';
+  const sessionModel = getSessionModel(sessionId);
+  const tabId = await createTab(label, sessionModel || undefined, provider);
   const tab = tabs.get(tabId);
   if (!tab) return;
 
@@ -3165,12 +3195,8 @@ async function resumeSession(sessionId) {
   // Restore session denied tools from namedSessions
   tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
 
-  // Restore persisted model for this session
-  const sessionModel = getSessionModel(sessionId);
-  if (sessionModel) {
-    tab.selectedModel = sessionModel;
-    updateModelSelectBtn(tabId);
-  }
+  // Model was already applied via createTab(initialModel); just refresh the button.
+  if (sessionModel) updateModelSelectBtn(tabId);
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;

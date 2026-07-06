@@ -2226,6 +2226,17 @@ mark.chat-search-highlight--active {
   color: var(--text-muted);
 }
 
+.session-card__provider {
+  margin-left: 6px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 /* Claude Code session resume picker */
 .claude-sessions-dropdown { padding: 4px; }
 .claude-sessions__item { display: block; padding: 6px 10px; }
