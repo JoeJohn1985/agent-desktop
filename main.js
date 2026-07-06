@@ -199,6 +199,31 @@ function createWindow() {
  * @param {string} [options.cwd] - Working directory override
  * @returns {Promise<number>} The tab ID
  */
+/**
+ * Base AcpClient options for the Claude Code adapter (shared by the prompt path
+ * and the session-list/resume path). Model/mode/approval are layered on top.
+ * @param {string} cwd
+ */
+function claudeCodeClientOptions(cwd) {
+  return {
+    cwd,
+    command: 'npx',
+    // Current adapter (@zed-industries/claude-code-acp is deprecated). -y installs
+    // it non-interactively on first run.
+    baseArgs: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
+    shell: true,
+    // The adapter returns slash-command output (/context) on stderr wrapped in
+    // <local-command-stdout>, not via the ACP response.
+    localCommandStdout: true,
+    // Bill the Claude subscription, not the API.
+    stripEnv: ['ANTHROPIC_API_KEY'],
+    // model/mode are session config options, not session/set_model/set_mode.
+    useConfigOptions: true,
+    mcpServers: [],
+  };
+}
+
 async function sendCopilotPrompt(tabId, prompt, options = {}) {
   const cwd = options.cwd || COPILOT_CWD;
   // The explicit ProviderID from the renderer is authoritative; fall back to
@@ -224,32 +249,11 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   // ── ACP path (Copilot / Claude Code) ─────────────────────────
   let clientOptions;
   if (provider === 'claude-code') {
-    // Claude Code via the Zed ACP adapter. Model is applied over ACP, not flags.
-    // Strip ANTHROPIC_API_KEY so it bills the Claude subscription, not the API.
     clientOptions = {
-      cwd,
-      command: 'npx',
-      // Current adapter (the old @zed-industries/claude-code-acp is deprecated and
-      // pins an older SDK that lacks newer models like Sonnet 5). Use -y so npx
-      // installs it non-interactively on first run.
-      baseArgs: ['-y', '@agentclientprotocol/claude-agent-acp'],
-      // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
-      shell: true,
-      // The adapter returns slash-command output (/context) on stderr wrapped in
-      // <local-command-stdout>, not via the ACP response.
-      localCommandStdout: true,
-      stripEnv: ['ANTHROPIC_API_KEY'],
-      // Off → auto-approve permission requests in the backend (no UI prompt).
+      ...claudeCodeClientOptions(cwd),
       autoApprovePermissions: !options.manualApproval,
-      // This adapter sets model/mode via session/set_config_option (it answers
-      // "method not found" to session/set_model / session/set_mode).
-      useConfigOptions: true,
-      // Diagnostic: probe once whether the adapter supports session/list (→ tells
-      // us if session resume/interop is feasible). Logged, harmless.
-      probeSessionList: true,
       model: options.model,
       mode: options.mode,
-      mcpServers: [],
     };
   } else {
     clientOptions = {
@@ -466,6 +470,23 @@ ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId)
     client.respondPermission(requestId, optionId);
   }
   return { success: true };
+});
+
+/** @ipc copilot:listSessions — Lists the ACP backend's sessions (Claude Code resume picker). */
+ipcMain.handle('copilot:listSessions', async (_event, tabId, cwd) => {
+  try {
+    let client = backends.get(tabId);
+    if (!client) {
+      client = new AcpClient(tabId, sendToRenderer, claudeCodeClientOptions(cwd || COPILOT_CWD));
+      client.__provider = 'claude-code';
+      backends.set(tabId, client);
+    }
+    if (client.state === 'dead') await client.start();
+    const r = await client.listSessions();
+    return { success: true, sessions: (r && r.sessions) || [] };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), sessions: [] };
+  }
 });
 
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
