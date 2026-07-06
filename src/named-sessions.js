@@ -101,14 +101,31 @@ function createNamedSessionsManager(store) {
     return entry.cwd ?? null;
   }
 
+  /**
+   * Save the provider (ProviderID) for a named session so it can be resumed with
+   * the right backend (Copilot vs Claude Code — they share model ids).
+   * @param {string} sessionId
+   * @param {string} provider
+   */
+  function saveSessionProvider(sessionId, provider) {
+    if (!store.namedSessions || !store.namedSessions[sessionId]) return;
+    store.namedSessions[sessionId].provider = provider;
+  }
+
+  /** Get the persisted provider for a session (null if unknown → treat as copilot). */
+  function getSessionProvider(sessionId) {
+    const entry = (store.namedSessions || {})[sessionId];
+    return (entry && entry.provider) || null;
+  }
+
   function getSortedList() {
     const all = getAll();
     return Object.entries(all)
-      .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '' }))
+      .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '', provider: entry.provider || 'copilot' }))
       .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
   }
 
-  return { getAll, getName, getEntry, setName, remove, touch, getDeniedTools, saveDeniedTools, saveSessionCwd, getSessionCwd, getSortedList };
+  return { getAll, getName, getEntry, setName, remove, touch, getDeniedTools, saveDeniedTools, saveSessionCwd, getSessionCwd, saveSessionProvider, getSessionProvider, getSortedList };
 }
 
 module.exports = {

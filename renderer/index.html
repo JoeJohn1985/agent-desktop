@@ -205,6 +205,9 @@
         <div class="model-select-wrapper">
           <button class="session-actions__btn" id="btnContextInfo" data-tooltip="Kontext-Auslastung anzeigen">📊 Kontext</button>
         </div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnApprovalToggle" data-tooltip="Aktionen bestätigen / alles erlauben (pro Tab)">🔓 Auto</button>
+        </div>
         <div class="tools-popup-wrapper">
           <button class="session-actions__btn" id="btnSessionTools" data-tooltip="Session Shell Tools verwalten">🔧 Tools</button>
           <!-- Session Tools Popup -->
@@ -272,6 +275,7 @@
         </div>
         <div class="dev-console__body" id="devConsoleBody"></div>
       </div>
+      <div class="permission-dropup" id="permissionDropup" style="display:none;"></div>
       <div class="chat-input-bar">
         <button class="chat-terminal-btn" id="btnExportChat" data-tooltip="Chat als Markdown exportieren">📥</button>
         <div class="chat-input-wrapper">
@@ -412,6 +416,16 @@
               </label>
             </div>
             <div class="settings__hint">Wenn aktiviert, darf Copilot auf alle Dateipfade zugreifen — nicht nur das Arbeitsverzeichnis.</div>
+          </div>
+          <div class="settings__group">
+            <div class="settings__row">
+              <label class="settings__label">Aktionen manuell bestätigen (Default für neue Tabs)</label>
+              <label class="settings__toggle">
+                <input type="checkbox" id="settManualApproval" />
+                <span class="settings__toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings__hint">Standard für neue Tabs: An = vor jeder Aktion nachfragen (Dropup über der Eingabe), Aus = alles erlauben (voll agentisch). Pro Tab jederzeit über den 🔓/🔒-Schalter in der Tab-Leiste umstellbar (wird je Session gespeichert).</div>
           </div>
           <div class="settings__group">
             <label class="settings__label">Zusätzliche Ordner</label>

@@ -1,4 +1,4 @@
-# Copilot Desktop — Setup
+# Agent Desktop — Setup
 # Installiert Dependencies und erstellt Desktop-Verknüpfung.
 # Keine Admin-Rechte erforderlich.
 
@@ -10,23 +10,49 @@ function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Fail($msg) { Write-Host "  [ERROR] $msg" -ForegroundColor Red }
 
 Write-Host "`n===========================================" -ForegroundColor Magenta
-Write-Host "  Copilot Desktop — Setup" -ForegroundColor Magenta
+Write-Host "  Agent Desktop — Setup" -ForegroundColor Magenta
 Write-Host "===========================================`n" -ForegroundColor Magenta
 
-# ── 1. Node.js prüfen ────────────────────────────────────────
+# ── 1. Node.js prüfen (und bei Bedarf installieren) ──────────
 Write-Step "Node.js prüfen..."
-$nodeVersion = node --version 2>$null
-if ($nodeVersion) {
-    $major = [int]($nodeVersion -replace 'v(\d+).*','$1')
-    if ($major -ge 18) {
-        Write-OK "Node.js $nodeVersion"
+
+function Update-PathFromEnvironment {
+    # Nach einer Installation kennt die laufende Session den neuen PATH noch nicht.
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user    = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = @($machine, $user | Where-Object { $_ }) -join ';'
+}
+
+# Get-Command statt direktem Aufruf: löst bei fehlendem Node KEINEN
+# terminierenden Fehler aus (ErrorActionPreference=Stop).
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host "  Node.js nicht gefunden — versuche automatische Installation via winget..." -ForegroundColor White
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        try {
+            winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+        } catch {
+            Write-Host "  winget-Installation nicht abgeschlossen: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+        Update-PathFromEnvironment
     } else {
-        Write-Fail "Node.js $nodeVersion ist zu alt (mind. 18 benötigt)."
-        Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
-        exit 1
+        Write-Host "  winget ist auf diesem System nicht verfügbar." -ForegroundColor DarkYellow
     }
+}
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Fail "Node.js nicht gefunden / Auto-Installation fehlgeschlagen."
+    Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
+    Write-Host "  und oeffne danach das Terminal neu (PATH aktualisieren)." -ForegroundColor White
+    exit 1
+}
+
+$nodeVersion = & node --version
+$major = [int]($nodeVersion -replace 'v(\d+).*','$1')
+if ($major -ge 18) {
+    Write-OK "Node.js $nodeVersion"
 } else {
-    Write-Fail "Node.js nicht gefunden."
+    Write-Fail "Node.js $nodeVersion ist zu alt (mind. 18 benötigt)."
     Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
     exit 1
 }
@@ -53,7 +79,7 @@ if (-not (Test-Path $electronExe)) {
 
 $iconPath = Join-Path $appRoot "assets\icon.ico"
 $desktopPath = [Environment]::GetFolderPath("Desktop")
-$shortcutPath = Join-Path $desktopPath "Copilot Desktop.lnk"
+$shortcutPath = Join-Path $desktopPath "Agent Desktop.lnk"
 
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -61,7 +87,7 @@ $shortcut.TargetPath = $electronExe
 $shortcut.Arguments = "."
 $shortcut.WorkingDirectory = $appRoot
 $shortcut.IconLocation = "$iconPath, 0"
-$shortcut.Description = "Copilot Desktop App"
+$shortcut.Description = "Agent Desktop"
 $shortcut.Save()
 
 Write-OK "Verknüpfung erstellt: $shortcutPath"

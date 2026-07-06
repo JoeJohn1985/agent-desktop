@@ -199,9 +199,36 @@ function createWindow() {
  * @param {string} [options.cwd] - Working directory override
  * @returns {Promise<number>} The tab ID
  */
+/**
+ * Base AcpClient options for the Claude Code adapter (shared by the prompt path
+ * and the session-list/resume path). Model/mode/approval are layered on top.
+ * @param {string} cwd
+ */
+function claudeCodeClientOptions(cwd) {
+  return {
+    cwd,
+    command: 'npx',
+    // Current adapter (@zed-industries/claude-code-acp is deprecated). -y installs
+    // it non-interactively on first run.
+    baseArgs: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
+    shell: true,
+    // The adapter returns slash-command output (/context) on stderr wrapped in
+    // <local-command-stdout>, not via the ACP response.
+    localCommandStdout: true,
+    // Bill the Claude subscription, not the API.
+    stripEnv: ['ANTHROPIC_API_KEY'],
+    // model/mode are session config options, not session/set_model/set_mode.
+    useConfigOptions: true,
+    mcpServers: [],
+  };
+}
+
 async function sendCopilotPrompt(tabId, prompt, options = {}) {
   const cwd = options.cwd || COPILOT_CWD;
-  const provider = getModelProvider(options.model || '');
+  // The explicit ProviderID from the renderer is authoritative; fall back to
+  // deriving it from the model only for legacy callers.
+  const provider = options.provider || getModelProvider(options.model || '');
 
   let client = backends.get(tabId);
 
@@ -212,30 +239,45 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
     client = null;
   }
 
-  if (provider !== 'copilot') {
+  // ACP-based backends: Copilot CLI and Claude Code (via the ACP adapter).
+  // Everything else is a direct-API backend.
+  const ACP_PROVIDERS = new Set(['copilot', 'claude-code']);
+  if (!ACP_PROVIDERS.has(provider)) {
     return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
   }
 
-  // ── Copilot CLI (ACP) path ───────────────────────────────────
-  const clientOptions = {
-    cwd,
-    copilotBin: COPILOT_BIN,
-    model: options.model,
-    mode: options.mode,
-    deniedTools: options.deniedTools,
-    addDirs: options.addDirs || [],
-    allowAllPaths: options.allowAllPaths,
-    mcpServers: getAcpMcpServers(cwd),
-  };
-
-  // Always include global CWD as additional path when using a different CWD
-  if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
-    clientOptions.addDirs.push(COPILOT_CWD);
+  // ── ACP path (Copilot / Claude Code) ─────────────────────────
+  let clientOptions;
+  if (provider === 'claude-code') {
+    clientOptions = {
+      ...claudeCodeClientOptions(cwd),
+      autoApprovePermissions: !options.manualApproval,
+      model: options.model,
+      mode: options.mode,
+    };
+  } else {
+    clientOptions = {
+      cwd,
+      copilotBin: COPILOT_BIN,
+      model: options.model,
+      mode: options.mode,
+      deniedTools: options.deniedTools,
+      addDirs: options.addDirs || [],
+      allowAllPaths: options.allowAllPaths,
+      // Manual approval → drop --allow-all so the CLI asks via request_permission.
+      allowAll: !options.manualApproval,
+      autoApprovePermissions: !options.manualApproval,
+      mcpServers: getAcpMcpServers(cwd),
+    };
+    // Always include global CWD as an additional path when using a different CWD
+    if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
+      clientOptions.addDirs.push(COPILOT_CWD);
+    }
   }
 
   if (!client) {
     client = new AcpClient(tabId, sendToRenderer, clientOptions);
-    client.__provider = 'copilot';
+    client.__provider = provider;
     backends.set(tabId, client);
   } else {
     // Update options if they changed (e.g., model switch)
@@ -376,6 +418,58 @@ ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
     console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
     return { success: false, error: err?.message || String(err) };
   }
+});
+
+/**
+ * @ipc copilot:setApproval — Switch a tab between manual approval and allow-all.
+ * Copilot needs a transparent process restart (--allow-all is a spawn flag);
+ * Claude Code applies live (backend reads autoApprovePermissions per request).
+ */
+ipcMain.handle('copilot:setApproval', async (_event, tabId, manualApproval) => {
+  const client = backends.get(tabId);
+  if (!client) return { success: false, error: 'Kein aktiver Client' };
+  const opts = { allowAll: !manualApproval, autoApprovePermissions: !manualApproval };
+  try {
+    if (client.__provider === 'copilot' && client.state !== 'dead' && client.sessionId) {
+      const sessionId = client.sessionId;
+      await client.stop();
+      client.updateOptions(opts);
+      await client.start();
+      await client.loadSession(sessionId);
+    } else {
+      client.updateOptions(opts);
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/** @ipc claudecode:status — Whether the Claude Code CLI is installed (via `claude --version`). */
+ipcMain.handle('claudecode:status', async () => {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      const proc = spawn('claude', ['--version'], { shell: true, windowsHide: true });
+      let out = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.on('error', () => finish({ installed: false }));
+      proc.on('close', (code) => finish({ installed: code === 0, version: out.trim() }));
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ installed: false }); }, 6000);
+    } catch (_) {
+      finish({ installed: false });
+    }
+  });
+});
+
+/** @ipc copilot:respondPermission — Answers an agent permission request (ACP). */
+ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId) => {
+  const client = backends.get(tabId);
+  if (client && typeof client.respondPermission === 'function') {
+    client.respondPermission(requestId, optionId);
+  }
+  return { success: true };
 });
 
 /** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */

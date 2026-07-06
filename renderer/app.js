@@ -174,13 +174,16 @@ function saveOpenTabs() {
   tabs.forEach((tab) => {
     // Persist the chosen model with every tab so the provider survives a
     // restart even for tabs saved before their first message (no sessionId).
+    // The ProviderID must be persisted explicitly — it can't always be derived
+    // from the model (Claude Code and the Anthropic API share the same model ids).
+    const provider = getTabProvider(tab);
     if (tab.sessionId) {
-      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null });
+      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null, provider });
       // Persist denied tools in namedSessions
       saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
-    } else if (tab.selectedModel && tab.selectedModel !== getDefaultModelId()) {
-      // Unsent tab with a non-default (e.g. Gemini/Anthropic) provider chosen.
-      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel });
+    } else if (provider !== getDefaultProvider() || (tab.selectedModel && tab.selectedModel !== getDefaultModelId())) {
+      // Unsent tab with a non-default provider/model chosen.
+      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel, provider });
     }
   });
   setPref('openTabs', openTabs);
@@ -202,7 +205,7 @@ async function restoreOpenTabs() {
       // Resolve the model up front (entry first, then per-session map) so the
       // provider is correct from creation — including unsent tabs without id.
       const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
-      const tabId = await createTab(label, model);
+      const tabId = await createTab(label, model, t.provider);
       const tab = tabs.get(tabId);
       if (tab) {
         tab.sessionId = t.sessionId || null;
@@ -555,8 +558,14 @@ function showNotification(message, type = 'info') {
  * @param {string} [label='🤖 Chat'] - Display label for the tab.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label, initialModel) {
+async function createTab(label, initialModel, provider) {
   const tabLabel = label || '🤖 Chat';
+  // The ProviderID is the authoritative discriminator (it determines available
+  // models and provider-specific behaviour). Prefer the explicit arg; else derive
+  // from the model (legacy), else the configured default provider.
+  const tabProvider = provider
+    || (initialModel ? window.RendererLogic.getModelProvider(initialModel) : null)
+    || getDefaultProvider();
   const tabId = await copilot.chat.newTab();
 
   // Create stream output element
@@ -592,7 +601,10 @@ async function createTab(label, initialModel) {
     _lastUsageTokens: null,
     _costUsd: 0,
     _sessionName: null,
-    selectedModel: initialModel || getDefaultModelId(),
+    provider: tabProvider,
+    // Per-tab manual-approval toggle; new tabs inherit the global default.
+    manualApproval: getSettings().manualApproval === true,
+    selectedModel: initialModel || getDefaultModelForProvider(tabProvider),
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -703,9 +715,14 @@ function switchTab(tabId) {
     chatInput?.focus();
   }
 
-  updateUsageDisplay(activeTab?._lastUsageParsed ?? null, activeTab?._lastUsageTokens ?? null, activeTab?._lastUsageText ?? null);
-  if (activeTab?.sessionId && !activeTab.isProcessing) {
-    refreshUsageDisplay(tabId);
+  if (activeTab && isSubscriptionProvider(getTabProvider(activeTab))) {
+    // Subscription (Claude Code): show the plan quota, not a USD/credit cost.
+    updateSubscriptionUsageDisplay(activeTab);
+  } else {
+    updateUsageDisplay(activeTab?._lastUsageParsed ?? null, activeTab?._lastUsageTokens ?? null, activeTab?._lastUsageText ?? null);
+    if (activeTab?.sessionId && !activeTab.isProcessing) {
+      refreshUsageDisplay(tabId);
+    }
   }
 }
 
@@ -864,6 +881,10 @@ function startTabRename(tabId, tabEl, labelSpan) {
       if (tab.sessionId) {
         // Existing session — save name in preferences (CLI-safe)
         setSessionName(tab.sessionId, newName);
+        // Persist provider/cwd now that the session has a namedSessions entry.
+        saveSessionProvider(tab.sessionId, getTabProvider(tab));
+        if (tab.cwd) saveSessionCwd(tab.sessionId, tab.cwd);
+        if (tab.selectedModel) saveSessionModel(tab.sessionId, tab.selectedModel);
       } else {
         // No session yet — create one
         try {
@@ -877,6 +898,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
             // would lose its provider and fall back to Copilot on resume.
             if (tab.selectedModel) saveSessionModel(newId, tab.selectedModel);
             if (tab.cwd) saveSessionCwd(newId, tab.cwd);
+            saveSessionProvider(newId, getTabProvider(tab));
             saveOpenTabs();
           }
         } catch (e) {
@@ -1190,6 +1212,9 @@ function sendMessage() {
   const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
 
   const sendTabId = activeTabId;
+  // Claude Code manages its own skills/agents — don't prepend the app's Copilot
+  // skill/agent prompt prefixes (they'd be meaningless there).
+  if (getTabProvider(tab) === 'claude-code') { agentPrefix = ''; skillPrefix = ''; }
   // Freeze the model this prompt actually runs on. The token delta measured after
   // completion must be priced at THIS model — not tab.selectedModel, which the
   // user may switch (for the next prompt) before /usage is read.
@@ -1200,9 +1225,14 @@ function sendMessage() {
     allowedTools: [],
     deniedTools: mergedDenied,
     allowAllPaths: settings.allowAllPaths === true,
+    // Per-tab: when on, drop --allow-all / auto-approve so the agent asks per action.
+    manualApproval: tab.manualApproval === true,
     addDirs: getEffectiveExtraDirs(),
     mode: tab.mode || DEFAULT_MODE_ID,
-    model: tab.selectedModel || DEFAULT_MODEL_ID,
+    // Empty → let the backend use its own default model (e.g. Claude Code before
+    // we know its real model ids). Don't force a Copilot id onto other providers.
+    model: tab.selectedModel || undefined,
+    provider: getTabProvider(tab),
     cwd: tab.cwd || undefined,
     activeSkills: activeSkillDirs,
     activeAgents: activeAgentSlugs,
@@ -1628,9 +1658,59 @@ function initCopilotIPC() {
       }
 
       case 'copilot.models_available': {
-        // The CLI reported which models this account can use → use them for the
-        // Copilot model dropdown instead of the hardcoded fallback list.
-        updateCopilotModels(event.data.models);
+        // The ACP backend reported which models this account can use → assign them
+        // to THIS tab's provider (Copilot or Claude Code) rather than assuming
+        // Copilot, so each ACP provider gets its own discovered model list.
+        applyDynamicModels(getTabProvider(tab), event.data.models);
+        // Adopt the backend's current model when the tab hasn't chosen one yet
+        // (e.g. Claude Code, where we don't force a default) so the 🧠 button
+        // shows the active model instead of being blank.
+        if (!tab.selectedModel && event.data.currentModelId) {
+          tab.selectedModel = event.data.currentModelId;
+          updateModelSelectBtn(tabId);
+        }
+        break;
+      }
+
+      case 'session.modes_available': {
+        // The ACP backend reported its session modes → assign them to this tab's
+        // provider (Claude Code has its own permission modes).
+        const provider = getTabProvider(tab);
+        const mapped = (event.data.modes || [])
+          .filter(m => m && m.id)
+          .map(m => ({ id: m.id, short: m.name || m.id, label: m.name || m.id, desc: m.description || '' }));
+        if (mapped.length) {
+          _dynamicModes[provider] = mapped;
+          setPref('dynamicModes', _dynamicModes); // survive restarts → dropdown filled pre-prompt
+          // Adopt the backend's current mode when the tab's mode isn't valid here.
+          if (!mapped.some(m => m.id === tab.mode)) {
+            tab.mode = event.data.currentModeId || mapped[0].id;
+          }
+          updateModeSelectBtn(tabId);
+        }
+        break;
+      }
+
+      case 'session.usage_update': {
+        // Claude Code live usage: context %, subscription rate-limit, USD cost.
+        const d = event.data || {};
+        // Pure-usage events report the context window (size ~200k); the cost-
+        // bearing event uses a different size — use it only for cost, not context.
+        if (!d.cost && d.size && d.used != null) {
+          const pct = Math.min(100, Math.round((d.used / d.size) * 100));
+          tab._contextPercent = pct;
+          if (tabId === activeTabId) updateContextButtonPct(pct);
+        }
+        if (d.rateLimit) tab._subRateLimit = d.rateLimit;
+        if (d.cost && typeof d.cost.amount === 'number') tab._subCostUsd = d.cost.amount;
+        if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
+        break;
+      }
+
+      case 'session.permission_request': {
+        // The agent (Claude Code / Copilot) asks whether to run an action →
+        // queue it and show the dropup above the chat input.
+        enqueuePermissionRequest(tabId, event.data);
         break;
       }
 
@@ -1672,6 +1752,8 @@ function initCopilotIPC() {
           if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
+          // Persist provider so a resumed session uses the right backend.
+          saveSessionProvider(event.sessionId, getTabProvider(tab));
           saveOpenTabs();
           // Show todos panel (project-scoped by cwd) for this session
           if (!activeSessionId) {
@@ -1746,15 +1828,20 @@ function initCopilotIPC() {
       // Run /usage first, then /context — the backend handles only one silent
       // command at a time ("Cannot run command while busy" otherwise). Refresh
       // runs for background tabs too so cost tracking stays accurate.
-      refreshUsageDisplay(tabId).finally(() => {
-        // /context is free for all providers. Direct-API tabs additionally
-        // auto-compact when high; Copilot manages its own context window.
-        if (getTabProvider(tab) !== 'copilot') {
-          refreshApiContext(tabId);
-        } else {
-          refreshContextDisplay(tabId);
-        }
-      });
+      if (isSubscriptionProvider(getTabProvider(tab))) {
+        // Subscription (Claude Code): no per-token billing, and context + quota
+        // arrive live via usage_update → nothing to poll here.
+      } else {
+        refreshUsageDisplay(tabId).finally(() => {
+          // /context is free for all providers. Direct-API tabs additionally
+          // auto-compact when high; ACP backends (Copilot) manage their own.
+          if (isAcpProvider(getTabProvider(tab))) {
+            refreshContextDisplay(tabId);
+          } else {
+            refreshApiContext(tabId);
+          }
+        });
+      }
     }
   });
 }
@@ -1782,6 +1869,13 @@ const DEFAULT_MODELS = [
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6', short: 'Opus 4.6', provider: 'copilot', tier: 'aic' },
   { id: 'claude-opus-4.8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'copilot', tier: 'aic' },
   { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', short: 'GPT-5.3', provider: 'copilot', tier: 'aic' },
+  // Claude Code (provider: 'claude-code') — billed via the Claude subscription
+  // (CLI login, no API key). The adapter uses ALIASES (default/sonnet/opus/haiku),
+  // not full model ids; the real list is discovered via ACP and replaces these.
+  { id: 'default', label: 'Default (Sonnet 5)', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
+  { id: 'sonnet', label: 'Sonnet 5', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
+  { id: 'opus', label: 'Opus 4.8', short: 'Opus 4.8', provider: 'claude-code', tier: 'sub' },
+  { id: 'haiku', label: 'Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code', tier: 'sub' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
@@ -1809,6 +1903,7 @@ const MODEL_TIER_BADGE = {
   paid: '<span class="model-tier model-tier--paid" data-tooltip="Direkt kostenpflichtig (Abrechnung pro Token beim Provider)">💲 kostenpflichtig</span>',
   free: '<span class="model-tier model-tier--free" data-tooltip="Im kostenlosen Kontingent des Providers nutzbar">🆓 kostenlos</span>',
   aic: '<span class="model-tier model-tier--aic" data-tooltip="Abrechnung über dein GitHub-Copilot-Abo / AI Credits">AIC</span>',
+  sub: '<span class="model-tier model-tier--aic" data-tooltip="Über dein Claude-Abo abgerechnet (kein Token-Preis)">Abo</span>',
 };
 function modelTierBadge(model) {
   return model && model.tier ? (MODEL_TIER_BADGE[model.tier] || '') : '';
@@ -1816,6 +1911,7 @@ function modelTierBadge(model) {
 
 const PROVIDER_LABELS = {
   copilot: 'GitHub Copilot',
+  'claude-code': 'Claude Code',
   anthropic: 'Anthropic API',
   gemini: 'Google Gemini',
   openai: 'OpenAI',
@@ -1831,6 +1927,7 @@ const PROVIDER_ICON = '🔌';
 // direct-API providers. Gemini/OpenAI are listed but not yet selectable.
 const PROVIDERS = [
   { id: 'copilot', active: true },
+  { id: 'claude-code', active: true },
   { id: 'gemini', active: true },
   { id: 'anthropic', active: true },
   { id: 'openai', active: true },
@@ -1840,7 +1937,7 @@ const PROVIDERS = [
 
 // Maturity markers per provider. Beta = tested but not final; Alpha = untested.
 // Copilot is the primary, fully-tested provider and carries no badge.
-const BETA_PROVIDERS = new Set(['gemini']);
+const BETA_PROVIDERS = new Set(['gemini', 'claude-code']);
 const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
 
 /** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
@@ -1875,6 +1972,7 @@ function getDefaultProvider() {
 // first list entry (Haiku) — see DEFAULT_MODEL_ID.
 const PROVIDER_DEFAULT_MODEL = {
   copilot: DEFAULT_MODEL_ID,        // claude-sonnet-4.6
+  'claude-code': 'claude-sonnet-5', // refined once ACP reports the real models
   anthropic: 'claude-opus-4-8',
   gemini: 'gemini-2.5-flash',
   openai: 'gpt-5.1',
@@ -1894,9 +1992,17 @@ function getDefaultModelForProvider(provider) {
   const valid = (id) => id && getModelsForProvider(provider).some(m => m.id === id);
   const configured = (getSettings().defaultModels || {})[provider];
   if (valid(configured)) return configured;
+  // Claude Code: don't force a model — let the ACP adapter use its own default
+  // (the subscription default) unless the user explicitly configured one. Forcing
+  // an id we're unsure about would make the adapter reject the prompt.
+  if (provider === 'claude-code') return '';
   if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
-  return m ? m.id : DEFAULT_MODEL_ID;
+  if (m) return m.id;
+  // No known model for this provider yet (e.g. Claude Code before ACP discovery).
+  // Return '' so the backend uses its own default instead of a foreign model id
+  // (forcing a Copilot id like claude-sonnet-4.6 makes Claude Code reject it).
+  return '';
 }
 
 /** Persist the default model for one provider. */
@@ -1906,7 +2012,7 @@ function saveDefaultModelForProvider(provider, modelId) {
   saveSetting('defaultModels', map);
 }
 
-const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)' };
+const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)', sub: ' (Abo)' };
 
 /** Render the "default provider" + "default model per provider" settings controls. */
 function renderDefaultModelSettings() {
@@ -1952,7 +2058,7 @@ const _dynamicModels = {};
 
 /** Default cost tier for freshly-discovered models, by provider. */
 const PROVIDER_DEFAULT_TIER = {
-  copilot: 'aic', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
+  copilot: 'aic', 'claude-code': 'sub', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
 };
 
 /**
@@ -2010,6 +2116,14 @@ function initCopilotModels() {
     const legacy = getPref('copilotModels', null);
     if (Array.isArray(legacy) && legacy.length) _dynamicModels.copilot = legacy;
   }
+  // Restore discovered session modes per provider so the mode dropdown has content
+  // before the first prompt (e.g. Claude Code's modes after a restart).
+  const storedModes = getPref('dynamicModes', null);
+  if (storedModes && typeof storedModes === 'object' && !Array.isArray(storedModes)) {
+    for (const [prov, list] of Object.entries(storedModes)) {
+      if (Array.isArray(list) && list.length) _dynamicModes[prov] = list;
+    }
+  }
 }
 
 /**
@@ -2061,10 +2175,24 @@ function getModelsForProvider(provider) {
  * the single source of truth; the provider is implied by it).
  */
 function getTabProvider(tab) {
-  return window.RendererLogic.getModelProvider(tab?.selectedModel || '') || 'copilot';
+  // The tab's explicit ProviderID is authoritative; fall back to deriving it from
+  // the model only for legacy tabs that predate the provider field.
+  return tab?.provider
+    || window.RendererLogic.getModelProvider(tab?.selectedModel || '')
+    || 'copilot';
 }
 
-const PROVIDER_SHORT = { copilot: 'Copilot', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+
+/** ACP-based backends (CLI/adapter over stdio), as opposed to direct-API providers. */
+function isAcpProvider(provider) {
+  return provider === 'copilot' || provider === 'claude-code';
+}
+
+/** Whether a provider is billed via a subscription (no per-token USD cost). */
+function isSubscriptionProvider(provider) {
+  return provider === 'claude-code';
+}
 
 /** Update the read-only provider label (shown next to the cost) for a tab. */
 function updateProviderSelectBtn(tabId) {
@@ -2138,6 +2266,17 @@ const SESSION_MODES = [
   { id: 'autopilot', label: 'Autopilot', short: '🚀 Autopilot', desc: 'Autonom bis Task-Abschluss (experimentell)' },
 ];
 
+// Session modes discovered per provider via ACP (Claude Code reports its own
+// permission modes: default/acceptEdits/plan/bypassPermissions/…).
+const _dynamicModes = {};
+
+/** Modes selectable for a provider (discovered list wins; Copilot has a static one). */
+function getModesForProvider(provider) {
+  const dyn = _dynamicModes[provider];
+  if (dyn && dyn.length) return dyn;
+  return provider === 'copilot' ? SESSION_MODES : [];
+}
+
 /**
  * Update the tab-header mode select button to reflect the active tab's mode.
  * @param {string} [tabId]
@@ -2146,11 +2285,12 @@ function updateModeSelectBtn(tabId) {
   const btn = document.getElementById('btnModeSelect');
   if (!btn) return;
   const tab = tabs.get(tabId ?? activeTabId);
+  const modes = getModesForProvider(tab ? getTabProvider(tab) : 'copilot');
   const modeId = tab?.mode || DEFAULT_MODE_ID;
-  const found = SESSION_MODES.find(m => m.id === modeId);
+  const found = modes.find(m => m.id === modeId);
   btn.textContent = found ? found.short : '🤖 Agent';
-  // Highlight when not in the default Agent mode.
-  btn.classList.toggle('session-actions__btn--active', modeId !== DEFAULT_MODE_ID);
+  // Highlight when not on the provider's first/default mode.
+  btn.classList.toggle('session-actions__btn--active', !!found && modes[0] && found.id !== modes[0].id);
 }
 
 /**
@@ -2183,6 +2323,55 @@ function updateModelSelectBtn(tabId) {
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
+  updateApprovalBtn(tabId);
+  updateProviderSpecificControls(tabId);
+}
+
+/**
+ * Hide the session tools deny-list for Claude Code (it governs permissions via
+ * its mode/permission prompts, not --deny-tool). The mode dropdown IS shown for
+ * Claude Code — it carries the provider's own discovered modes.
+ * @param {string} [tabId]
+ */
+function updateProviderSpecificControls(tabId) {
+  const tab = tabs.get(tabId ?? activeTabId);
+  const isClaudeCode = tab && getTabProvider(tab) === 'claude-code';
+  const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
+  if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
+}
+
+/**
+ * Reflect the active tab's manual-approval state on the toggle button.
+ * @param {string} [tabId]
+ */
+function updateApprovalBtn(tabId) {
+  const btn = document.getElementById('btnApprovalToggle');
+  if (!btn) return;
+  const tab = tabs.get(tabId ?? activeTabId);
+  // Only ACP backends (Copilot, Claude Code) use the permission flow.
+  const wrapper = btn.closest('.model-select-wrapper') || btn;
+  if (!tab || !isAcpProvider(getTabProvider(tab))) { wrapper.style.display = 'none'; return; }
+  wrapper.style.display = '';
+  const manual = tab?.manualApproval === true;
+  btn.textContent = manual ? '🔒 Bestätigen' : '🔓 Auto';
+  btn.classList.toggle('session-actions__btn--active', manual);
+  btn.setAttribute('data-tooltip', manual
+    ? 'Aktionen werden einzeln bestätigt (Dropup). Klick: alles erlauben'
+    : 'Alles erlauben — keine Rückfragen. Klick: Bestätigen aktivieren');
+}
+
+/** Flip the active tab's manual-approval mode and apply it to the backend. */
+async function toggleApproval(tabId) {
+  const id = tabId ?? activeTabId;
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.manualApproval = !tab.manualApproval;
+  if (tab.sessionId) saveSessionApproval(tab.sessionId, tab.manualApproval);
+  updateApprovalBtn(id);
+  if (tab.sessionId) {
+    // Copilot restarts transparently (spawn flag); Claude Code applies live.
+    try { await copilot.chat.setApproval(id, tab.manualApproval); } catch (_) { /* ignore */ }
+  }
 }
 
 /**
@@ -2256,6 +2445,8 @@ function initTabModelSelector() {
  * next sendMessage() call.
  */
 function initTabModeSelector() {
+  document.getElementById('btnApprovalToggle')?.addEventListener('click', () => toggleApproval(activeTabId));
+
   const btn = document.getElementById('btnModeSelect');
   if (!btn) return;
 
@@ -2276,11 +2467,12 @@ function initTabModeSelector() {
     const openedForTabId = activeTabId;
     const tab = tabs.get(openedForTabId);
     const currentMode = tab?.mode || DEFAULT_MODE_ID;
+    const modes = getModesForProvider(getTabProvider(tab));
 
     const dropdown = document.createElement('div');
     dropdown.className = 'model-dropdown model-dropdown--below mode-dropdown';
 
-    SESSION_MODES.forEach(m => {
+    modes.forEach(m => {
       const isActive = currentMode === m.id;
       const item = document.createElement('div');
       item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
@@ -2516,9 +2708,6 @@ async function refreshUsageDisplay(tabId) {
   try {
     const result = await window.copilot.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
-    // DIAGNOSTIC: raw /usage output — to check whether it breaks down tokens by
-    // model/subagent or only reports a single session-wide aggregate.
-    console.log(`[usage-raw tab${tabId}]\n${result.text}`);
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
@@ -2538,7 +2727,11 @@ async function refreshUsageDisplay(tabId) {
       // which may already point at a different model chosen for the next prompt.
       // This keeps a mid-session model switch from mis-pricing prior tokens.
       const modelId = tab._billingModel || tab.selectedModel || '';
-      const deltaUsd = estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
+      // Subscription providers (Claude Code) are covered by the plan — no USD
+      // billing yet (token-based accounting for add-on budgets comes later).
+      const deltaUsd = isSubscriptionProvider(getTabProvider(tab))
+        ? 0
+        : estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
       if (deltaUsd && deltaUsd > 0) {
         tab._costUsd = (tab._costUsd || 0) + deltaUsd;
         recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, getTabProvider(tab));
@@ -2619,6 +2812,82 @@ function updateUsageDisplay(parsed, tokens, fullText) {
   el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';
 }
 
+/**
+ * Subscription usage display (Claude Code): shows the plan quota / rate-limit
+ * status in the session bar instead of a USD/credit cost — subscriptions have
+ * no per-token price. Fed by usage_update events.
+ * @param {Object} tab
+ */
+function updateSubscriptionUsageDisplay(tab) {
+  const el = document.getElementById('sessionUsage');
+  if (!el || !tab || getTabProvider(tab) !== 'claude-code') return;
+  const rl = tab._subRateLimit;
+  let txt = 'Abo';
+  let warn = false;
+  if (rl) {
+    if (rl.status && rl.status !== 'allowed') { txt = 'Abo · Limit erreicht'; warn = true; }
+    else if (rl.resetsAt) {
+      const mins = Math.max(0, Math.round((rl.resetsAt * 1000 - Date.now()) / 60000));
+      txt = `Abo · Reset in ${Math.floor(mins / 60)}h ${mins % 60}m`;
+    }
+  }
+  el.textContent = (warn ? '⚠️ ' : '') + txt;
+  const parts = [];
+  if (rl?.rateLimitType) parts.push(`Kontingent: ${rl.rateLimitType}`);
+  if (rl?.overageStatus) parts.push(`Overage: ${rl.overageStatus}${rl.overageDisabledReason ? ' (' + rl.overageDisabledReason + ')' : ''}`);
+  if (typeof tab._subCostUsd === 'number') parts.push(`Token-Äquivalent: $${tab._subCostUsd.toFixed(4)}`);
+  el.title = parts.join('\n') || 'Über dein Claude-Abo abgerechnet';
+}
+
+// ── Permission requests (ACP session/request_permission) ─────
+// The agent asks whether to run an action; we show a dropup above the chat
+// input with the offered options and route the answer back to the backend.
+const _permissionQueue = [];
+let _permissionActive = null;
+
+/** Queue an incoming permission request and show it if none is active. */
+function enqueuePermissionRequest(tabId, data) {
+  _permissionQueue.push({ tabId, ...data });
+  if (!_permissionActive) showNextPermission();
+}
+
+/** Render the next queued permission request (or hide the dropup when empty). */
+function showNextPermission() {
+  const el = document.getElementById('permissionDropup');
+  if (!el) return;
+  _permissionActive = _permissionQueue.shift() || null;
+  if (!_permissionActive) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const p = _permissionActive;
+  const tab = tabs.get(p.tabId);
+  const providerName = PROVIDER_SHORT[tab ? getTabProvider(tab) : 'copilot'] || 'Agent';
+  const icon = toolIcon(p.toolName) || '🔧';
+  const opts = (Array.isArray(p.options) && p.options.length) ? p.options : [
+    { optionId: 'allow', name: 'Erlauben', kind: 'allow_once' },
+    { optionId: 'reject', name: 'Ablehnen', kind: 'reject_once' },
+  ];
+  const btns = opts.map(o => {
+    const cls = /allow/.test(o.kind || '') ? 'permission-dropup__btn--allow'
+      : /reject/.test(o.kind || '') ? 'permission-dropup__btn--reject' : '';
+    return `<button class="permission-dropup__btn ${cls}" data-opt="${escapeAttr(o.optionId)}">${escapeHtml(o.name || o.optionId)}</button>`;
+  }).join('');
+  const more = _permissionQueue.length ? `<div class="permission-dropup__queue">+${_permissionQueue.length} weitere Anfrage(n)</div>` : '';
+  el.innerHTML = `
+    <div class="permission-dropup__head">🔐 <strong>${escapeHtml(providerName)}</strong> möchte ausführen: <span class="permission-dropup__title">${icon} ${escapeHtml(p.title || p.toolName || 'Aktion')}</span></div>
+    <div class="permission-dropup__actions">${btns}</div>${more}`;
+  el.querySelectorAll('.permission-dropup__btn').forEach(b => {
+    b.addEventListener('click', () => answerPermission(b.dataset.opt));
+  });
+  el.style.display = 'block';
+}
+
+/** Send the chosen option back to the backend and advance the queue. */
+function answerPermission(optionId) {
+  if (!_permissionActive) return;
+  const { tabId, requestId } = _permissionActive;
+  try { copilot.chat.respondPermission(tabId, requestId, optionId || null); } catch (_) { /* ignore */ }
+  showNextPermission();
+}
+
 // ── Cost Log + Cost Settings Panel → modules/costs.js ────────
 // getCostLog, recordCostEntry, clearCostLog, initCostsPanel,
 // renderCostsPanel, drawCostsChart, niceStep, renderCostsBreakdown
@@ -2648,6 +2917,36 @@ function saveSessionCwd(sessionId, cwd) {
 function getSessionCwd(sessionId) {
   const entry = getNamedSessions()[sessionId];
   return entry?.cwd ?? null;
+}
+
+/** Persist the provider (ProviderID) of a named session so resume uses the right backend. */
+function saveSessionProvider(sessionId, provider) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].provider = provider;
+    setPref('namedSessions', all);
+  }
+}
+
+/** Get the persisted provider for a session (null → treat as Copilot). */
+function getSessionProvider(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return entry?.provider || null;
+}
+
+/** Persist the per-session manual-approval flag in namedSessions. */
+function saveSessionApproval(sessionId, manualApproval) {
+  const all = getNamedSessions();
+  if (all[sessionId]) {
+    all[sessionId].manualApproval = manualApproval === true;
+    setPref('namedSessions', all);
+  }
+}
+
+/** Read the per-session manual-approval flag (null when unset). */
+function getSessionApproval(sessionId) {
+  const entry = getNamedSessions()[sessionId];
+  return typeof entry?.manualApproval === 'boolean' ? entry.manualApproval : null;
 }
 
 /**
@@ -2744,12 +3043,16 @@ function renderSessions(list) {
     const title = s.name;
     const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
     const cwdBtnClass = s.cwd ? 'session-card__cwd-btn' : 'session-card__cwd-btn session-card__cwd-btn--empty';
+    // Tag non-Copilot sessions so the source backend is clear in the sidebar.
+    const provider = getSessionProvider(s.id) || 'copilot';
+    const provTag = provider === 'claude-code'
+      ? '<span class="session-card__provider" data-tooltip="Claude Code (Abo)">🟣 Claude</span>' : '';
 
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
-            <div class="session-card__title">${escapeHtml(title)}</div>
+            <div class="session-card__title">${escapeHtml(title)}${provTag}</div>
           </div>
           <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
           <button class="${cwdBtnClass}" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}" aria-label="Arbeitsverzeichnis ändern">📁</button>
@@ -2818,7 +3121,11 @@ async function resumeSession(sessionId) {
   const customName = getSessionName(sessionId);
   const label = '🤖 ' + (customName || sessionId.substring(0, 8));
 
-  const tabId = await createTab(label);
+  // Resume with the session's own provider (Copilot vs Claude Code — they share
+  // model ids, so the ProviderID must come from the stored session, not the model).
+  const provider = getSessionProvider(sessionId) || 'copilot';
+  const sessionModel = getSessionModel(sessionId);
+  const tabId = await createTab(label, sessionModel || undefined, provider);
   const tab = tabs.get(tabId);
   if (!tab) return;
 
@@ -2827,12 +3134,8 @@ async function resumeSession(sessionId) {
   // Restore session denied tools from namedSessions
   tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
 
-  // Restore persisted model for this session
-  const sessionModel = getSessionModel(sessionId);
-  if (sessionModel) {
-    tab.selectedModel = sessionModel;
-    updateModelSelectBtn(tabId);
-  }
+  // Model was already applied via createTab(initialModel); just refresh the button.
+  if (sessionModel) updateModelSelectBtn(tabId);
 
   // Immediately set sessionId so the next prompt resumes this session
   tab.sessionId = sessionId;
@@ -2840,6 +3143,9 @@ async function resumeSession(sessionId) {
   // reading after reopening would be billed in full (re-charging the whole prior
   // session). Flag it so the next /usage read only establishes the baseline.
   tab._usageBaselinePending = true;
+  // Restore the per-session manual-approval flag (else the global default).
+  const savedApproval = getSessionApproval(sessionId);
+  tab.manualApproval = savedApproval != null ? savedApproval : (getSettings().manualApproval === true);
   // Restore the project directory so project-scoped todos load correctly.
   if (!tab.cwd) tab.cwd = getSessionCwd(sessionId) || null;
   // Update lastUsed timestamp
@@ -4351,7 +4657,7 @@ function openAddTabProviderMenu(btn) {
   };
 
   PROVIDERS.forEach(p => {
-    const hasKey = p.id === 'copilot' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const hasKey = p.id === 'copilot' || p.id === 'claude-code' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
     const item = document.createElement('div');
     item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
     let badge = providerStageBadge(p.id);
@@ -4365,8 +4671,9 @@ function openAddTabProviderMenu(btn) {
       }
       close();
       const label = p.id === 'copilot' ? '🤖 Chat' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
-      createTab(label, getDefaultModelForProvider(p.id));
-      if (p.id !== 'copilot' && !hasKey) {
+      createTab(label, getDefaultModelForProvider(p.id), p.id);
+      // Direct-API providers need a key; Copilot and Claude Code use CLI login.
+      if (p.id !== 'copilot' && p.id !== 'claude-code' && !hasKey) {
         showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
       }
     });
@@ -4487,6 +4794,11 @@ function initSettings() {
   settDevMode.checked = savedSettings.devMode === true;
   applyDevMode(savedSettings.devMode === true);
   settAllowAllPaths.checked = savedSettings.allowAllPaths === true;
+  const settManualApproval = document.getElementById('settManualApproval');
+  if (settManualApproval) {
+    settManualApproval.checked = savedSettings.manualApproval === true;
+    settManualApproval.addEventListener('change', () => saveSetting('manualApproval', settManualApproval.checked));
+  }
 
   // Default provider (#3) + default model per provider (#2).
   renderDefaultModelSettings();
@@ -4739,6 +5051,18 @@ const PROVIDER_SETTINGS = [
     ].join('\n'),
   },
   {
+    id: 'claude-code', active: true, cli: true,
+    info: [
+      'Claude Code – voll agentisch über das Abo (kein API-Key).',
+      '',
+      'Läuft über den ACP-Adapter (npx @agentclientprotocol/claude-agent-acp).',
+      'Abrechnung über dein Claude-Abo (Pro/Max) statt pro Token —',
+      'sofern kein ANTHROPIC_API_KEY gesetzt ist (wird bewusst entfernt).',
+      '',
+      'Voraussetzung: einmalig „claude" (Claude Code CLI) mit dem Abo einloggen.',
+    ].join('\n'),
+  },
+  {
     id: 'anthropic', active: true, placeholder: 'sk-ant-…',
     info: [
       'Claude – voll agentisch (direkte API).',
@@ -4892,8 +5216,9 @@ async function renderCopilotProviderRow(list, p) {
   row.className = 'providers-row';
   row.innerHTML = `
     <div class="providers-row__head">
-      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS.copilot)}</span>
+      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
       ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
+      ${providerStageBadge(p.id).trim()}
       <span class="providers-row__status">… wird geprüft</span>
     </div>
     <div class="providers-row__controls"></div>`;
@@ -4901,6 +5226,32 @@ async function renderCopilotProviderRow(list, p) {
 
   const statusEl = row.querySelector('.providers-row__status');
   const controls = row.querySelector('.providers-row__controls');
+
+  // Claude Code: launched on demand via npx; billed through the subscription.
+  // Live-detect the CLI; the subscription login itself can't be checked
+  // non-interactively, so we point the user to `claude` for it.
+  if (p.id === 'claude-code') {
+    let cc = { installed: false };
+    try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+    if (cc.installed) {
+      statusEl.textContent = '● „claude"-CLI installiert' + (cc.version ? ` (v${cc.version})` : '');
+      statusEl.classList.add('is-set');
+    } else {
+      statusEl.textContent = '⚠ „claude"-CLI nicht gefunden';
+    }
+    const hint = document.createElement('span');
+    hint.className = 'providers-row__hint';
+    hint.textContent = cc.installed
+      ? 'Melde dich einmalig mit dem Abo an (Terminal: „claude" → Login). Kein API-Key nötig — ANTHROPIC_API_KEY wird für Claude Code entfernt.'
+      : 'Installiere die „claude"-CLI (npm i -g @anthropic-ai/claude-code) und melde dich mit dem Abo an.';
+    controls.appendChild(hint);
+    const recheck = document.createElement('button');
+    recheck.className = 'action-btn';
+    recheck.textContent = 'Status prüfen';
+    recheck.addEventListener('click', () => renderProvidersSettings());
+    controls.appendChild(recheck);
+    return;
+  }
 
   let status = { cliInstalled: false, authenticated: false, user: null };
   try { status = await window.copilot.auth.status(); } catch (_) { /* old build / offline */ }
@@ -5725,6 +6076,7 @@ async function renderCwdStep(body, btnNext) {
 function renderProviderStep(body, btnNext) {
   const choices = [
     { id: 'copilot', label: '🔌 GitHub Copilot', sub: 'CLI-Login, MCP-Unterstützung' },
+    { id: 'claude-code', label: '🟣 Claude Code', sub: 'CLI-Login, über dein Claude-Abo' },
     { id: 'anthropic', label: '🟣 Anthropic', sub: 'API-Key (Claude)' },
     { id: 'gemini', label: '🔷 Google Gemini', sub: 'API-Key, Live-Suche' },
     { id: 'openai', label: '🟢 OpenAI', sub: 'API-Key (GPT)' },
@@ -5767,6 +6119,10 @@ function renderProviderStep(body, btnNext) {
 
 /** Render the provider-specific sub-area (Copilot login / API key / Ollama info). */
 async function renderProviderDetail(container, provider) {
+  if (provider === 'claude-code') {
+    container.innerHTML = '<div class="onboarding-login__status">🟣 Claude Code läuft über deine <strong>Claude Code CLI</strong> und dein <strong>Abo</strong> — kein API-Key nötig. Installiere die „claude"-CLI und melde dich einmalig an (<code>claude</code> → Login). Danach kannst du fortfahren.</div>';
+    return;
+  }
   if (provider === 'copilot') {
     container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Prüfe Copilot-Status…</div>';
     let status = { cliInstalled: false, authenticated: false, user: null };

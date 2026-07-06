@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.1.0] - 2026-07-07
+
+### Added
+- **New provider: Claude Code (Beta)** — use Claude Code via the ACP adapter
+  (`@agentclientprotocol/claude-agent-acp`, launched through `npx`), billed
+  through your **Claude subscription** (no API key; `ANTHROPIC_API_KEY` is
+  stripped from the child process). Fully integrated:
+  - **Explicit ProviderID per tab** (`tab.provider`) as the authoritative
+    discriminator — Claude Code and the Anthropic API share model ids, so the
+    provider now comes from the tab/session, not the model.
+  - **Model & mode selection** via `session/set_config_option` (the adapter's
+    config-options API); models (Sonnet 5, Opus 4.8, Haiku 4.5, Fable) and the
+    permission modes (default/auto/acceptEdits/plan/dontAsk/bypassPermissions)
+    are discovered and persisted.
+  - **Live context %** and **subscription quota display** (rate-limit reset,
+    out-of-credits warning) from `usage_update`; no USD billing.
+  - **Named sessions in the sidebar** like Copilot (provider-tagged), resumed
+    with the right backend.
+  - **Live CLI status** in the API-providers settings.
+- **Interactive permission handling (ACP `session/request_permission`)** for
+  Copilot **and** Claude Code — a dropup above the chat input shows the agent's
+  offered options (allow once/always, reject), queued if several arrive. New
+  per-tab approval toggle; a global "manual approval" setting drops Copilot's
+  `--allow-all` so it asks per action (default off = unchanged).
+- **Setup: auto-install Node.js via winget** when missing (best-effort, refreshes
+  the session PATH), with a clear manual fallback.
+
+### Fixed
+- Default model per provider is validated against the provider's actual (incl.
+  discovered) model list, so a Copilot/Claude Code default is applied and saved.
+- `setup.ps1` no longer aborts with a raw "node not recognized" error when Node
+  is missing (uses `Get-Command`); rebranded to "Agent Desktop".
+- Model button shows the version (e.g. "Sonnet 5", not "Sonnet") for Claude Code.
+- ACP `#ensureReady` waits for a starting backend instead of failing fast (npx
+  adapter spawn race).
+
+### Changed
+- Copilot-only controls (tools deny-list, skill/agent prompt prefixes) are hidden
+  for Claude Code tabs; the mode dropdown shows Claude Code's own modes.
+
 ## [1.0.1] - 2026-07-03
 
 ### Fixed

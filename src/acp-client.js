@@ -10,6 +10,8 @@ const RESTART_WINDOW_MS = 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /compact …)
+const DEBUG_ACP = process.env.ACP_DEBUG === '1'; // verbose diagnostics (models dump, unhandled events)
+const LOCAL_CMD_GRACE_MS = 2_000; // wait for a stderr <local-command-stdout> flush (Claude Code)
 const STOP_GRACE_MS = 5_000;
 
 /**
@@ -24,6 +26,10 @@ class AcpClient extends EventEmitter {
   #options;      // CLI options (model, deniedTools, addDirs, etc.)
   #cwd;
   #copilotBin;
+  #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
+  #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
+  #shell = false;     // spawn via a shell — needed on Windows for .cmd/.bat (npx)
+  #localCommandStdout = false; // adapter returns slash output on stderr (Claude Code)
 
   // ── Process ──────────────────────────────────────────────────
   #process = null;
@@ -46,6 +52,10 @@ class AcpClient extends EventEmitter {
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
+  #openPermissions = new Set(); // JSON-RPC ids of permission requests awaiting a UI answer
+  #probedSessions = false;      // one-shot session/list capability probe (diagnostic)
+  #localCmdBuf = '';       // stderr buffer while capturing a <local-command-stdout> block (Claude Code)
+  #localCmdWaiter = null;  // resolver awaited by silentCommand until the block arrives
   #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
 
   // ── Recovery ─────────────────────────────────────────────────
@@ -57,7 +67,16 @@ class AcpClient extends EventEmitter {
    * @param {Function} sendToRenderer - Function to send IPC messages (channel, ...args)
    * @param {Object} [options={}] - Configuration
    * @param {string} [options.cwd] - Working directory
-   * @param {string} [options.copilotBin='copilot'] - Path to copilot binary
+   * @param {string} [options.copilotBin='copilot'] - Path to the copilot binary
+   * @param {string} [options.command] - ACP process command (overrides copilotBin;
+   *   e.g. 'npx' for the Claude Code adapter). Defaults to the copilot binary.
+   * @param {string[]} [options.baseArgs] - Fixed spawn args for a non-Copilot ACP
+   *   adapter (e.g. ['@zed-industries/claude-code-acp']). When set, the
+   *   Copilot-specific flag builder (--acp/--model/--deny-tool/…) is skipped;
+   *   model/deny are applied via ACP instead.
+   * @param {string[]} [options.stripEnv] - Env vars to remove from the child
+   *   process (e.g. ['ANTHROPIC_API_KEY'] so Claude Code bills the subscription,
+   *   not the API).
    * @param {string} [options.model] - Model override
    * @param {string[]} [options.deniedTools] - Tools to deny
    * @param {string[]} [options.addDirs] - Additional allowed directories
@@ -68,7 +87,11 @@ class AcpClient extends EventEmitter {
     this.#tabId = tabId;
     this.#sendToRenderer = sendToRenderer;
     this.#cwd = options.cwd || process.cwd();
-    this.#copilotBin = options.copilotBin || 'copilot';
+    this.#copilotBin = options.command || options.copilotBin || 'copilot';
+    this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
+    this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
+    this.#shell = options.shell === true;
+    this.#localCommandStdout = options.localCommandStdout === true;
     this.#options = options;
   }
 
@@ -90,20 +113,36 @@ class AcpClient extends EventEmitter {
     this.#appliedModel = null;
     this.#appliedMode = null;
 
-    const args = ['--acp', '--allow-all'];
-    if (this.#options.model) args.push('--model', this.#options.model);
-    if (this.#options.deniedTools) {
-      for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
+    // Non-Copilot ACP adapters (e.g. Claude Code) get their fixed args verbatim;
+    // model/deny are applied over ACP, not via CLI flags. Copilot uses its flags.
+    let args;
+    if (this.#baseArgs) {
+      args = [...this.#baseArgs];
+    } else {
+      // --allow-all makes the CLI auto-approve tools (no permission prompts). When
+      // manual approval is on we drop it so the CLI asks via session/request_permission.
+      args = ['--acp'];
+      if (this.#options.allowAll !== false) args.push('--allow-all');
+      if (this.#options.model) args.push('--model', this.#options.model);
+      if (this.#options.deniedTools) {
+        for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
+      }
+      if (this.#options.addDirs) {
+        for (const d of this.#options.addDirs) args.push('--add-dir', d);
+      }
+      if (this.#options.allowAllPaths) args.push('--allow-all-paths');
     }
-    if (this.#options.addDirs) {
-      for (const d of this.#options.addDirs) args.push('--add-dir', d);
-    }
-    if (this.#options.allowAllPaths) args.push('--allow-all-paths');
+
+    // Build the child env, removing any keys the backend must not see. Critical
+    // for Claude Code: an inherited ANTHROPIC_API_KEY would switch billing from
+    // the subscription to pay-per-token API usage.
+    const env = { ...process.env, NO_COLOR: '1' };
+    for (const key of this.#stripEnv) delete env[key];
 
     const proc = spawn(this.#copilotBin, args, {
       cwd: this.#cwd,
-      env: { ...process.env, NO_COLOR: '1' },
-      shell: false,
+      env,
+      shell: this.#shell,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -115,9 +154,22 @@ class AcpClient extends EventEmitter {
 
     // stderr → error events to renderer
     proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString('utf-8').trim();
+      const raw = chunk.toString('utf-8');
+      const text = raw.trim();
       if (text) {
         console.warn(`[acp:tab${this.#tabId}:stderr]`, text);
+      }
+      // Some ACP adapters (Claude Code) return slash-command output on stderr,
+      // wrapped in <local-command-stdout>…</local-command-stdout>, instead of the
+      // normal ACP response. Capture it while a silentCommand is in flight.
+      if (this.#contextQueryCollector) {
+        this.#localCmdBuf += raw;
+        const m = this.#localCmdBuf.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
+        if (m) {
+          this.#contextQueryCollector.push(m[1]);
+          this.#localCmdBuf = '';
+          if (this.#localCmdWaiter) { const w = this.#localCmdWaiter; this.#localCmdWaiter = null; w(); }
+        }
       }
     });
 
@@ -199,9 +251,28 @@ class AcpClient extends EventEmitter {
       console.error(`[acp:tab${this.#tabId}] session/new: no sessionId in result`, JSON.stringify(result));
     }
     this.#captureModes(result);
+    if (DEBUG_ACP) {
+      try {
+        console.log(`[acp:tab${this.#tabId}] session/new models :: ${JSON.stringify(result?.models ?? result?.configOptions ?? {}).slice(0, 1500)}`);
+      } catch (_) { /* ignore */ }
+    }
     this.#emitCurrentModel(result);
     this.#emitAvailableModels(result);
+    this.#probeSessionList();
     return result;
+  }
+
+  /**
+   * One-shot diagnostic: probe whether this ACP backend supports session/list
+   * (needed to know if Claude Code session resume/interop is feasible). Logs the
+   * result; never throws. Only runs when the probeSessionList option is set.
+   */
+  #probeSessionList() {
+    if (!this.#options.probeSessionList || this.#probedSessions) return;
+    this.#probedSessions = true;
+    this.listSessions()
+      .then((r) => console.log(`[acp:tab${this.#tabId}] session/list :: ${JSON.stringify(r).slice(0, 1200)}`))
+      .catch((e) => console.log(`[acp:tab${this.#tabId}] session/list not supported: ${e?.message || e}`));
   }
 
   /**
@@ -250,17 +321,52 @@ class AcpClient extends EventEmitter {
     const model = this.#options.model;
     if (!model || !this.#sessionId || model === this.#appliedModel) return;
     try {
-      await this.#sendRequest('session/set_model', { sessionId: this.#sessionId, modelId: model });
+      if (this.#options.useConfigOptions) {
+        // Current Claude Code adapter: model is a session config option, not
+        // session/set_model (which it answers "method not found").
+        await this.#sendRequest('session/set_config_option', { sessionId: this.#sessionId, configId: 'model', value: model });
+      } else {
+        await this.#sendRequest('session/set_model', { sessionId: this.#sessionId, modelId: model });
+      }
       this.#appliedModel = model;
     } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/set_model(${model}) failed:`, err.message);
+      console.warn(`[acp:tab${this.#tabId}] set model(${model}) failed:`, err.message);
     }
   }
 
   /** Captures the available session modes from a session/new|load result. */
   #captureModes(result) {
     const modes = result?.modes?.availableModes;
-    if (Array.isArray(modes) && modes.length) this.#availableModes = modes;
+    if (Array.isArray(modes) && modes.length) {
+      this.#availableModes = modes;
+    } else {
+      // Current Claude Code adapter reports modes via a configOptions entry.
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'mode');
+      if (opt && Array.isArray(opt.options)) {
+        this.#availableModes = opt.options.filter((o) => o && o.value).map((o) => ({ id: o.value, name: o.name || o.value }));
+      }
+    }
+    this.#emitAvailableModes(result);
+  }
+
+  /** Emit the session modes (both ACP shapes) so the renderer can offer them. */
+  #emitAvailableModes(result) {
+    let modes = [];
+    let currentModeId = null;
+    const list = result?.modes?.availableModes;
+    if (Array.isArray(list) && list.length) {
+      modes = list.map((m) => ({ id: m.id, name: m.name || m.id, description: m.description || '' }));
+      currentModeId = result?.modes?.currentModeId || null;
+    } else {
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'mode');
+      if (opt && Array.isArray(opt.options)) {
+        modes = opt.options.filter((o) => o && o.value).map((o) => ({ id: o.value, name: o.name || o.value, description: o.description || '' }));
+        currentModeId = opt.currentValue || null;
+      }
+    }
+    if (modes.length) {
+      this.#emitToRenderer({ type: 'session.modes_available', data: { modes, currentModeId } });
+    }
   }
 
   /**
@@ -282,15 +388,26 @@ class AcpClient extends EventEmitter {
    * applied. No-op if no mode is configured, no session, or mode is unknown.
    */
   async #applyMode() {
-    const shortId = this.#options.mode;
-    if (!shortId || !this.#sessionId) return;
-    const modeId = this.#resolveModeId(shortId);
-    if (!modeId || modeId === this.#appliedMode) return;
+    const mode = this.#options.mode;
+    if (!mode || !this.#sessionId) return;
     try {
-      await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
-      this.#appliedMode = modeId;
+      if (this.#options.useConfigOptions) {
+        // Claude Code: mode is a config option value (default/plan/acceptEdits/…).
+        // Apply directly; only when it's a known mode and not already applied.
+        const known = this.#availableModes.some((m) => m.id === mode);
+        if (!known || mode === this.#appliedMode) return;
+        await this.#sendRequest('session/set_config_option', { sessionId: this.#sessionId, configId: 'mode', value: mode });
+        this.#appliedMode = mode;
+        if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] set mode(${mode}) ok`);
+      } else {
+        const modeId = this.#resolveModeId(mode);
+        if (!modeId || modeId === this.#appliedMode) return;
+        await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
+        this.#appliedMode = modeId;
+        if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] session/set_mode(${modeId}) ok`);
+      }
     } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/set_mode(${shortId}) failed:`, err.message);
+      console.warn(`[acp:tab${this.#tabId}] set mode(${mode}) failed:`, err.message);
     }
   }
 
@@ -374,6 +491,7 @@ class AcpClient extends EventEmitter {
       return;
     }
     this.#cancelRequested = true;
+    this.#cancelOpenPermissions();
     this.#sendNotification('session/cancel', { sessionId: this.#sessionId });
   }
 
@@ -392,14 +510,28 @@ class AcpClient extends EventEmitter {
     this.#state = 'busy';
     this.#promptDone = false;
     this.#contextQueryCollector = [];
+    this.#localCmdBuf = '';
     try {
       await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
       }, SLASH_COMMAND_TIMEOUT_MS);
+      // If nothing arrived via the ACP response, give adapters that emit slash
+      // output on stderr (Claude Code) a moment to flush a <local-command-stdout>
+      // block. Other backends return immediately.
+      if (this.#localCommandStdout && !this.#contextQueryCollector.join('')) {
+        await new Promise((resolve) => {
+          this.#localCmdWaiter = resolve;
+          setTimeout(() => {
+            if (this.#localCmdWaiter) { this.#localCmdWaiter = null; resolve(); }
+          }, LOCAL_CMD_GRACE_MS);
+        });
+      }
       return this.#contextQueryCollector.join('');
     } finally {
       this.#contextQueryCollector = null;
+      this.#localCmdBuf = '';
+      this.#localCmdWaiter = null;
       this.#promptDone = true;
       this.#state = this.#process ? 'ready' : 'dead';
     }
@@ -487,7 +619,8 @@ class AcpClient extends EventEmitter {
       return;
     }
 
-    // JSON-RPC Response (has id)
+    // JSON-RPC message with an id: either a response to OUR request, or a request
+    // FROM the agent (e.g. session/request_permission) that we must answer.
     if (msg.id !== undefined && msg.id !== null) {
       const pending = this.#pendingRequests.get(msg.id);
       if (pending) {
@@ -498,7 +631,9 @@ class AcpClient extends EventEmitter {
         } else {
           pending.resolve(msg.result);
         }
+        return;
       }
+      if (msg.method) { this.#handleAgentRequest(msg); }
       return;
     }
 
@@ -506,6 +641,82 @@ class AcpClient extends EventEmitter {
     if (msg.method === 'session/update' && msg.params) {
       this.#handleSessionUpdate(msg.params);
     }
+  }
+
+  /**
+   * Handles a JSON-RPC request initiated by the agent (bidirectional ACP). We
+   * answer session/request_permission (via the UI); anything else gets a
+   * method-not-found reply so the agent doesn't hang waiting.
+   */
+  #handleAgentRequest(msg) {
+    const { id, method, params } = msg;
+    if (method === 'session/request_permission') {
+      this.#handlePermissionRequest(id, params || {});
+      return;
+    }
+    console.log(`[acp:tab${this.#tabId}] agent request (unhandled): ${method} :: ${JSON.stringify(params || {}).slice(0, 400)}`);
+    this.#sendResponse(id, undefined, { code: -32601, message: `Method not handled: ${method}` });
+  }
+
+  /**
+   * Forwards a permission request to the renderer (dropup UI) and tracks it so
+   * the user's answer can be routed back via respondPermission().
+   */
+  #handlePermissionRequest(id, params) {
+    const options = Array.isArray(params.options) ? params.options : [];
+    const tc = params.toolCall || {};
+    // Auto-approve (read live from options so a per-tab toggle works without a
+    // restart): pick an allow option and answer immediately, no UI prompt.
+    if (this.#options.autoApprovePermissions) {
+      const allow = options.find((o) => /allow/.test(o.kind || '')) || options[0];
+      if (allow && allow.optionId) {
+        this.#sendResponse(id, { outcome: { outcome: 'selected', optionId: allow.optionId } });
+        return;
+      }
+    }
+    this.#openPermissions.add(id);
+    this.#emitToRenderer({
+      type: 'session.permission_request',
+      data: {
+        requestId: id,
+        title: tc.title || tc.rawInput?.command || tc.kind || 'Aktion',
+        kind: tc.kind || '',
+        toolName: AcpClient.#mapToolKind(tc.kind, tc.title),
+        options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+      },
+    });
+  }
+
+  /**
+   * Answers a pending permission request with the chosen option (or cancels it
+   * when optionId is falsy). No-op if the request is unknown/already answered.
+   * @param {number|string} requestId
+   * @param {string} [optionId]
+   */
+  respondPermission(requestId, optionId) {
+    if (!this.#openPermissions.has(requestId)) return;
+    this.#openPermissions.delete(requestId);
+    const outcome = optionId
+      ? { outcome: 'selected', optionId }
+      : { outcome: 'cancelled' };
+    this.#sendResponse(requestId, { outcome });
+  }
+
+  /** Writes a JSON-RPC response (result or error) for an agent-initiated request. */
+  #sendResponse(id, result, error) {
+    try {
+      if (!this.#process?.stdin || this.#process.stdin.destroyed) return;
+      const payload = error ? { jsonrpc: '2.0', id, error } : { jsonrpc: '2.0', id, result };
+      this.#process.stdin.write(JSON.stringify(payload) + '\n');
+    } catch (_) { /* process gone */ }
+  }
+
+  /** Cancel all open permission requests (e.g. on stop/cancel) so nothing hangs. */
+  #cancelOpenPermissions() {
+    for (const id of this.#openPermissions) {
+      this.#sendResponse(id, { outcome: { outcome: 'cancelled' } });
+    }
+    this.#openPermissions.clear();
   }
 
   // ── Private: Event Mapping ───────────────────────────────────
@@ -672,13 +883,37 @@ class AcpClient extends EventEmitter {
         break;
       }
 
+      case 'usage_update': {
+        // Claude Code adapter: live context usage + subscription rate-limit + a
+        // USD cost equivalent. → drive the context % and the subscription display.
+        if (this.#contextQueryCollector) break;
+        this.#emitToRenderer({
+          type: 'session.usage_update',
+          data: {
+            used: update.used,
+            size: update.size,
+            rateLimit: update._meta?.['_claude/rateLimit'] || null,
+            cost: update.cost || null,
+          },
+        });
+        break;
+      }
+
+      case 'session_info_update': {
+        // Adapter-generated session title (e.g. from the first message). Not used yet.
+        break;
+      }
+
       default: {
-        // DIAGNOSTIC: dump the FULL payload of unknown updates so we can spot any
-        // subagent-/usage-/model-tagged signal the CLI might emit (e.g. per-turn
-        // token usage or a delegated sub-agent). Truncated to keep logs sane.
-        let dump;
-        try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
-        console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
+        // Unknown update — only dump the full payload under ACP_DEBUG to keep
+        // normal logs clean; otherwise just note the type.
+        if (DEBUG_ACP) {
+          let dump;
+          try { dump = JSON.stringify(update).slice(0, 2000); } catch (_) { dump = String(update); }
+          console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType} :: ${dump}`);
+        } else {
+          console.log(`[acp:tab${this.#tabId}] unhandled update: ${eventType}`);
+        }
         break;
       }
     }
@@ -749,16 +984,37 @@ class AcpClient extends EventEmitter {
    * @param {Object} result - session/new|load result
    */
   #emitAvailableModels(result) {
+    let models = [];
+    let currentModelId = null;
+
+    // Shape A (Copilot / old Claude Code adapter): result.models.availableModels
     const list = result?.models?.availableModels;
-    if (!Array.isArray(list) || !list.length) return;
-    const models = list
-      .filter((m) => m && m.modelId)
-      .map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+    if (Array.isArray(list) && list.length) {
+      models = list.filter((m) => m && m.modelId).map((m) => ({ id: m.modelId, name: m.name || m.modelId }));
+      currentModelId = result?.models?.currentModelId || null;
+    }
+
+    // Shape B (current Claude Code adapter): a configOptions entry id 'model'
+    // with { options:[{value,name,description}], currentValue }.
+    if (!models.length) {
+      const opt = (result?.configOptions || []).find((o) => o && o.id === 'model');
+      if (opt && Array.isArray(opt.options)) {
+        models = opt.options
+          .filter((o) => o && o.value)
+          .map((o) => {
+            // The version lives in the description ("Sonnet 5 · …"); the name is
+            // just "Sonnet". Prefer the version so the UI shows model numbers.
+            const version = String(o.description || '').split('·')[0].trim();
+            let name = version || o.name || o.value;
+            if (o.value === 'default' && version) name = `Default (${version})`;
+            return { id: o.value, name };
+          });
+        currentModelId = opt.currentValue || null;
+      }
+    }
+
     if (models.length) {
-      this.#emitToRenderer({
-        type: 'copilot.models_available',
-        data: { models, currentModelId: result?.models?.currentModelId || null },
-      });
+      this.#emitToRenderer({ type: 'copilot.models_available', data: { models, currentModelId } });
     }
   }
 
@@ -850,12 +1106,16 @@ class AcpClient extends EventEmitter {
     if (this.#state === 'dead') {
       await this.start();
     }
-    if (this.#state !== 'ready' && this.#state !== 'busy') {
-      // Wait a bit for state to transition
+    if (this.#state === 'ready' || this.#state === 'busy') return;
+    // state === 'starting' — a start() is in flight (e.g. a concurrent listSessions
+    // spawned the process; the npx adapter can take several seconds on first run).
+    // Wait for it to settle instead of failing fast.
+    const deadline = Date.now() + 30_000;
+    while (this.#state === 'starting' && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 100));
-      if (this.#state !== 'ready' && this.#state !== 'busy') {
-        throw new Error(`AcpClient not ready (state=${this.#state})`);
-      }
+    }
+    if (this.#state !== 'ready' && this.#state !== 'busy') {
+      throw new Error(`AcpClient not ready (state=${this.#state})`);
     }
   }
 
