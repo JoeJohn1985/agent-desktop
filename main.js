@@ -241,6 +241,9 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       stripEnv: ['ANTHROPIC_API_KEY'],
       // Off → auto-approve permission requests in the backend (no UI prompt).
       autoApprovePermissions: !options.manualApproval,
+      // Diagnostic: probe once whether the adapter supports session/list (→ tells
+      // us if session resume/interop is feasible). Logged, harmless.
+      probeSessionList: true,
       model: options.model,
       mode: options.mode,
       mcpServers: [],

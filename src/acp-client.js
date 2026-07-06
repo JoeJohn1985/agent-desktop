@@ -53,6 +53,7 @@ class AcpClient extends EventEmitter {
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
   #openPermissions = new Set(); // JSON-RPC ids of permission requests awaiting a UI answer
+  #probedSessions = false;      // one-shot session/list capability probe (diagnostic)
   #localCmdBuf = '';       // stderr buffer while capturing a <local-command-stdout> block (Claude Code)
   #localCmdWaiter = null;  // resolver awaited by silentCommand until the block arrives
   #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
@@ -257,7 +258,21 @@ class AcpClient extends EventEmitter {
     }
     this.#emitCurrentModel(result);
     this.#emitAvailableModels(result);
+    this.#probeSessionList();
     return result;
+  }
+
+  /**
+   * One-shot diagnostic: probe whether this ACP backend supports session/list
+   * (needed to know if Claude Code session resume/interop is feasible). Logs the
+   * result; never throws. Only runs when the probeSessionList option is set.
+   */
+  #probeSessionList() {
+    if (!this.#options.probeSessionList || this.#probedSessions) return;
+    this.#probedSessions = true;
+    this.listSessions()
+      .then((r) => console.log(`[acp:tab${this.#tabId}] session/list :: ${JSON.stringify(r).slice(0, 1200)}`))
+      .catch((e) => console.log(`[acp:tab${this.#tabId}] session/list not supported: ${e?.message || e}`));
   }
 
   /**
