@@ -1748,6 +1748,12 @@ function initCopilotIPC() {
         // Store sessionId for resume
         if (event.sessionId) {
           tab.sessionId = event.sessionId;
+          // The backend may report the session's real cwd (e.g. Claude Code resume
+          // corrected a cwd mismatch) → adopt it so it's persisted and used going forward.
+          if (event.cwd && event.cwd !== tab.cwd) {
+            tab.cwd = event.cwd;
+            loadTodos(tab.cwd);
+          }
           // Persist selected model for this new session
           if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
           // Persist CWD for this session

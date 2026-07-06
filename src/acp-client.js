@@ -287,29 +287,57 @@ class AcpClient extends EventEmitter {
     // session/load replays the conversation history as session/update events.
     // Suppress them so the renderer doesn't duplicate the existing chat.
     this.#suppressReplay = true;
-    try {
+
+    // Performs session/load under a specific cwd and wires up the loaded session.
+    const doLoad = async (useCwd) => {
       const result = await this.#sendRequest('session/load', {
         sessionId,
-        cwd: cwd || this.#cwd,
+        cwd: useCwd,
         mcpServers: mcpServers ?? this.#options.mcpServers ?? [],
       });
       // session/load does not echo back the sessionId — it returns models/modes/config.
-      // The session is now active under the ID we passed in.
       this.#sessionId = sessionId;
       this.#sessionLoadedInProcess = true;
-      this.#emitToRenderer({ type: 'result', sessionId });
+      this.#cwd = useCwd;
+      // Include the resolved cwd so the renderer can persist a corrected value.
+      this.#emitToRenderer({ type: 'result', sessionId, cwd: useCwd });
       this.#captureModes(result);
       this.#emitCurrentModel(result);
       this.#emitAvailableModels(result);
       return result;
-    } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
-      // Tell the renderer the previous conversation could not be restored,
-      // so it can inform the user before a fresh session is created.
-      this.#emitToRenderer({ type: 'session.restore_failed', data: { sessionId } });
-      return this.newSession(cwd, mcpServers);
+    };
+
+    try {
+      const loadCwd = cwd || this.#cwd;
+      try {
+        return await doLoad(loadCwd);
+      } catch (err) {
+        // Claude Code scopes sessions per working directory. If the session lives
+        // under a different cwd (e.g. we lost/changed the original one), find its
+        // real cwd via session/list and retry there. (Only this adapter needs it.)
+        if (this.#options.useConfigOptions) {
+          const realCwd = await this.#findSessionCwd(sessionId);
+          if (realCwd && realCwd !== loadCwd) {
+            try { return await doLoad(realCwd); } catch (_) { /* fall through to new */ }
+          }
+        }
+        console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
+        this.#emitToRenderer({ type: 'session.restore_failed', data: { sessionId } });
+        return this.newSession(cwd, mcpServers);
+      }
     } finally {
       this.#suppressReplay = false;
+    }
+  }
+
+  /** Look up a session's working directory from session/list (null if unknown). */
+  async #findSessionCwd(sessionId) {
+    try {
+      const list = await this.#sendRequest('session/list', {});
+      const s = ((list && list.sessions) || []).find((x) => x.sessionId === sessionId);
+      return s?.cwd || null;
+    } catch (_) {
+      return null;
     }
   }
 
