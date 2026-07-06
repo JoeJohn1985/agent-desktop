@@ -321,10 +321,16 @@ class AcpClient extends EventEmitter {
     const model = this.#options.model;
     if (!model || !this.#sessionId || model === this.#appliedModel) return;
     try {
-      await this.#sendRequest('session/set_model', { sessionId: this.#sessionId, modelId: model });
+      if (this.#options.useConfigOptions) {
+        // Current Claude Code adapter: model is a session config option, not
+        // session/set_model (which it answers "method not found").
+        await this.#sendRequest('session/set_config_option', { sessionId: this.#sessionId, configId: 'model', value: model });
+      } else {
+        await this.#sendRequest('session/set_model', { sessionId: this.#sessionId, modelId: model });
+      }
       this.#appliedModel = model;
     } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/set_model(${model}) failed:`, err.message);
+      console.warn(`[acp:tab${this.#tabId}] set model(${model}) failed:`, err.message);
     }
   }
 
@@ -382,16 +388,26 @@ class AcpClient extends EventEmitter {
    * applied. No-op if no mode is configured, no session, or mode is unknown.
    */
   async #applyMode() {
-    const shortId = this.#options.mode;
-    if (!shortId || !this.#sessionId) return;
-    const modeId = this.#resolveModeId(shortId);
-    if (!modeId || modeId === this.#appliedMode) return;
+    const mode = this.#options.mode;
+    if (!mode || !this.#sessionId) return;
     try {
-      await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
-      this.#appliedMode = modeId;
-      if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] session/set_mode(${modeId}) ok`);
+      if (this.#options.useConfigOptions) {
+        // Claude Code: mode is a config option value (default/plan/acceptEdits/…).
+        // Apply directly; only when it's a known mode and not already applied.
+        const known = this.#availableModes.some((m) => m.id === mode);
+        if (!known || mode === this.#appliedMode) return;
+        await this.#sendRequest('session/set_config_option', { sessionId: this.#sessionId, configId: 'mode', value: mode });
+        this.#appliedMode = mode;
+        if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] set mode(${mode}) ok`);
+      } else {
+        const modeId = this.#resolveModeId(mode);
+        if (!modeId || modeId === this.#appliedMode) return;
+        await this.#sendRequest('session/set_mode', { sessionId: this.#sessionId, modeId });
+        this.#appliedMode = modeId;
+        if (DEBUG_ACP) console.log(`[acp:tab${this.#tabId}] session/set_mode(${modeId}) ok`);
+      }
     } catch (err) {
-      console.warn(`[acp:tab${this.#tabId}] session/set_mode(${shortId} → ${modeId}) failed:`, err.message);
+      console.warn(`[acp:tab${this.#tabId}] set mode(${mode}) failed:`, err.message);
     }
   }
 
