@@ -13,16 +13,40 @@ Write-Host "`n===========================================" -ForegroundColor Mage
 Write-Host "  Agent Desktop — Setup" -ForegroundColor Magenta
 Write-Host "===========================================`n" -ForegroundColor Magenta
 
-# ── 1. Node.js prüfen ────────────────────────────────────────
+# ── 1. Node.js prüfen (und bei Bedarf installieren) ──────────
 Write-Step "Node.js prüfen..."
+
+function Update-PathFromEnvironment {
+    # Nach einer Installation kennt die laufende Session den neuen PATH noch nicht.
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user    = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = @($machine, $user | Where-Object { $_ }) -join ';'
+}
+
 # Get-Command statt direktem Aufruf: löst bei fehlendem Node KEINEN
-# terminierenden Fehler aus (ErrorActionPreference=Stop) → freundliche Meldung.
+# terminierenden Fehler aus (ErrorActionPreference=Stop).
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Fail "Node.js nicht gefunden."
+    Write-Host "  Node.js nicht gefunden — versuche automatische Installation via winget..." -ForegroundColor White
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        try {
+            winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+        } catch {
+            Write-Host "  winget-Installation nicht abgeschlossen: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+        Update-PathFromEnvironment
+    } else {
+        Write-Host "  winget ist auf diesem System nicht verfügbar." -ForegroundColor DarkYellow
+    }
+}
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Fail "Node.js nicht gefunden / Auto-Installation fehlgeschlagen."
     Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
     Write-Host "  und oeffne danach das Terminal neu (PATH aktualisieren)." -ForegroundColor White
     exit 1
 }
+
 $nodeVersion = & node --version
 $major = [int]($nodeVersion -replace 'v(\d+).*','$1')
 if ($major -ge 18) {
