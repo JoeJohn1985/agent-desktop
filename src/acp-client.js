@@ -1106,12 +1106,16 @@ class AcpClient extends EventEmitter {
     if (this.#state === 'dead') {
       await this.start();
     }
-    if (this.#state !== 'ready' && this.#state !== 'busy') {
-      // Wait a bit for state to transition
+    if (this.#state === 'ready' || this.#state === 'busy') return;
+    // state === 'starting' — a start() is in flight (e.g. a concurrent listSessions
+    // spawned the process; the npx adapter can take several seconds on first run).
+    // Wait for it to settle instead of failing fast.
+    const deadline = Date.now() + 30_000;
+    while (this.#state === 'starting' && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 100));
-      if (this.#state !== 'ready' && this.#state !== 'busy') {
-        throw new Error(`AcpClient not ready (state=${this.#state})`);
-      }
+    }
+    if (this.#state !== 'ready' && this.#state !== 'busy') {
+      throw new Error(`AcpClient not ready (state=${this.#state})`);
     }
   }
 
