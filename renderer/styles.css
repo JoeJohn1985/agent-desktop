@@ -2043,6 +2043,34 @@ mark.chat-search-highlight--active {
 }
 
 /* ── API-Provider Settings ──────────────────────────────── */
+/* Provider feature comparison matrix (settings → Features) */
+.feature-matrix-wrap { overflow-x: auto; }
+.feature-matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+.feature-matrix th, .feature-matrix td {
+  border: 1px solid var(--border);
+  padding: 7px 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+.feature-matrix thead th { position: sticky; top: 0; background: var(--bg-surface); z-index: 1; }
+.feature-matrix__corner { text-align: left; opacity: 0.7; }
+.feature-matrix__feature {
+  text-align: left;
+  font-weight: 500;
+  position: sticky;
+  left: 0;
+  background: var(--bg-surface);
+  z-index: 1;
+}
+.feature-matrix__feature-icon { margin-right: 6px; }
+.feature-matrix__provider { vertical-align: bottom; }
+.feature-matrix__provider-icon { display: block; margin: 0 auto 3px; }
+.feature-matrix__provider-icon .provider-icon { width: 18px; height: 18px; }
+.feature-matrix__provider-name { font-size: 11px; opacity: 0.8; }
+.feature-matrix__cell { font-weight: 700; }
+.feature-matrix__cell--yes { color: var(--green, #2ecc71); }
+.feature-matrix__cell--no { color: var(--text-muted, #888); opacity: 0.55; font-weight: 400; }
+
 .providers-list { display: flex; flex-direction: column; gap: 14px; }
 .providers-row {
   border: 1px solid var(--border);

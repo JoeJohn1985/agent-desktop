@@ -2213,23 +2213,68 @@ function isSubscriptionProvider(provider) {
   return provider === 'claude-code';
 }
 
-// Which app features each provider actually supports. Unsupported ones are hidden
-// from the UI while a tab of that provider is active. (Claude Code brings its own
-// skills/agents/MCP; Gemini is context-light with no session persistence.)
+// Which app features each provider actually supports. This is the single source
+// of truth: the sidebar hides unsupported skills/agents/MCP sections and the tab
+// rename button while a tab of that provider is active, and the settings
+// "Features" panel renders the same data as a comparison matrix.
+// (Claude Code brings its own skills/agents/MCP via its CLI; direct APIs share a
+// generic agent runtime but no skills/agents/MCP/marketplace/session persistence
+// yet; the Copilot CLI supports the full feature set.)
 const PROVIDER_CAPABILITIES = {
-  copilot:       { skills: true,  agents: true,  mcp: true,  sessions: true },
-  'claude-code': { skills: false, agents: false, mcp: false, sessions: true },
-  anthropic:     { skills: false, agents: false, mcp: false, sessions: false },
-  gemini:        { skills: false, agents: false, mcp: false, sessions: false },
-  openai:        { skills: false, agents: false, mcp: false, sessions: false },
-  glm:           { skills: false, agents: false, mcp: false, sessions: false },
-  ollama:        { skills: false, agents: false, mcp: false, sessions: false },
+  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: true,  sessions: true,  marketplace: true },
+  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: true,  marketplace: false },
+  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
 };
+
+// Feature metadata for the settings comparison matrix (label + icon + hint).
+const PROVIDER_FEATURE_META = [
+  { key: 'models',      icon: '🧠', label: 'Modellauswahl', hint: 'Zwischen mehreren Modellen des Providers wählen.' },
+  { key: 'modes',       icon: '⚙️', label: 'Modi',          hint: 'Betriebs-/Denkmodi (z.B. Reasoning, Agent-Modi).' },
+  { key: 'tools',       icon: '🔧', label: 'Toolverwendung', hint: 'Ausführung von Tools/Funktionen (Dateien, Shell …).' },
+  { key: 'context',     icon: '📏', label: 'Kontext',        hint: 'Kontextauslastung wird angezeigt/verwaltet.' },
+  { key: 'costs',       icon: '💰', label: 'Kosten',         hint: 'Kosten-/Token-Tracking verfügbar.' },
+  { key: 'skills',      icon: '🧩', label: 'Skills',         hint: 'SKILL.md-basierte KI-Skills.' },
+  { key: 'agents',      icon: '🤖', label: 'Agents',         hint: 'Wiederverwendbare Agent-Definitionen.' },
+  { key: 'mcp',         icon: '🔌', label: 'MCP',            hint: 'Model-Context-Protocol-Server.' },
+  { key: 'sessions',    icon: '💾', label: 'Sessions speichern', hint: 'Gesprächsverlauf persistent speichern/fortsetzen.' },
+  { key: 'marketplace', icon: '🛒', label: 'Marketplace',    hint: 'Erweiterungen/Extensions aus dem Marketplace.' },
+];
+
+// Providers shown as columns in the feature matrix (order matters).
+const PROVIDER_MATRIX_ORDER = ['copilot', 'claude-code', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
 
 /** Whether a provider supports a given app feature (default true if unknown). */
 function providerSupports(provider, feature) {
   const caps = PROVIDER_CAPABILITIES[provider] || PROVIDER_CAPABILITIES.copilot;
   return caps[feature] !== false;
+}
+
+/** Render the provider feature comparison matrix into the settings panel. */
+function renderFeatureMatrix() {
+  const container = document.getElementById('featuresMatrix');
+  if (!container) return;
+  const providers = PROVIDER_MATRIX_ORDER.filter((p) => PROVIDER_CAPABILITIES[p]);
+  const head = providers.map((p) =>
+    `<th class="feature-matrix__provider" data-tooltip="${escapeAttr(PROVIDER_SHORT[p] || p)}">` +
+      `<span class="feature-matrix__provider-icon">${providerIconHtml(p)}</span>` +
+      `<span class="feature-matrix__provider-name">${escapeHtml(PROVIDER_SHORT[p] || p)}</span>` +
+    '</th>').join('');
+  const rows = PROVIDER_FEATURE_META.map((f) => {
+    const cells = providers.map((p) => {
+      const ok = providerSupports(p, f.key);
+      return `<td class="feature-matrix__cell feature-matrix__cell--${ok ? 'yes' : 'no'}" data-tooltip="${escapeAttr((PROVIDER_SHORT[p] || p) + ': ' + f.label + (ok ? ' ✓' : ' — noch nicht'))}">${ok ? '✓' : '—'}</td>`;
+    }).join('');
+    return `<tr><th class="feature-matrix__feature" data-tooltip="${escapeAttr(f.hint)}"><span class="feature-matrix__feature-icon">${f.icon}</span>${escapeHtml(f.label)}</th>${cells}</tr>`;
+  }).join('');
+  container.innerHTML =
+    '<table class="feature-matrix">' +
+      `<thead><tr><th class="feature-matrix__corner">Feature</th>${head}</tr></thead>` +
+      `<tbody>${rows}</tbody>` +
+    '</table>';
 }
 
 /** Show/hide sidebar sections based on the active provider's capabilities. */
@@ -5014,6 +5059,7 @@ function initSettings() {
   initShortcutsSettings();
 
   document.querySelector('.settings__tab[data-tab="providers"]')?.addEventListener('click', renderProvidersSettings);
+  document.querySelector('.settings__tab[data-tab="features"]')?.addEventListener('click', renderFeatureMatrix);
 
   // Dev tools: Onboarding toggle
   async function loadDevOnboardingState() {

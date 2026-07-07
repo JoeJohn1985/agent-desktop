@@ -316,6 +316,7 @@
         <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
         <button class="settings__tab" data-tab="copilot">Konfiguration</button>
         <button class="settings__tab" data-tab="providers">API-Provider</button>
+        <button class="settings__tab" data-tab="features">Features</button>
         <button class="settings__tab" data-tab="folders">Ordner</button>
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
       </div>
@@ -449,6 +450,16 @@
             <div class="settings__hint" id="providersUnavailable" style="display:none;color:var(--red,#e74c3c);">
               ⚠️ OS-Verschlüsselung ist nicht verfügbar — Keys können nicht sicher gespeichert werden.
             </div>
+          </div>
+        </div>
+        <!-- Tab: Features -->
+        <div class="settings__panel" data-panel="features">
+          <div class="settings__group">
+            <div class="settings__hint" style="margin-bottom:12px;">
+              Übersicht, welche Kern-Features die einzelnen Provider aktuell unterstützen.
+              Nicht unterstützte Funktionen werden im aktiven Tab automatisch ausgeblendet.
+            </div>
+            <div id="featuresMatrix" class="feature-matrix-wrap"></div>
           </div>
         </div>
         <!-- Tab: Ordner -->
