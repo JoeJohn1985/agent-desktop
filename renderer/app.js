@@ -2219,11 +2219,11 @@ function isSubscriptionProvider(provider) {
 const PROVIDER_CAPABILITIES = {
   copilot:       { skills: true,  agents: true,  mcp: true,  sessions: true },
   'claude-code': { skills: false, agents: false, mcp: false, sessions: true },
-  anthropic:     { skills: true,  agents: true,  mcp: false, sessions: true },
+  anthropic:     { skills: false, agents: false, mcp: false, sessions: true },
   gemini:        { skills: false, agents: false, mcp: false, sessions: false },
-  openai:        { skills: true,  agents: true,  mcp: false, sessions: true },
-  glm:           { skills: true,  agents: true,  mcp: false, sessions: true },
-  ollama:        { skills: true,  agents: true,  mcp: false, sessions: true },
+  openai:        { skills: false, agents: false, mcp: false, sessions: true },
+  glm:           { skills: false, agents: false, mcp: false, sessions: true },
+  ollama:        { skills: false, agents: false, mcp: false, sessions: true },
 };
 
 /** Whether a provider supports a given app feature (default true if unknown). */
@@ -6694,6 +6694,10 @@ async function showTutorialPopup() {
 async function showTutorialRenamePopup() {
   const flags = await copilot.tutorial.getFlags();
   if (flags.tutorialRenameShown) return;
+
+  // Don't advertise renaming-to-save on providers that can't persist sessions.
+  const activeTab = tabs.get(activeTabId);
+  if (activeTab && !providerSupports(getTabProvider(activeTab), 'sessions')) return;
 
   const tabBar = document.getElementById('tabBar');
   const firstTab = tabBar && tabBar.querySelector('.tab');
