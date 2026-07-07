@@ -2219,11 +2219,11 @@ function isSubscriptionProvider(provider) {
 const PROVIDER_CAPABILITIES = {
   copilot:       { skills: true,  agents: true,  mcp: true,  sessions: true },
   'claude-code': { skills: false, agents: false, mcp: false, sessions: true },
-  anthropic:     { skills: false, agents: false, mcp: false, sessions: true },
+  anthropic:     { skills: false, agents: false, mcp: false, sessions: false },
   gemini:        { skills: false, agents: false, mcp: false, sessions: false },
-  openai:        { skills: false, agents: false, mcp: false, sessions: true },
-  glm:           { skills: false, agents: false, mcp: false, sessions: true },
-  ollama:        { skills: false, agents: false, mcp: false, sessions: true },
+  openai:        { skills: false, agents: false, mcp: false, sessions: false },
+  glm:           { skills: false, agents: false, mcp: false, sessions: false },
+  ollama:        { skills: false, agents: false, mcp: false, sessions: false },
 };
 
 /** Whether a provider supports a given app feature (default true if unknown). */
