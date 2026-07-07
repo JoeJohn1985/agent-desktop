@@ -5365,7 +5365,7 @@ async function renderCopilotProviderRow(list, p) {
   row.className = 'providers-row';
   row.innerHTML = `
     <div class="providers-row__head">
-      <span class="providers-row__name">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
+      <span class="providers-row__name"><span class="providers-row__icon">${providerIconHtml(p.id)}</span>${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>
       ${p.info ? `<span class="providers-row__info" data-tooltip="${escapeAttr(p.info)}" aria-label="Tools & Besonderheiten">ⓘ</span>` : ''}
       ${providerStageBadge(p.id).trim()}
       <span class="providers-row__status">… wird geprüft</span>
