@@ -804,16 +804,20 @@ function renderTabs() {
     labelSpan.textContent = fullLabel;
     el.appendChild(labelSpan);
 
-    // Edit (pencil) button — visible on hover
-    const editBtn = document.createElement('span');
-    editBtn.className = 'tab__edit';
-    editBtn.textContent = '✎';
-    editBtn.setAttribute('data-tooltip', 'Umbenennen');
-    editBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      startTabRename(id, el, labelSpan);
-    });
-    el.appendChild(editBtn);
+    // Edit (pencil) button — visible on hover. Renaming persists the session,
+    // so only show it for providers that support session saving.
+    const canSaveSession = providerSupports(getTabProvider(tab), 'sessions');
+    if (canSaveSession) {
+      const editBtn = document.createElement('span');
+      editBtn.className = 'tab__edit';
+      editBtn.textContent = '✎';
+      editBtn.setAttribute('data-tooltip', 'Umbenennen');
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startTabRename(id, el, labelSpan);
+      });
+      el.appendChild(editBtn);
+    }
 
     if (tabs.size > 1) {
       const closeBtn = document.createElement('span');
@@ -830,7 +834,7 @@ function renderTabs() {
     el.addEventListener('click', () => switchTab(id));
     el.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      startTabRename(id, el, labelSpan);
+      if (canSaveSession) startTabRename(id, el, labelSpan);
     });
 
     bar.insertBefore(el, addBtn);
@@ -2230,7 +2234,9 @@ function providerSupports(provider, feature) {
 
 /** Show/hide sidebar sections based on the active provider's capabilities. */
 function updateSidebarForProvider(provider) {
-  const sections = { sessions: 'sessionsSection', skills: 'skillsSection', agents: 'agentsSection', mcp: 'mcpSection' };
+  // Sessions stay visible for every provider (needed to resume other providers'
+  // sessions); session *saving* is gated separately on the tab rename button.
+  const sections = { skills: 'skillsSection', agents: 'agentsSection', mcp: 'mcpSection' };
   for (const [feature, id] of Object.entries(sections)) {
     const el = document.getElementById(id);
     if (el) el.style.display = providerSupports(provider, feature) ? '' : 'none';
