@@ -2045,13 +2045,13 @@ mark.chat-search-highlight--active {
 /* ── API-Provider Settings ──────────────────────────────── */
 /* Provider feature comparison matrix (settings → Features) */
 .feature-matrix-wrap { overflow-x: auto; }
-.feature-matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+.feature-matrix { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
 .feature-matrix th, .feature-matrix td {
   border: 1px solid var(--border);
-  padding: 7px 9px;
+  padding: 7px 4px;
   text-align: center;
-  white-space: nowrap;
 }
+.feature-matrix__corner, .feature-matrix__feature { width: 24%; }
 .feature-matrix thead th { position: sticky; top: 0; background: var(--bg-surface); z-index: 1; }
 .feature-matrix__corner { text-align: left; opacity: 0.7; }
 .feature-matrix__feature {
