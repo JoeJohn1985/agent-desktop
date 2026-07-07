@@ -251,7 +251,10 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   if (provider === 'claude-code') {
     clientOptions = {
       ...claudeCodeClientOptions(cwd),
-      autoApprovePermissions: !options.manualApproval,
+      // No app-side auto-approve override here: Claude Code's own permission
+      // mode (default/acceptEdits/plan/bypassPermissions, set via options.mode)
+      // is the single source of truth for whether it asks before acting.
+      autoApprovePermissions: false,
       model: options.model,
       mode: options.mode,
     };

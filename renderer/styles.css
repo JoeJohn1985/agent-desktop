@@ -856,7 +856,7 @@ body {
 }
 .tab__short { flex-shrink: 0; }
 .tab__app-icon { width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
-.tab__provider-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-secondary); }
+.tab__provider-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-secondary); position: relative; top: 1px; }
 
 /* Provider brand icons (inline SVG, monochrome via currentColor) */
 .provider-icon { width: 14px; height: 14px; display: inline-block; vertical-align: middle; flex-shrink: 0; }
@@ -2207,7 +2207,7 @@ mark.chat-search-highlight--active {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 6px 16px;
   border-top: 1px solid var(--border);
   background: var(--bg-base);
 }

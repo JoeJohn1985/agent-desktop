@@ -2445,9 +2445,11 @@ function updateApprovalBtn(tabId) {
   const btn = document.getElementById('btnApprovalToggle');
   if (!btn) return;
   const tab = tabs.get(tabId ?? activeTabId);
-  // Only ACP backends (Copilot, Claude Code) use the permission flow.
+  // Only Copilot uses this app-side toggle. Claude Code has its own native
+  // permission modes (default/acceptEdits/plan/bypassPermissions, selectable via
+  // the mode button) which would otherwise fight with this blanket override.
   const wrapper = btn.closest('.model-select-wrapper') || btn;
-  if (!tab || !isAcpProvider(getTabProvider(tab))) { wrapper.style.display = 'none'; return; }
+  if (!tab || getTabProvider(tab) !== 'copilot') { wrapper.style.display = 'none'; return; }
   wrapper.style.display = '';
   const manual = tab?.manualApproval === true;
   btn.textContent = manual ? '🔒 Bestätigen' : '🔓 Auto';
