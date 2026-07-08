@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.4] - 2026-07-08
+
+### Fixed
+- **Settings "Features" matrix was stale**: `PROVIDER_CAPABILITIES` still
+  listed `skills`/`agents` as unsupported for Claude Code, Anthropic, OpenAI,
+  GLM and Ollama from before those providers got the lazy-loaded per-provider
+  Skills/Agents index. Since the same table also drives
+  `updateSidebarForProvider()`, this was hiding the Skills/Agents sidebar
+  sections for those providers' tabs, not just mislabeling the matrix.
+  Gemini stays `false` (deliberately excluded, kept context-light).
+
 ## [1.2.3] - 2026-07-08
 
 ### Changed

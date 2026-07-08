@@ -2226,17 +2226,18 @@ function isSubscriptionProvider(provider) {
 // of truth: the sidebar hides unsupported skills/agents/MCP sections and the tab
 // rename button while a tab of that provider is active, and the settings
 // "Features" panel renders the same data as a comparison matrix.
-// (Claude Code brings its own skills/agents/MCP via its CLI; direct APIs share a
-// generic agent runtime but no skills/agents/MCP/marketplace/session persistence
-// yet; the Copilot CLI supports the full feature set.)
+// (Claude Code and the direct-API providers use the app's own lazy-loaded
+// per-provider Skills/Agents (see LAZY_CONTEXT_PROVIDERS in main.js) — Gemini
+// is deliberately excluded to keep it context-light. MCP and Marketplace stay
+// Copilot-only; the Copilot CLI supports the full feature set.)
 const PROVIDER_CAPABILITIES = {
   copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: true,  sessions: true,  marketplace: true },
-  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: true,  marketplace: false },
-  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
-  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: true,  marketplace: false },
+  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
+  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
   gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
-  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
-  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
+  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
+  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
 };
 
 // Feature metadata for the settings comparison matrix (label + icon + hint).
