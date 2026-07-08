@@ -1,6 +1,47 @@
 # Changelog
 
-## [1.1.0] - 2026-07-07
+## [1.2.0] - 2026-07-08
+
+### Added
+- **Skills for every provider**: provider-scoped folders under
+  `~/.agent-desktop/<provider>/skills` (Claude Code, Anthropic, OpenAI, GLM,
+  Ollama — Copilot keeps its native `~/.copilot/skills`; Gemini stays
+  context-light on purpose). Exposed as a lazy index (name + description +
+  file path) instead of inlining full content — the model reads a skill's
+  `SKILL.md` itself via its file tool only once it judges it relevant.
+  Sidebar's Skills section now follows the active tab's provider.
+- **Agents for every provider**, same shape as Skills:
+  `~/.agent-desktop/<provider>/agents`, lazy index, provider-aware sidebar.
+  Unlike Skills, agents are a persona switch — if a task matches an agent's
+  description, the model reads its `.agent.md` and adopts that
+  approach for the rest of the task (real sub-agent delegation is a separate,
+  later effort). The manual "activate" toggle still works everywhere as an
+  explicit override on top of the automatic selection.
+- **Claude Code session history on reopen**: tabs resumed from the sidebar (or
+  restored after an app restart) now restore the full prior conversation for
+  Claude Code too, read from its own native transcript
+  (`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`) — previously the tab
+  came back empty because it was wrongly routed through the direct-API
+  history store.
+- Tool-call rendering: the always-visible summary line (both the pending call
+  and its result) is now length-capped instead of growing without bound; the
+  full untruncated text stays one click away in an expandable block, so
+  nothing is lost — just not dumped as a wall of text by default.
+
+### Fixed
+- Claude Code's own permission modes (default/acceptEdits/plan/
+  bypassPermissions) are now the sole authority over approvals — the
+  app-level "Auto" toggle no longer fights with them (hidden for Claude Code
+  tabs; Copilot is unaffected).
+- Sidebar tab icon (`.tab__provider-icon`) is properly vertically centered.
+- Several silently-dropped/duplicated code paths cleaned up along the way:
+  `formatToolArgs`/`toolIcon`/`escapeHtml`/… existed twice (an untested copy
+  in `renderer/modules/utils.js` was silently shadowing the tested
+  `src/renderer-logic.js` versions) — consolidated onto the single tested
+  source.
+
+### Changed
+- `.chat-input-bar` padding tightened (`12px 16px` → `6px 16px`).
 
 ### Added
 - **New provider: Claude Code (Beta)** — use Claude Code via the ACP adapter

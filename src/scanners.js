@@ -46,6 +46,31 @@ function scanSkillDirectory(dir, source, iconFn, yamlParse) {
   return results;
 }
 
+/**
+ * Scans one or more skill directories and returns a lazy-loadable index
+ * (name + description + absolute SKILL.md path), used to expose skills to a
+ * model without inlining their full content — the model reads a SKILL.md
+ * itself via its file tool only once it judges that skill relevant.
+ * Directories are deduplicated by skill dir name, first match wins.
+ *
+ * @param {string[]} dirs - Skill directories to scan, in priority order.
+ * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
+ * @returns {Array<{name: string, description: string, file: string}>}
+ */
+function scanSkillsIndex(dirs, yamlParse) {
+  const entries = [];
+  const seen = new Set();
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const s of scanSkillDirectory(dir, 'user', () => '', yamlParse)) {
+      if (seen.has(s.dirName)) continue;
+      seen.add(s.dirName);
+      entries.push({ name: s.name, description: s.description, file: path.join(dir, s.dirName, 'SKILL.md') });
+    }
+  }
+  return entries;
+}
+
 // ── Folder Config ────────────────────────────────────────────
 
 /**
@@ -80,6 +105,7 @@ function writeFolderConfig(configPath, config) {
 
 module.exports = {
   scanSkillDirectory,
+  scanSkillsIndex,
   readFolderConfig,
   writeFolderConfig,
 };

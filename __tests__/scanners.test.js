@@ -6,7 +6,7 @@ jest.mock('fs');
 
 const fs = require('fs');
 const path = require('path');
-const { scanSkillDirectory, readFolderConfig, writeFolderConfig } = require('../src/scanners');
+const { scanSkillDirectory, scanSkillsIndex, readFolderConfig, writeFolderConfig } = require('../src/scanners');
 
 const SKILLS_DIR = path.join('C:', 'test', 'skills');
 const CONFIG_PATH = path.join('C:', 'test', '.copilot-desktop', 'folders.json');
@@ -287,6 +287,56 @@ describe('scanSkillDirectory', () => {
     const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
     expect(result).toHaveLength(2);
     expect(result.every(s => s.source === 'project')).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// scanSkillsIndex
+// ══════════════════════════════════════════════════════════════
+
+describe('scanSkillsIndex', () => {
+  const PROVIDER_DIR = path.join('C:', 'test', 'userData', '.agent-desktop', 'claude-code', 'skills');
+  const PROJECT_DIR = path.join('C:', 'myproject', '.github', 'skills');
+
+  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', () => {
+    const skillMdPath = path.join(PROVIDER_DIR, 'pdf', 'SKILL.md');
+    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR || p === skillMdPath);
+    fs.readdirSync.mockReturnValue([dirent('pdf')]);
+    fs.readFileSync.mockReturnValue('---\nname: pdf\ndescription: PDF-Verarbeitung\n---\n\nVolltext-Anleitung');
+    yamlParse.mockReturnValue({ name: 'pdf', description: 'PDF-Verarbeitung' });
+
+    const result = scanSkillsIndex([PROVIDER_DIR], yamlParse);
+    expect(result).toEqual([
+      { name: 'pdf', description: 'PDF-Verarbeitung', file: skillMdPath },
+    ]);
+  });
+
+  test('ignoriert leere/undefined Verzeichnisse', () => {
+    expect(scanSkillsIndex([null, undefined, ''], yamlParse)).toEqual([]);
+  });
+
+  test('dedupliziert nach dirName über mehrere Verzeichnisse, erstes Match gewinnt', () => {
+    const providerSkillMd = path.join(PROVIDER_DIR, 'shared', 'SKILL.md');
+    const projectSkillMd = path.join(PROJECT_DIR, 'shared', 'SKILL.md');
+    fs.existsSync.mockImplementation((p) => {
+      return p === PROVIDER_DIR || p === providerSkillMd || p === PROJECT_DIR || p === projectSkillMd;
+    });
+    fs.readdirSync.mockImplementation((dir) => {
+      if (dir === PROVIDER_DIR) return [dirent('shared')];
+      if (dir === PROJECT_DIR) return [dirent('shared')];
+      return [];
+    });
+    fs.readFileSync.mockReturnValue('---\nname: shared\ndescription: Provider-Version\n---\n');
+    yamlParse.mockReturnValue({ name: 'shared', description: 'Provider-Version' });
+
+    const result = scanSkillsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe(providerSkillMd);
+  });
+
+  test('gibt [] zurück wenn keine Verzeichnisse existieren', () => {
+    fs.existsSync.mockReturnValue(false);
+    expect(scanSkillsIndex([PROVIDER_DIR], yamlParse)).toEqual([]);
   });
 });
 

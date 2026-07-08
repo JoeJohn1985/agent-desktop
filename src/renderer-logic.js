@@ -11,6 +11,7 @@
 
 // ── Constants ────────────────────────────────────────────────
 const TOOL_ARGS_MAX_LENGTH = 60;
+const TOOL_PREVIEW_MAX_LENGTH = 150;
 
 // ── Path Helpers ─────────────────────────────────────────────
 
@@ -135,17 +136,53 @@ function toolDisplayName(name) {
 }
 
 /**
- * Formats tool arguments into a short summary string.
+ * Collapses whitespace (including newlines) into single spaces and truncates
+ * to maxLen, appending an ellipsis if anything was cut. Used to keep
+ * always-visible summary lines from growing without bound while the full,
+ * untruncated text stays available elsewhere (an expandable detail block).
+ */
+function truncateInline(text, maxLen) {
+  const collapsed = String(text || '').replace(/\s+/g, ' ').trim();
+  return collapsed.length > maxLen ? collapsed.slice(0, maxLen) + '…' : collapsed;
+}
+
+/**
+ * Full, untruncated primary argument text for a tool call — used for the
+ * expanded view. Mirrors the key priority of formatToolArgs().
+ */
+function toolArgFullText(args) {
+  if (!args) return '';
+  if (args.path) return args.path;
+  if (args.pattern) return args.pattern;
+  if (args.command) return args.command;
+  if (args.query) return args.query;
+  if (args.prompt) return args.prompt;
+  // Common MCP tool argument keys (e.g. Playwright): show something useful.
+  if (args.url) return args.url;
+  if (args.selector) return args.selector;
+  if (args.element) return args.element;
+  if (args.text) return String(args.text);
+  return '';
+}
+
+/**
+ * Formats tool arguments into a short, single-line summary string for the
+ * collapsed view. The untruncated text is available via toolArgFullText().
  */
 function formatToolArgs(name, args, maxLen) {
-  const limit = maxLen || TOOL_ARGS_MAX_LENGTH;
   if (!args) return '';
   if (args.path) return truncatePath(args.path);
-  if (args.pattern) return args.pattern;
-  if (args.command) return args.command.substring(0, limit) + (args.command.length > limit ? '…' : '');
-  if (args.query) return args.query.substring(0, limit) + (args.query.length > limit ? '…' : '');
-  if (args.prompt) return args.prompt.substring(0, limit) + (args.prompt.length > limit ? '…' : '');
-  return '';
+  const full = toolArgFullText(args);
+  return full ? truncateInline(full, maxLen || TOOL_ARGS_MAX_LENGTH) : '';
+}
+
+/**
+ * Short, single-line preview of a tool's result content for the collapsed
+ * summary. The untruncated resultContent stays available in the expandable
+ * body, so nothing is lost — this only bounds what's always visible.
+ */
+function formatToolResultPreview(resultContent, maxLen) {
+  return truncateInline(resultContent || '', maxLen || TOOL_PREVIEW_MAX_LENGTH);
 }
 
 // ── Session Filtering ────────────────────────────────────────
@@ -479,10 +516,14 @@ const _api = {
   toolIcon,
   toolDisplayName,
   formatToolArgs,
+  toolArgFullText,
+  truncateInline,
+  formatToolResultPreview,
   filterSessions,
   TOOL_ICONS,
   TOOL_DISPLAY_NAMES,
   TOOL_ARGS_MAX_LENGTH,
+  TOOL_PREVIEW_MAX_LENGTH,
   MODEL_PRICING,
   MODEL_PROVIDERS,
   getModelProvider,

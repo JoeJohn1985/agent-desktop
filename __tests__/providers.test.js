@@ -176,6 +176,33 @@ describe('Kontext-Management (ApiAgentClient)', () => {
   });
 });
 
+describe('buildAgentsIndex / buildSkillsIndex', () => {
+  const { buildAgentsIndex, buildSkillsIndex } = require('../src/providers/system-context');
+
+  it('buildAgentsIndex: [] / undefined ergibt leeren String', () => {
+    expect(buildAgentsIndex([])).toBe('');
+    expect(buildAgentsIndex(undefined)).toBe('');
+  });
+
+  it('buildAgentsIndex: listet Name, Beschreibung und Dateipfad, ohne Volltext', () => {
+    const out = buildAgentsIndex([{ name: 'planner', description: 'Plant Aufgaben', file: 'C:\\agents\\planner.agent.md' }]);
+    expect(out).toContain('Verfügbare Agenten');
+    expect(out).toContain('planner');
+    expect(out).toContain('Plant Aufgaben');
+    expect(out).toContain('C:\\agents\\planner.agent.md');
+  });
+
+  it('buildAgentsIndex: fehlende description bekommt Platzhalter', () => {
+    const out = buildAgentsIndex([{ name: 'x', file: 'f.agent.md' }]);
+    expect(out).toContain('(keine Beschreibung)');
+  });
+
+  it('buildSkillsIndex: [] / undefined ergibt leeren String', () => {
+    expect(buildSkillsIndex([])).toBe('');
+    expect(buildSkillsIndex(undefined)).toBe('');
+  });
+});
+
 describe('System-Context-Komposition', () => {
   const fs = require('fs');
   const os = require('os');
@@ -192,14 +219,27 @@ describe('System-Context-Komposition', () => {
     fs.writeFileSync(path.join(cwd, '.github', 'skills', 'pdf', 'SKILL.md'), 'PDF-Skill Inhalt.');
   });
 
-  it('bündelt Instructions, Agents und Skills aus dem Projekt', () => {
-    const out = composeSystemContext({ cwd, activeAgents: ['planner'], activeSkills: ['pdf'] });
+  it('bündelt Instructions sowie einen Agents- und Skills-Index (Lazy, kein Volltext)', () => {
+    const agentFile = path.join(cwd, '.github', 'agents', 'planner.agent.md');
+    const skillFile = path.join(cwd, '.github', 'skills', 'pdf', 'SKILL.md');
+    const out = composeSystemContext({
+      cwd,
+      agents: [{ name: 'planner', description: 'Plant Aufgaben', file: agentFile }],
+      skills: [{ name: 'pdf', description: 'PDF-Verarbeitung', file: skillFile }],
+    });
     expect(out).toContain('Projekt-Instructions');
     expect(out).toContain('Antworte immer auf Deutsch.');
-    expect(out).toContain('Agent: planner');
-    expect(out).toContain('Du bist ein Planer.');
-    expect(out).toContain('Skill: pdf');
-    expect(out).toContain('PDF-Skill Inhalt.');
+    expect(out).toContain('Verfügbare Agenten');
+    expect(out).toContain('planner');
+    expect(out).toContain('Plant Aufgaben');
+    expect(out).toContain(agentFile);
+    expect(out).toContain('Verfügbare Skills');
+    expect(out).toContain('pdf');
+    expect(out).toContain('PDF-Verarbeitung');
+    expect(out).toContain(skillFile);
+    // Lazy indexes only — no eager inlining of the agent's/skill's file content.
+    expect(out).not.toContain('Du bist ein Planer.');
+    expect(out).not.toContain('PDF-Skill Inhalt.');
   });
 
   it('leerer String wenn nichts aktiv und keine Instructions', () => {
@@ -207,9 +247,14 @@ describe('System-Context-Komposition', () => {
     expect(composeSystemContext({ cwd: empty })).toBe('');
   });
 
-  it('ignoriert nicht vorhandene Skills/Agents', () => {
-    const out = composeSystemContext({ cwd, activeSkills: ['gibtsnicht'] });
-    expect(out).not.toContain('Skill: gibtsnicht');
+  it('ignoriert leere Skills-Liste', () => {
+    const out = composeSystemContext({ cwd, skills: [] });
+    expect(out).not.toContain('Verfügbare Skills');
+  });
+
+  it('ignoriert leere Agents-Liste', () => {
+    const out = composeSystemContext({ cwd, agents: [] });
+    expect(out).not.toContain('Verfügbare Agenten');
   });
 });
 

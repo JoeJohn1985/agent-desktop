@@ -494,6 +494,17 @@ describe('AcpClient', () => {
       expect(req.params.prompt).toEqual([{ type: 'text', text: 'Hallo ACP!' }]);
     });
 
+    it('prompt(text, systemContext) stellt einen zusätzlichen Text-Block voran', async () => {
+      client.prompt('Hallo ACP!', 'Verfügbare Skills: pdf');
+      await flushPromises();
+
+      const req = JSON.parse(stdinWritten[0].trim());
+      expect(req.params.prompt).toEqual([
+        { type: 'text', text: 'Verfügbare Skills: pdf' },
+        { type: 'text', text: 'Hallo ACP!' },
+      ]);
+    });
+
     it('prompt() wechselt State zu "busy"', async () => {
       client.prompt('Test');
       await flushPromises();

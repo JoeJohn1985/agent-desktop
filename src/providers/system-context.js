@@ -27,20 +27,44 @@ function readFirst(paths) {
 }
 
 /**
+ * Builds a lazy-loadable skills index: name + description + absolute file
+ * path per skill. Nothing is inlined eagerly — the model reads a SKILL.md
+ * itself via its file tool only once it judges that skill relevant.
+ * @param {Array<{name: string, description?: string, file: string}>} [skills]
+ * @returns {string} Empty string if there are no skills.
+ */
+function buildSkillsIndex(skills) {
+  if (!skills || !skills.length) return '';
+  const lines = skills.map(s => `- **${s.name}**: ${s.description || '(keine Beschreibung)'}\n  Datei: ${s.file}`);
+  return `# Verfügbare Skills\n\nFolgende Skills stehen zur Verfügung. Lies bei Bedarf die angegebene Datei mit deinem Datei-Werkzeug, um die vollständige Anleitung zu erhalten — nur wenn sie für die aktuelle Aufgabe relevant ist.\n\n${lines.join('\n')}`;
+}
+
+/**
+ * Builds a lazy-loadable agents index: name + description + absolute file
+ * path per agent. Nothing is inlined eagerly — the model reads an agent's
+ * .agent.md itself via its file tool once it judges the persona/approach
+ * relevant, and adopts it for the rest of the task (a persona switch within
+ * the same conversation — not a delegated sub-agent run).
+ * @param {Array<{name: string, description?: string, file: string}>} [agents]
+ * @returns {string} Empty string if there are no agents.
+ */
+function buildAgentsIndex(agents) {
+  if (!agents || !agents.length) return '';
+  const lines = agents.map(a => `- **${a.name}**: ${a.description || '(keine Beschreibung)'}\n  Datei: ${a.file}`);
+  return `# Verfügbare Agenten\n\nFolgende Agenten (Rollen/Herangehensweisen für bestimmte Aufgabenarten) stehen zur Verfügung. Passt eine Aufgabe zu einem Agenten, lies bei Bedarf dessen Datei mit deinem Datei-Werkzeug und übernimm die darin beschriebene Herangehensweise für den weiteren Verlauf der Aufgabe.\n\n${lines.join('\n')}`;
+}
+
+/**
  * Builds the composed system-context string (may be empty).
  * @param {Object} opts
  * @param {string} opts.cwd - Working directory (for project-level files).
- * @param {string} [opts.skillsDir] - User skills directory.
- * @param {string} [opts.agentsDir] - User agents directory.
  * @param {string} [opts.instructionsFile] - Configured instructions file path.
- * @param {string[]} [opts.activeSkills] - Active skill dir names.
- * @param {string[]} [opts.activeAgents] - Active agent file slugs.
+ * @param {Array<{name: string, description?: string, file: string}>} [opts.agents] - Pre-scanned agents (provider-global + project) to expose as a lazy index.
+ * @param {Array<{name: string, description?: string, file: string}>} [opts.skills] - Pre-scanned skills (provider-global + project) to expose as a lazy index.
  * @returns {string}
  */
 function composeSystemContext(opts = {}) {
-  const { cwd = process.cwd(), skillsDir, agentsDir, instructionsFile } = opts;
-  const activeSkills = opts.activeSkills || [];
-  const activeAgents = opts.activeAgents || [];
+  const { cwd = process.cwd(), instructionsFile } = opts;
   const parts = [];
 
   // 1. Instructions (base configuration, e.g. "always answer in German").
@@ -51,25 +75,15 @@ function composeSystemContext(opts = {}) {
   ]);
   if (instr) parts.push(`# Projekt-Instructions\n\n${instr}`);
 
-  // 2. Active agents (how the task should be approached).
-  for (const slug of activeAgents) {
-    const content = readFirst([
-      agentsDir && path.join(agentsDir, `${slug}.agent.md`),
-      path.join(cwd, '.github', 'agents', `${slug}.agent.md`),
-    ]);
-    if (content) parts.push(`# Agent: ${slug}\n\n${content}`);
-  }
+  // 2. Agents — lazy index (see buildAgentsIndex).
+  const agentsBlock = buildAgentsIndex(opts.agents);
+  if (agentsBlock) parts.push(agentsBlock);
 
-  // 3. Active skills (reference knowledge the model may draw on).
-  for (const dirName of activeSkills) {
-    const content = readFirst([
-      skillsDir && path.join(skillsDir, dirName, 'SKILL.md'),
-      path.join(cwd, '.github', 'skills', dirName, 'SKILL.md'),
-    ]);
-    if (content) parts.push(`# Skill: ${dirName}\n\n${content}`);
-  }
+  // 3. Skills — lazy index (see buildSkillsIndex).
+  const skillsBlock = buildSkillsIndex(opts.skills);
+  if (skillsBlock) parts.push(skillsBlock);
 
   return parts.join('\n\n---\n\n');
 }
 
-module.exports = { composeSystemContext };
+module.exports = { composeSystemContext, buildSkillsIndex, buildAgentsIndex };

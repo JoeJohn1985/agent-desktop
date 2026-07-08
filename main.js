@@ -11,16 +11,17 @@ if (process.platform === 'linux') {
 }
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
+const { readClaudeCodeTranscript } = require('./src/claude-code-transcript');
 const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
-const { scanSkillDirectory: _scanSkillDirectory, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
-const { scanAgentsDirectory } = require('./src/agents');
+const { scanSkillDirectory: _scanSkillDirectory, scanSkillsIndex: _scanSkillsIndex, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
+const { scanAgentsDirectory, scanAgentsIndex: _scanAgentsIndex } = require('./src/agents');
 const { AcpClient } = require('./src/acp-client');
 const { getModelProvider, createApiBackend } = require('./src/providers');
 const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
-const { DATA_DIR, migrateLegacyData } = require('./src/data-dir');
+const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir } = require('./src/data-dir');
 
 app.name = 'agent-desktop';
 
@@ -105,6 +106,23 @@ const COPILOT_BIN = 'copilot';
 let COPILOT_CWD = folderConfig.cwd || process.cwd();
 /** @type {string} Directory for project images */
 let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
+/**
+ * Providers that get their own ~/.agent-desktop/<provider>/{skills,agents}
+ * folders with the lazy skills/agents index. Copilot keeps its native
+ * ~/.copilot/{skills,agents} (the CLI reads them itself); Gemini is
+ * intentionally kept context-light.
+ * @type {string[]}
+ */
+const LAZY_CONTEXT_PROVIDERS = ['claude-code', 'anthropic', 'openai', 'glm', 'ollama'];
+
+/** Creates the per-provider skills/agents folders (if missing) so they show up on disk right away. */
+function ensureProviderContextDirs() {
+  for (const provider of LAZY_CONTEXT_PROVIDERS) {
+    for (const dir of [providerSkillsDir(provider), providerAgentsDir(provider)]) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { console.warn(`[context] Ordner ${dir} konnte nicht angelegt werden:`, e.message); }
+    }
+  }
+}
 
 // ── Constants ──────────────────────────────────────────────────
 const CLI_VERSION_TIMEOUT_MS = 5000;
@@ -293,6 +311,7 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   }
 
   // Session management: load existing or create new
+  let isNewlyCreatedSession = false;
   if (!client.sessionId) {
     const mcpNames = (clientOptions.mcpServers || []).map(s => s.name);
     console.log(`[acp:tab${tabId}] ${options.sessionId ? 'load' : 'new'} session with MCP servers: [${mcpNames.join(', ') || 'none'}]`);
@@ -300,11 +319,31 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       await client.loadSession(options.sessionId, cwd);
     } else {
       await client.newSession(cwd);
+      isNewlyCreatedSession = true;
     }
   }
 
+  // Claude Code has no native skills/agents folder of its own here (unlike
+  // Copilot, whose CLI reads ~/.copilot/{skills,agents} itself) — inject lazy
+  // agents+skills indexes once, invisibly, as part of the very first prompt
+  // of a brand-new session. They then stay part of that session's own
+  // history for the rest of the chat.
+  let promptContext;
+  if (provider === 'claude-code' && isNewlyCreatedSession) {
+    const { buildSkillsIndex, buildAgentsIndex } = require('./src/providers/system-context');
+    const agents = _scanAgentsIndex([
+      providerAgentsDir('claude-code'),
+      path.join(cwd, '.github', 'agents'),
+    ], yaml.parse);
+    const skills = _scanSkillsIndex([
+      providerSkillsDir('claude-code'),
+      path.join(cwd, '.github', 'skills'),
+    ], yaml.parse);
+    promptContext = [buildAgentsIndex(agents), buildSkillsIndex(skills)].filter(Boolean).join('\n\n---\n\n') || undefined;
+  }
+
   // Send prompt (async — events stream to renderer via AcpClient)
-  client.prompt(prompt).catch((err) => {
+  client.prompt(prompt, promptContext).catch((err) => {
     // Cancellation is a normal user action, not an error.
     if (err.message === 'Cancelled') return;
     console.error(`[acp:tab${tabId}] prompt error:`, err.message);
@@ -330,22 +369,28 @@ async function sendApiPrompt(tabId, prompt, options) {
     throw new Error(`Kein API-Key für ${provider} hinterlegt. Bitte in den Einstellungen unter „API-Provider" eintragen.`);
   }
 
-  // Compose the system context (instructions + active agents + active skills)
+  // Compose the system context (instructions + active agents + skills index)
   // from their .md files — for direct APIs there is no CLI to read them.
-  // Only Anthropic uses it; Gemini is intentionally kept context-light.
+  // Gemini is intentionally kept context-light (no tool access trusted yet).
   let systemContext = '';
   try {
     const { composeSystemContext } = require('./src/providers/system-context');
-    // Full-agentic providers get the project context (instructions/agents/skills);
-    // Gemini is intentionally kept context-light.
-    const CONTEXT_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+    const CONTEXT_PROVIDERS = new Set(LAZY_CONTEXT_PROVIDERS.filter(p => p !== 'claude-code'));
     if (CONTEXT_PROVIDERS.has(provider)) systemContext = composeSystemContext({
       cwd,
-      skillsDir: folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills'),
-      agentsDir: folderConfig.agentsDir || path.join(os.homedir(), '.copilot', 'agents'),
       instructionsFile: folderConfig.instructionsFile,
-      activeSkills: options.activeSkills || [],
-      activeAgents: options.activeAgents || [],
+      // Agents/Skills are provider-scoped (~/.agent-desktop/<provider>/…) plus
+      // any project-level ones (cwd/.github/…) — exposed as lazy indexes, not
+      // inlined. The model reloads a file itself via read_file only once it
+      // judges the agent/skill relevant to the current task.
+      agents: _scanAgentsIndex([
+        providerAgentsDir(provider),
+        path.join(cwd, '.github', 'agents'),
+      ], yaml.parse),
+      skills: _scanSkillsIndex([
+        providerSkillsDir(provider),
+        path.join(cwd, '.github', 'skills'),
+      ], yaml.parse),
     });
   } catch (e) {
     console.warn('[api] composeSystemContext failed:', e?.message);
@@ -751,6 +796,15 @@ ipcMain.handle('sessions:readAllMessages', async (_event, sessionId) => {
 });
 
 /**
+ * @ipc sessions:readClaudeCodeTranscript — Full message history of a Claude
+ * Code session, read from its own native transcript (not the app's session
+ * store). @param {string} cwd @param {string} sessionId @returns {Promise<Array>}
+ */
+ipcMain.handle('sessions:readClaudeCodeTranscript', async (_event, cwd, sessionId) => {
+  return readClaudeCodeTranscript(os.homedir(), cwd, sessionId);
+});
+
+/**
  * Backs up a session's todos.json (if present and non-empty) before deletion,
  * so a manually curated todo list is never lost permanently. Copies go to
  * ~/.copilot-desktop/deleted-todos/<sessionId>-<timestamp>.json.
@@ -958,6 +1012,19 @@ ipcMain.handle('skills:list', async () => {
 });
 
 /**
+ * @ipc skills:listProvider — Scans ~/.agent-desktop/<provider>/skills/ for a
+ * non-Copilot provider (Claude Code, Anthropic, OpenAI, GLM, Ollama).
+ * Copilot keeps its native ~/.copilot/skills and is not handled here.
+ * @param {string} provider
+ * @returns {Promise<Array<Object>>} Skills with source 'provider'
+ */
+ipcMain.handle('skills:listProvider', async (_event, provider) => {
+  const dir = providerSkillsDir(provider);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
+  return _scanSkillDirectory(dir, 'provider', userSkillIcon, yaml.parse);
+});
+
+/**
  * @ipc skills:listProject — Scans .github/skills/ in a given CWD for project-specific skills.
  * @param {string} cwd - Absolute path to scan
  * @returns {Promise<Array<Object>>} Project skills with source 'project'
@@ -1116,6 +1183,19 @@ ipcMain.handle('mcp:probe', async () => {
 // Agents
 ipcMain.handle('agents:list', async () => {
   return scanAgents();
+});
+
+/**
+ * @ipc agents:listProvider — Scans ~/.agent-desktop/<provider>/agents/ for a
+ * non-Copilot provider (Claude Code, Anthropic, OpenAI, GLM, Ollama).
+ * Copilot keeps its native ~/.copilot/agents and is not handled here.
+ * @param {string} provider
+ * @returns {Promise<Array<Object>>} Agents with source 'provider'
+ */
+ipcMain.handle('agents:listProvider', async (_event, provider) => {
+  const dir = providerAgentsDir(provider);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
+  return scanAgentsDirectory(dir, yaml.parse).map(a => ({ ...a, source: 'provider' }));
 });
 
 /**
@@ -1927,6 +2007,7 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
   }
+  ensureProviderContextDirs();
   createWindow();
   startImageWatcher();
 });

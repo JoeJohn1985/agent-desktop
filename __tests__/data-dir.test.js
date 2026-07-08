@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { migrateLegacyData } = require('../src/data-dir');
+const { migrateLegacyData, providerSkillsDir, providerAgentsDir, DATA_DIR } = require('../src/data-dir');
 
 function mkTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agentdesk-mig-'));
@@ -66,5 +66,29 @@ describe('data-dir: migrateLegacyData', () => {
     const moved = migrateLegacyData({ userDataDir: userDir, legacyUserDataDir: legacyUser, dataDir: root, legacyDataDir: root });
     expect(moved).toBe(false);
     expect(fs.readFileSync(path.join(userDir, 'preferences.json'), 'utf-8')).toBe('NEW');
+  });
+});
+
+describe('data-dir: providerSkillsDir', () => {
+  it('liegt unter ~/.agent-desktop/<provider>/skills', () => {
+    expect(providerSkillsDir('claude-code')).toBe(path.join(DATA_DIR, 'claude-code', 'skills'));
+  });
+
+  it('trennt Provider in eigene Unterordner', () => {
+    expect(providerSkillsDir('anthropic')).not.toBe(providerSkillsDir('openai'));
+  });
+});
+
+describe('data-dir: providerAgentsDir', () => {
+  it('liegt unter ~/.agent-desktop/<provider>/agents', () => {
+    expect(providerAgentsDir('claude-code')).toBe(path.join(DATA_DIR, 'claude-code', 'agents'));
+  });
+
+  it('trennt Provider in eigene Unterordner', () => {
+    expect(providerAgentsDir('anthropic')).not.toBe(providerAgentsDir('openai'));
+  });
+
+  it('liegt getrennt vom Skills-Ordner desselben Providers', () => {
+    expect(providerAgentsDir('claude-code')).not.toBe(providerSkillsDir('claude-code'));
   });
 });

@@ -11,8 +11,12 @@ const {
   toolIcon,
   toolDisplayName,
   formatToolArgs,
+  toolArgFullText,
+  truncateInline,
+  formatToolResultPreview,
   filterSessions,
   TOOL_ARGS_MAX_LENGTH,
+  TOOL_PREVIEW_MAX_LENGTH,
   MODEL_PRICING,
   parseTokenK,
   parseUsageTokens,
@@ -284,6 +288,70 @@ describe('formatToolArgs', () => {
     const cmd = 'a'.repeat(20);
     const result = formatToolArgs('powershell', { command: cmd }, 10);
     expect(result).toBe('a'.repeat(10) + '…');
+  });
+
+  it('handles MCP tool argument keys (url/selector/element/text)', () => {
+    expect(formatToolArgs('browser_navigate', { url: 'https://example.com' })).toBe('https://example.com');
+    expect(formatToolArgs('browser_click', { selector: '#submit' })).toBe('#submit');
+    expect(formatToolArgs('browser_click', { element: 'Submit button' })).toBe('Submit button');
+    expect(formatToolArgs('browser_type', { text: 'hello' })).toBe('hello');
+  });
+
+  it('collapses embedded newlines before truncating', () => {
+    expect(formatToolArgs('powershell', { command: 'line1\nline2\nline3' })).toBe('line1 line2 line3');
+  });
+});
+
+// ── toolArgFullText ────────────────────────────────────────────
+describe('toolArgFullText', () => {
+  it('returns the untruncated primary argument, unlike formatToolArgs', () => {
+    const longCmd = 'a'.repeat(100);
+    expect(toolArgFullText({ command: longCmd })).toBe(longCmd);
+  });
+
+  it('preserves embedded newlines (no collapsing)', () => {
+    expect(toolArgFullText({ command: 'line1\nline2' })).toBe('line1\nline2');
+  });
+
+  it('returns empty string for null/undefined/unrecognized args', () => {
+    expect(toolArgFullText(null)).toBe('');
+    expect(toolArgFullText({ foo: 'bar' })).toBe('');
+  });
+});
+
+// ── truncateInline ───────────────────────────────────────────
+describe('truncateInline', () => {
+  it('leaves short text untouched', () => {
+    expect(truncateInline('hello', 60)).toBe('hello');
+  });
+
+  it('collapses whitespace/newlines and truncates with an ellipsis', () => {
+    const text = 'a'.repeat(70);
+    const result = truncateInline(text, 60);
+    expect(result).toBe('a'.repeat(60) + '…');
+  });
+
+  it('handles empty/undefined input', () => {
+    expect(truncateInline('', 60)).toBe('');
+    expect(truncateInline(undefined, 60)).toBe('');
+  });
+});
+
+// ── formatToolResultPreview ──────────────────────────────────
+describe('formatToolResultPreview', () => {
+  it('leaves short results untouched', () => {
+    expect(formatToolResultPreview('ok')).toBe('ok');
+  });
+
+  it('truncates long results to TOOL_PREVIEW_MAX_LENGTH', () => {
+    const longResult = 'x'.repeat(500);
+    const result = formatToolResultPreview(longResult);
+    expect(result.length).toBe(TOOL_PREVIEW_MAX_LENGTH + 1);
+    expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('collapses embedded newlines', () => {
+    expect(formatToolResultPreview('line1\nline2\nline3')).toBe('line1 line2 line3');
   });
 });
 

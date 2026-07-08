@@ -178,4 +178,4 @@ function readAllMessages(sessionDir, limit = 1000) {
   }
 }
 
-module.exports = { readCheckpoints, readPlan, readRecentMessages, readAllMessages };
+module.exports = { readCheckpoints, readPlan, readRecentMessages, readAllMessages, extractMessageContent };

@@ -138,6 +138,8 @@ contextBridge.exposeInMainWorld('copilot', {
     readRecentMessages: (id) => ipcRenderer.invoke('sessions:readRecentMessages', id),
     /** @ipc sessions:readAllMessages — Full chronological history. @param {string} id @returns {Promise<Array>} */
     readAllMessages: (id) => ipcRenderer.invoke('sessions:readAllMessages', id),
+    /** @ipc sessions:readClaudeCodeTranscript — Full history from Claude Code's own transcript. @param {string} cwd @param {string} id @returns {Promise<Array>} */
+    readClaudeCodeTranscript: (cwd, id) => ipcRenderer.invoke('sessions:readClaudeCodeTranscript', cwd, id),
     /** @ipc sessions:create @param {string} name - Session display name @returns {Promise<string>} New session UUID */
     create: (name) => ipcRenderer.invoke('sessions:create', name),
     /** @ipc sessions:delete @param {string} id - Session ID @returns {Promise<boolean>} */
@@ -313,6 +315,8 @@ contextBridge.exposeInMainWorld('copilot', {
     list: () => ipcRenderer.invoke('skills:list'),
     /** @ipc skills:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project skills from cwd/.github/skills/ */
     listProject: (cwd) => ipcRenderer.invoke('skills:listProject', cwd),
+    /** @ipc skills:listProvider @param {string} provider @returns {Promise<Array<Object>>} Skills from ~/.agent-desktop/<provider>/skills/ (all providers except Copilot, which keeps its native ~/.copilot/skills) */
+    listProvider: (provider) => ipcRenderer.invoke('skills:listProvider', provider),
     /** @ipc skills:delete @param {string} dirName - Skill directory name @returns {Promise<{success: boolean, error?: string}>} */
     delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
     /** @ipc skills:deleteProject @param {string} cwd @param {string} dirName @returns {Promise<{success: boolean, error?: string}>} */
@@ -339,6 +343,8 @@ contextBridge.exposeInMainWorld('copilot', {
     list: () => ipcRenderer.invoke('agents:list'),
     /** @ipc agents:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project agents from cwd/.github/agents/ */
     listProject: (cwd) => ipcRenderer.invoke('agents:listProject', cwd),
+    /** @ipc agents:listProvider @param {string} provider @returns {Promise<Array<Object>>} Agents from ~/.agent-desktop/<provider>/agents/ (all providers except Copilot, which keeps its native ~/.copilot/agents) */
+    listProvider: (provider) => ipcRenderer.invoke('agents:listProvider', provider),
     /** @ipc agents:delete @param {string} fileSlug - Agent file slug (without .agent.md) @returns {Promise<{success: boolean, error?: string}>} */
     delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },

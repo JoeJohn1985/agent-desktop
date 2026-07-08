@@ -20,6 +20,27 @@ const LEGACY_APP_DIR = '.copilot-desktop';
 const DATA_DIR = path.join(os.homedir(), APP_DIR);
 const LEGACY_DATA_DIR = path.join(os.homedir(), LEGACY_APP_DIR);
 
+// Provider-scoped config (skills, …) lives under the same home-dir data
+// folder as everything else, one subfolder per provider — analogous to
+// Copilot's own ~/.copilot/skills: ~/.agent-desktop/<provider>/skills/<name>/SKILL.md
+/**
+ * Absolute path to a provider's skills directory, under ~/.agent-desktop.
+ * @param {string} provider - Provider id, e.g. 'claude-code', 'anthropic'.
+ * @returns {string}
+ */
+function providerSkillsDir(provider) {
+  return path.join(DATA_DIR, provider, 'skills');
+}
+
+/**
+ * Absolute path to a provider's agents directory, under ~/.agent-desktop.
+ * @param {string} provider - Provider id, e.g. 'claude-code', 'anthropic'.
+ * @returns {string}
+ */
+function providerAgentsDir(provider) {
+  return path.join(DATA_DIR, provider, 'agents');
+}
+
 /** Recursively copy src→dest without overwriting existing files. Never throws. */
 function copyMerge(src, dest, fsImpl) {
   try {
@@ -67,4 +88,4 @@ function migrateLegacyData(opts = {}, fsImpl = fs) {
   return moved;
 }
 
-module.exports = { DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge };
+module.exports = { DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge, providerSkillsDir, providerAgentsDir };

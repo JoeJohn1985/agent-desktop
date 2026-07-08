@@ -39,4 +39,30 @@ function scanAgentsDirectory(agentsDir, yamlParse) {
   return agents;
 }
 
-module.exports = { scanAgentsDirectory };
+/**
+ * Scans one or more agent directories and returns a lazy-loadable index
+ * (name + description + absolute .agent.md path), used to expose agents to a
+ * model without inlining their full instructions — the model reads an
+ * agent's file itself via its file tool once it judges the persona/approach
+ * relevant to the current task, and adopts it from there. Directories are
+ * deduplicated by file slug, first match wins.
+ *
+ * @param {string[]} dirs - Agent directories to scan, in priority order.
+ * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
+ * @returns {Array<{name: string, description: string, file: string}>}
+ */
+function scanAgentsIndex(dirs, yamlParse) {
+  const entries = [];
+  const seen = new Set();
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const a of scanAgentsDirectory(dir, yamlParse)) {
+      if (seen.has(a.fileSlug)) continue;
+      seen.add(a.fileSlug);
+      entries.push({ name: a.name, description: a.description, file: path.join(dir, `${a.fileSlug}.agent.md`) });
+    }
+  }
+  return entries;
+}
+
+module.exports = { scanAgentsDirectory, scanAgentsIndex };

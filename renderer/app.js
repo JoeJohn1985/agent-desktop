@@ -657,6 +657,12 @@ function switchTab(tabId) {
 
   renderTabs();
 
+  // Global skills/agents follow the newly active tab's provider (Copilot
+  // keeps its native ~/.copilot/{skills,agents}; every other provider has
+  // its own folder).
+  loadGlobalSkillsForProvider(getTabProvider(activeTab));
+  loadGlobalAgentsForProvider(getTabProvider(activeTab));
+
   // Reload project skills/agents for the newly active tab's CWD
   loadProjectSkillsAndAgents(activeTab?.cwd || null);
   
@@ -1153,7 +1159,12 @@ function sendMessage() {
     }
   }
 
-  // Build agent instructions prefix for active agents
+  // Build agent instructions prefix for active agents. Copilot's CLI has its
+  // own "/agent Name" slash command to switch persona; every other provider
+  // gets a plain-language hint instead — the model looks up the agent's full
+  // instructions itself via the agents index already in its context
+  // (composeSystemContext for API providers, the first-prompt index
+  // injection for Claude Code) and adopts that persona from there.
   let agentPrefix = '';
   const activeAgentInfos = [];
   if (activeAgents.size > 0) {
@@ -1164,11 +1175,11 @@ function sendMessage() {
       }
     }
     if (activeAgentInfos.length > 0) {
-      const agentNames = [...activeAgents].map(id => {
-        const a = agents.find(ag => ag.id === id);
-        return a ? `/agent ${a.name}` : null;
-      }).filter(Boolean);
-      agentPrefix = `${agentNames.join('\n')}\n\n`;
+      if (getTabProvider(tab) === 'copilot') {
+        agentPrefix = `${activeAgentInfos.map(ai => `/agent ${ai.name}`).join('\n')}\n\n`;
+      } else {
+        agentPrefix = `Nimm für diese Aufgabe die Rolle/Herangehensweise folgender Agenten ein:\n${activeAgentInfos.map(ai => `- ${ai.name}`).join('\n')}\n\n`;
+      }
     }
   }
 
@@ -1204,16 +1215,7 @@ function sendMessage() {
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
   const mergedDenied = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
 
-  // For direct-API backends, pass the active skill/agent identifiers so main
-  // can inline their .md content into the (cached) system prompt. Ignored by
-  // the Copilot backend (the CLI reads these files itself).
-  const activeSkillDirs = [...activeSkills].map(id => skills.find(s => s.id === id)?.dirName).filter(Boolean);
-  const activeAgentSlugs = [...activeAgents].map(id => agents.find(a => a.id === id)?.fileSlug).filter(Boolean);
-
   const sendTabId = activeTabId;
-  // Claude Code manages its own skills/agents — don't prepend the app's Copilot
-  // skill/agent prompt prefixes (they'd be meaningless there).
-  if (getTabProvider(tab) === 'claude-code') { agentPrefix = ''; skillPrefix = ''; }
   // Freeze the model this prompt actually runs on. The token delta measured after
   // completion must be priced at THIS model — not tab.selectedModel, which the
   // user may switch (for the next prompt) before /usage is read.
@@ -1233,8 +1235,6 @@ function sendMessage() {
     model: tab.selectedModel || undefined,
     provider: getTabProvider(tab),
     cwd: tab.cwd || undefined,
-    activeSkills: activeSkillDirs,
-    activeAgents: activeAgentSlugs,
     geminiMode: tab.geminiMode || 'search',
     baseURL: getProviderBaseUrl(getTabProvider(tab)) || undefined,
   })
@@ -1542,10 +1542,22 @@ function initCopilotIPC() {
         // generic icon. (report_intent already returned above.)
         {
           const callIcon = toolIcon(event.data.toolName) || '🔧';
-          const callEl = document.createElement('div');
-          callEl.className = 'stream-tool-call';
           const callArgs = formatToolArgs(event.data.toolName, event.data.arguments || {});
-          callEl.innerHTML = `<span class="stream-tool-call__icon">${callIcon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(event.data.toolName))}</span> <span class="stream-tool-call__args">${escapeHtml(callArgs)}</span>`;
+          const callFull = toolArgFullText(event.data.arguments || {});
+          const summaryHtml = `<span class="stream-tool-call__icon">${callIcon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(event.data.toolName))}</span> <span class="stream-tool-call__args">${escapeHtml(callArgs)}</span>`;
+          const callEl = document.createElement('details');
+          callEl.className = 'stream-tool-call';
+          const summary = document.createElement('summary');
+          summary.innerHTML = summaryHtml;
+          callEl.appendChild(summary);
+          // Only add the expandable full-text block when there's actually more
+          // to see than the collapsed preview already shows.
+          if (callFull && callFull !== callArgs) {
+            const full = document.createElement('pre');
+            full.className = 'stream-tool-call__full';
+            full.textContent = callFull;
+            callEl.appendChild(full);
+          }
           tab.streamEl.insertBefore(callEl, tab.statusEl);
         }
         if (event.data.toolName === 'ask_user') {
@@ -1591,7 +1603,10 @@ function initCopilotIPC() {
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
         const resultContent = event.data.result.content || '';
-        const preview = resultContent.replace(/\n/g, ' ');
+        // Collapsed summary is short — the untruncated resultContent stays
+        // available below in the expandable .stream-tool-result__content, so
+        // nothing is actually lost, just not dumped into the always-visible line.
+        const preview = formatToolResultPreview(resultContent);
         const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
 
         // ACP emits multiple tool_call_update events per call (pending →
@@ -3351,27 +3366,19 @@ async function displaySessionContext(tab, sessionId) {
 
   // 2. Letzte Nachrichten als echte Chat-Bubbles. Direkt-API-Sessions haben
   // keine CLI-State-Dateien — ihren Verlauf laden wir aus dem API-Session-Store.
+  // Claude Code führt ebenfalls kein solches Store, hat aber sein eigenes
+  // Transkript-Format (~/.claude/projects/…), das wir separat auslesen.
   try {
-    if (getTabProvider(tab) !== 'copilot') {
-      const history = await window.copilot.providers.loadSessionHistory(sessionId);
-      renderApiHistory(history, insertBefore);
-    } else {
+    const provider = getTabProvider(tab);
+    if (provider === 'copilot') {
       // Full conversation history (not just the last few) so reopening a
       // Copilot session restores the whole verlauf in the tab.
-      const messages = await copilot.sessions.readAllMessages(sessionId);
-      if (messages && messages.length > 0) {
-        for (const msg of messages) {
-          const el = document.createElement('div');
-          if (msg.role === 'user') {
-            el.className = 'stream-input stream-input--history';
-            el.textContent = msg.content;
-          } else {
-            el.className = 'stream-response markdown-body stream-response--history';
-            el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
-          }
-          insertBefore(el);
-        }
-      }
+      renderSimpleHistory(await copilot.sessions.readAllMessages(sessionId), insertBefore);
+    } else if (provider === 'claude-code') {
+      renderSimpleHistory(await copilot.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore);
+    } else {
+      const history = await window.copilot.providers.loadSessionHistory(sessionId);
+      renderApiHistory(history, insertBefore);
     }
   } catch (e) { console.warn('[sessions] Nachrichten nicht verfügbar:', e.message); }
 
@@ -3385,6 +3392,28 @@ async function displaySessionContext(tab, sessionId) {
   // view pinned at the very top and the user has to scroll all the way down.
   // rAF so the browser has laid out the freshly-inserted bubbles first.
   requestAnimationFrame(() => scrollToBottom(tab.streamEl));
+}
+
+/**
+ * Renders a simple {role, content}[] history (Copilot's events.jsonl or
+ * Claude Code's own transcript — both already reduced to plain text turns)
+ * as history bubbles.
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
+ */
+function renderSimpleHistory(messages, insertBefore) {
+  if (!Array.isArray(messages)) return;
+  for (const msg of messages) {
+    const el = document.createElement('div');
+    if (msg.role === 'user') {
+      el.className = 'stream-input stream-input--history';
+      el.textContent = msg.content;
+    } else {
+      el.className = 'stream-response markdown-body stream-response--history';
+      el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+    }
+    insertBefore(el);
+  }
 }
 
 /**
@@ -3770,6 +3799,32 @@ function renderSkillManager() {
 }
 
 /**
+ * Loads the "global" (non-project) skill list for a given provider and
+ * replaces whatever global skills were previously in `skills`, keeping any
+ * merged-in project skills (source 'project') intact. Copilot keeps its
+ * native ~/.copilot/skills scan (builtin+user+plugin); every other provider
+ * reads its own ~/.agent-desktop/<provider>/skills folder — the model
+ * decides itself which skill to read, so there's no "active" list to send.
+ * @param {string} provider
+ * @returns {Promise<void>}
+ */
+let _lastGlobalSkillsProvider = null;
+async function loadGlobalSkillsForProvider(provider) {
+  if (provider === _lastGlobalSkillsProvider) return;
+  _lastGlobalSkillsProvider = provider;
+  const projectSkills = skills.filter(s => s.source === 'project');
+  try {
+    const globalSkills = provider === 'copilot'
+      ? (await copilot.skills.list() || [])
+      : (await copilot.skills.listProvider(provider) || []);
+    skills = [...globalSkills, ...projectSkills];
+  } catch (e) {
+    console.warn('[skills] Laden fehlgeschlagen:', e.message);
+  }
+  renderSkills();
+}
+
+/**
  * Reload skills from the main process and re-render the sidebar list.
  * Shows a spinning indicator on the reload button during the operation.
  * @returns {Promise<void>}
@@ -3778,7 +3833,11 @@ async function reloadSkills() {
   const btn = document.querySelector('[aria-label="Skills neu laden"]');
   if (btn) btn.classList.add('sidebar__reload-btn--spinning');
   try {
-    skills = await copilot.skills.list() || [];
+    const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
+    _lastGlobalSkillsProvider = provider;
+    skills = provider === 'copilot'
+      ? (await copilot.skills.list() || [])
+      : (await copilot.skills.listProvider(provider) || []);
     const savedActiveSkills = getSettings().activeSkills || [];
     activeSkills = new Set(savedActiveSkills);
     const savedDisabledSkills = await copilot.skills.getDisabled() || [];
@@ -3880,7 +3939,10 @@ function renderAgents() {
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
     const isProject = a.source === 'project';
-    const deleteBtn = a.fileSlug && !isProject
+    // Provider-scoped agents (~/.agent-desktop/<provider>/agents) have no
+    // delete button here — agents:delete only knows Copilot's own
+    // ~/.copilot/agents folder and would delete the wrong file.
+    const deleteBtn = a.fileSlug && !isProject && a.source !== 'provider'
       ? `<button class="agent-card__delete" onclick="event.stopPropagation(); confirmDeleteAgent('${escapeAttr(a.fileSlug)}', '${escapeAttr(a.name)}')" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
       : '';
     const projectBadge = '';
@@ -3917,7 +3979,11 @@ async function reloadAgents() {
   const btn = document.querySelector('[aria-label="Agents neu laden"]');
   if (btn) btn.classList.add('sidebar__reload-btn--spinning');
   try {
-    agents = await copilot.agents.list() || [];
+    const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
+    _lastGlobalAgentsProvider = provider;
+    agents = provider === 'copilot'
+      ? (await copilot.agents.list() || [])
+      : (await copilot.agents.listProvider(provider) || []);
     const savedActiveAgents = getSettings().activeAgents || [];
     activeAgents = new Set(savedActiveAgents);
     renderAgents();
@@ -3926,6 +3992,32 @@ async function reloadAgents() {
   } finally {
     if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
   }
+}
+
+/**
+ * Loads the "global" (non-project) agent list for a given provider and
+ * replaces whatever global agents were previously in `agents`, keeping any
+ * merged-in project agents (source 'project') intact. Copilot keeps its
+ * native ~/.copilot/agents scan; every other provider reads its own
+ * ~/.agent-desktop/<provider>/agents folder — the model decides itself
+ * which agent's persona to adopt, so there's no "active" list to send.
+ * @param {string} provider
+ * @returns {Promise<void>}
+ */
+let _lastGlobalAgentsProvider = null;
+async function loadGlobalAgentsForProvider(provider) {
+  if (provider === _lastGlobalAgentsProvider) return;
+  _lastGlobalAgentsProvider = provider;
+  const projectAgents = agents.filter(a => a.source === 'project');
+  try {
+    const globalAgents = provider === 'copilot'
+      ? (await copilot.agents.list() || [])
+      : (await copilot.agents.listProvider(provider) || []);
+    agents = [...globalAgents, ...projectAgents];
+  } catch (e) {
+    console.warn('[agents] Laden fehlgeschlagen:', e.message);
+  }
+  renderAgents();
 }
 
 // ── Skill/Agent Delete Confirmation ──────────────────────────
@@ -4637,6 +4729,7 @@ async function initStatusbar() {
 async function initDataLoad() {
   try {
     skills = await copilot.skills.list() || [];
+    _lastGlobalSkillsProvider = 'copilot';
   } catch (e) {
     console.warn('[skills] Laden fehlgeschlagen:', e.message);
     skills = [];
@@ -4647,6 +4740,7 @@ async function initDataLoad() {
 
   try {
     agents = await copilot.agents.list() || [];
+    _lastGlobalAgentsProvider = 'copilot';
   } catch (e) {
     console.warn('[agents] Laden fehlgeschlagen:', e.message);
     agents = [];

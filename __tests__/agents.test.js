@@ -6,7 +6,7 @@ jest.mock('fs');
 
 const fs = require('fs');
 const path = require('path');
-const { scanAgentsDirectory } = require('../src/agents');
+const { scanAgentsDirectory, scanAgentsIndex } = require('../src/agents');
 
 const AGENTS_DIR = path.join('C:', 'Users', 'test', '.copilot', 'agents');
 
@@ -222,5 +222,50 @@ describe('scanAgentsDirectory', () => {
       path.join(AGENTS_DIR, 'test.agent.md'),
       'utf-8'
     );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// scanAgentsIndex
+// ══════════════════════════════════════════════════════════════
+
+describe('scanAgentsIndex', () => {
+  const PROVIDER_DIR = path.join('C:', 'test', 'userData', '.agent-desktop', 'claude-code', 'agents');
+  const PROJECT_DIR = path.join('C:', 'myproject', '.github', 'agents');
+
+  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', () => {
+    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR);
+    fs.readdirSync.mockReturnValue(['planner.agent.md']);
+    fs.readFileSync.mockReturnValue('---\nname: planner\ndescription: Plant Aufgaben\n---\n\nVolltext-Anleitung');
+    yamlParse.mockReturnValue({ name: 'planner', description: 'Plant Aufgaben' });
+
+    const result = scanAgentsIndex([PROVIDER_DIR], yamlParse);
+    expect(result).toEqual([
+      { name: 'planner', description: 'Plant Aufgaben', file: path.join(PROVIDER_DIR, 'planner.agent.md') },
+    ]);
+  });
+
+  test('ignoriert leere/undefined Verzeichnisse', () => {
+    expect(scanAgentsIndex([null, undefined, ''], yamlParse)).toEqual([]);
+  });
+
+  test('dedupliziert nach fileSlug über mehrere Verzeichnisse, erstes Match gewinnt', () => {
+    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR || p === PROJECT_DIR);
+    fs.readdirSync.mockImplementation((dir) => {
+      if (dir === PROVIDER_DIR) return ['shared.agent.md'];
+      if (dir === PROJECT_DIR) return ['shared.agent.md'];
+      return [];
+    });
+    fs.readFileSync.mockReturnValue('---\nname: shared\ndescription: Provider-Version\n---\n');
+    yamlParse.mockReturnValue({ name: 'shared', description: 'Provider-Version' });
+
+    const result = scanAgentsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe(path.join(PROVIDER_DIR, 'shared.agent.md'));
+  });
+
+  test('gibt [] zurück wenn keine Verzeichnisse existieren', () => {
+    fs.existsSync.mockReturnValue(false);
+    expect(scanAgentsIndex([PROVIDER_DIR], yamlParse)).toEqual([]);
   });
 });

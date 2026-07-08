@@ -455,7 +455,14 @@ class AcpClient extends EventEmitter {
    * @param {string} text - User prompt
    * @returns {Promise<Object>} Prompt result (stopReason, etc.)
    */
-  async prompt(text) {
+  /**
+   * @param {string} text - The visible user prompt.
+   * @param {string} [systemContext] - Optional invisible context block (e.g. a
+   *   skills index) prepended as a leading content block. Only meant to be
+   *   passed on the first prompt of a brand-new session — it then stays part
+   *   of the session's own history for the rest of the conversation.
+   */
+  async prompt(text, systemContext) {
     await this.#ensureReady();
     if (!this.#sessionId) {
       throw new Error('No active session. Call newSession() or loadSession() first.');
@@ -477,9 +484,12 @@ class AcpClient extends EventEmitter {
     this.#promptDone = false;
     this.#cancelRequested = false;
     try {
+      const promptBlocks = systemContext
+        ? [{ type: 'text', text: systemContext }, { type: 'text', text }]
+        : [{ type: 'text', text }];
       const result = await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
-        prompt: [{ type: 'text', text }],
+        prompt: promptBlocks,
       }, 0); // no timeout — an agentic turn can run for minutes (see #sendRequest)
       this.#state = 'ready';
       // A cancelled turn returns stopReason "cancelled" → report code -1 to the UI.
