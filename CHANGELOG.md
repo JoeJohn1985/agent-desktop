@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2] - 2026-07-08
+
+### Changed
+- `AGENTS.md`: the commit-message rule now documents the Conventional Commits
+  style (`type(scope): description`) actually in use, replacing the stale
+  `vX.Y.Z: description` prefix convention.
+
 ## [1.2.1] - 2026-07-08
 
 ### Fixed
