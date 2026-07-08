@@ -31,6 +31,7 @@ const {
   aggregateCostBySession,
   trimCostLog,
   parseQuotaError,
+  buildAgentPrefix,
 } = require('../src/renderer-logic');
 
 // ── parseQuotaError ──────────────────────────────────────────
@@ -762,5 +763,32 @@ describe('trimCostLog', () => {
     const log = [{ ts: 1, usd: 1 }, { ts: 2, usd: 2 }];
     trimCostLog(log, 100);
     expect(log).toHaveLength(2);
+  });
+});
+
+// ── buildAgentPrefix ─────────────────────────────────────────
+describe('buildAgentPrefix', () => {
+  it('gibt leeren String zurück, wenn keine Agenten aktiv sind', () => {
+    expect(buildAgentPrefix([], 'copilot')).toBe('');
+    expect(buildAgentPrefix(null, 'copilot')).toBe('');
+    expect(buildAgentPrefix(undefined, 'anthropic')).toBe('');
+  });
+
+  it('nutzt für Copilot die native /agent-Slash-Syntax', () => {
+    const prefix = buildAgentPrefix([{ name: 'Tester' }, { name: 'Planer' }], 'copilot');
+    expect(prefix).toBe('/agent Tester\n/agent Planer\n\n');
+  });
+
+  it('nutzt für alle anderen Provider eine Klartext-Anweisung ohne Copilot-Syntax', () => {
+    const prefix = buildAgentPrefix([{ name: 'Tester' }], 'claude-code');
+    expect(prefix).not.toContain('/agent');
+    expect(prefix).toBe('Nimm für diese Aufgabe die Rolle/Herangehensweise folgender Agenten ein:\n- Tester\n\n');
+  });
+
+  it('funktioniert identisch für Direkt-API-Provider (z. B. anthropic, openai)', () => {
+    const prefixAnthropic = buildAgentPrefix([{ name: 'Tester' }], 'anthropic');
+    const prefixOpenai = buildAgentPrefix([{ name: 'Tester' }], 'openai');
+    expect(prefixAnthropic).toBe(prefixOpenai);
+    expect(prefixAnthropic).not.toContain('/agent');
   });
 });

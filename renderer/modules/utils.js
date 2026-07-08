@@ -22,5 +22,6 @@ const SESSION_REFRESH_DELAY_MS = 400;
 const {
   truncatePath, escapeHtml, escapeAttr, escapeAttrJs,
   toolIcon, toolDisplayName, formatToolArgs, toolArgFullText, formatToolResultPreview,
+  buildAgentPrefix,
   TOOL_ARGS_MAX_LENGTH, TOOL_PREVIEW_MAX_LENGTH,
 } = window.RendererLogic;

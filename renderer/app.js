@@ -1174,13 +1174,7 @@ function sendMessage() {
         activeAgentInfos.push({ name: a.name, icon: a.icon || '🤖' });
       }
     }
-    if (activeAgentInfos.length > 0) {
-      if (getTabProvider(tab) === 'copilot') {
-        agentPrefix = `${activeAgentInfos.map(ai => `/agent ${ai.name}`).join('\n')}\n\n`;
-      } else {
-        agentPrefix = `Nimm für diese Aufgabe die Rolle/Herangehensweise folgender Agenten ein:\n${activeAgentInfos.map(ai => `- ${ai.name}`).join('\n')}\n\n`;
-      }
-    }
+    agentPrefix = buildAgentPrefix(activeAgentInfos, getTabProvider(tab));
   }
 
   // Show skill indicator tags below user message

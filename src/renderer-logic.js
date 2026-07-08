@@ -503,6 +503,27 @@ function parseQuotaError(raw) {
   return { title, detail, retrySeconds, model };
 }
 
+// ── Agent Prefix ─────────────────────────────────────────────
+
+/**
+ * Builds the invisible instruction prefix prepended to a prompt when one or
+ * more agents (personas) are active. Copilot's CLI understands its own
+ * `/agent Name` slash command to switch persona; every other provider gets a
+ * plain-language hint instead, since the model looks up the agent's full
+ * instructions itself via the agents index already in its system context and
+ * adopts that persona from there.
+ * @param {Array<{name: string}>} activeAgentInfos - Active agents (must have a `name`).
+ * @param {string} provider - Tab's provider id (e.g. 'copilot', 'claude-code', 'anthropic').
+ * @returns {string} Prefix text (ending in `\n\n`), or '' if no agents are active.
+ */
+function buildAgentPrefix(activeAgentInfos, provider) {
+  if (!Array.isArray(activeAgentInfos) || activeAgentInfos.length === 0) return '';
+  if (provider === 'copilot') {
+    return `${activeAgentInfos.map(ai => `/agent ${ai.name}`).join('\n')}\n\n`;
+  }
+  return `Nimm für diese Aufgabe die Rolle/Herangehensweise folgender Agenten ein:\n${activeAgentInfos.map(ai => `- ${ai.name}`).join('\n')}\n\n`;
+}
+
 // ── Exports ──────────────────────────────────────────────────
 const _api = {
   shortenPath,
@@ -541,6 +562,7 @@ const _api = {
   aggregateCostBySession,
   trimCostLog,
   parseQuotaError,
+  buildAgentPrefix,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

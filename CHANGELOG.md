@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.3] - 2026-07-08
+
+### Changed
+- Extracted the `agentPrefix` builder (Copilot's `/agent Name` syntax vs. the
+  plain-language persona hint for every other provider) out of `app.js` into
+  a pure, unit-tested `buildAgentPrefix()` in `src/renderer-logic.js`. This
+  logic previously had no automated test coverage, despite a prior real bug
+  in the same code path.
+- Added `docs/CODE-REVIEW-PLAN.md` and `docs/QUALITY-AUDIT-PLAN.md`: chunked,
+  multi-day plans for a full-codebase code review and quality audit.
+
 ## [1.2.2] - 2026-07-08
 
 ### Changed
