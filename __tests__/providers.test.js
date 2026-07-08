@@ -201,6 +201,19 @@ describe('buildAgentsIndex / buildSkillsIndex', () => {
     expect(buildSkillsIndex([])).toBe('');
     expect(buildSkillsIndex(undefined)).toBe('');
   });
+
+  it('buildSkillsIndex: listet Name, Beschreibung und Dateipfad, ohne Volltext', () => {
+    const out = buildSkillsIndex([{ name: 'pdf', description: 'PDF-Verarbeitung', file: 'C:\\skills\\pdf\\SKILL.md' }]);
+    expect(out).toContain('Verfügbare Skills');
+    expect(out).toContain('pdf');
+    expect(out).toContain('PDF-Verarbeitung');
+    expect(out).toContain('C:\\skills\\pdf\\SKILL.md');
+  });
+
+  it('buildSkillsIndex: fehlende description bekommt Platzhalter', () => {
+    const out = buildSkillsIndex([{ name: 'x', file: 'f/SKILL.md' }]);
+    expect(out).toContain('(keine Beschreibung)');
+  });
 });
 
 describe('System-Context-Komposition', () => {

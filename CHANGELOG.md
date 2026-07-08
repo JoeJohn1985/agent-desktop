@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.1] - 2026-07-08
+
+### Fixed
+- **Path traversal in `sessions:readClaudeCodeTranscript`**: `sessionId` was
+  joined into the transcript file path unchecked; now validated against a
+  strict `[a-zA-Z0-9-]+` allow-list (Claude Code session IDs are UUIDs)
+  before the path is built.
+- **Path traversal in `skills:listProvider`/`agents:listProvider`**: the
+  `provider` IPC argument reached `path.join` unchecked; both handlers now
+  validate against the known provider allow-list.
+
+### Changed
+- Documentation (`README.md`, `docs/ARCHITECTURE.md`, `docs/USER-GUIDE.md`)
+  updated for 1.2.0's per-provider Skills/Agents, the Claude Code history
+  restore, and the tool-call rendering change; a few pre-existing gaps fixed
+  along the way (missing IPC channels, `src/agents.js` mislabeled as
+  "sub-agent directory").
+
 ## [1.2.0] - 2026-07-08
 
 ### Added

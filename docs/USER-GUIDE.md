@@ -131,10 +131,16 @@ The sidebar is on the left edge and can be collapsed/expanded via the **collapse
 
 #### 🧠 Skills
 
-- List of all available AI skills with icon, name, and description.
-- **Toggle switch** to enable/disable per session.
-- **⊘ button** disables a skill globally in the Copilot CLI (`~/.copilot/settings.json`).
-- Active skills are automatically injected as a prompt prefix into every message.
+- List of all available AI skills with icon, name, and description — follows the active tab's provider (Copilot's native `~/.copilot/skills/`, or the tab provider's own `~/.agent-desktop/<provider>/skills/`).
+- The model decides on its own whether a skill is relevant and reads it via its file tool — nothing is force-fed into every prompt by default.
+- **Toggle switch** force-activates a skill for the next message as an explicit override, on top of the automatic selection.
+- **⊘ button** disables a skill globally in the Copilot CLI (`~/.copilot/settings.json`) — Copilot only.
+
+#### 🤖 Agents
+
+- List of all available agents (persona/approach presets) with icon, name, and description — same provider-follows-active-tab behavior as Skills.
+- Agents are a **persona switch**: if the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task — still the same conversation, not a separate delegated sub-agent run.
+- **Toggle switch** force-activates an agent for the next message, same override semantics as Skills.
 
 #### ✅ Todos
 
@@ -185,8 +191,8 @@ Directly below the tab bar you control the active session:
 - **User messages** appear on the right, **assistant responses** on the left.
 - Messages are rendered as **Markdown** with syntax highlighting.
 - **"Thinking" sections** show the AI's reasoning (collapsible).
-- **Tool calls** are shown as collapsible cards.
-- **Skill tags** show which skills were active when sending.
+- **Tool calls** show a short, length-capped summary line (both the call and its result); click to expand the full, untruncated text — nothing is lost, just not dumped as a wall of text by default.
+- **Skill/Agent tags** show which skills/agents were force-activated via the sidebar toggle when sending (automatic, model-chosen skills/agents don't show a tag).
 - **Chat search** via `Ctrl+F`.
 - A **scroll-to-bottom button** jumps to the end of the chat.
 
@@ -253,14 +259,34 @@ Drag files directly into the chat area — the file paths are sent as context to
 
 ### Skills
 
-- Skills are `SKILL.md` files in `~/.copilot/skills/`.
-- Enable/disable via the **toggle switch** in the sidebar.
-- The **⊘ button** disables skills CLI-wide (`~/.copilot/settings.json`).
+- Skills are `SKILL.md` files. Copilot reads its own `~/.copilot/skills/`; every
+  other provider (Claude Code, Anthropic, OpenAI, GLM, Ollama) has its own
+  `~/.agent-desktop/<provider>/skills/` — created automatically on first
+  launch.
+- Exposed to the model as a lazy index (name + description + file path), not
+  inlined eagerly. The model reads a specific `SKILL.md` itself, via its file
+  tool, only once it judges it relevant to the current task.
+- The sidebar list always shows the active tab's provider's skills.
+- **Toggle switch** in the sidebar force-activates a skill for the next
+  message — an explicit override on top of the automatic, model-driven
+  selection.
+- The **⊘ button** disables skills CLI-wide (`~/.copilot/settings.json`) — Copilot only.
 - **Project skills** (`Project` badge): from `.github/skills/` in the active CWD.
 
 ### Agents
 
-- The **sidebar badge** shows the total number of loaded agents.
+- Same folder structure as Skills — Copilot's own `~/.copilot/agents/`, every
+  other provider's own `~/.agent-desktop/<provider>/agents/`. Files follow the
+  `*.agent.md` format with YAML frontmatter (`name`, `description`, `tools`).
+- Unlike Skills, agents are a **persona switch**: once the model judges a task
+  matches an agent's description (from the same lazy index as Skills), it
+  reads that agent's file and adopts its approach for the rest of the task —
+  within the same conversation, not a delegated, isolated sub-agent run (that
+  is a separate, not-yet-built feature).
+- **Toggle switch** force-activates an agent for the next message. For
+  Copilot this sends its native `/agent <name>` slash command; for every
+  other provider a plain-language hint pointing at the same lazy index.
+- The **sidebar badge** shows the total number of loaded agents for the active tab's provider.
 - **Project agents** (`Project` badge): from `.github/agents/` in the active CWD.
 
 ### MCP servers (sidebar)
@@ -332,7 +358,7 @@ The **📈 icon** next to it opens the **cost page** — a dedicated full-screen
 
 ### Session resume
 
-Reopening a saved session restores its full history in the tab and scrolls to the latest message.
+Reopening a saved session restores its full history in the tab and scrolls to the latest message — for every provider, each reading from that provider's own history store (Copilot's `events.jsonl`, Claude Code's own transcript, or the direct-API session store).
 
 ### Settings
 

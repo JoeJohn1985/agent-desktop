@@ -31,6 +31,17 @@ describe('claudeCodeTranscriptPath', () => {
     const result = claudeCodeTranscriptPath(home, 'C:\\DEV\\app', 'abc-123');
     expect(result).toBe(path.join(home, '.claude', 'projects', 'C--DEV-app', 'abc-123.jsonl'));
   });
+
+  it('rejects a sessionId that would escape the projects directory (path traversal)', () => {
+    const home = path.join('C:', 'Users', 'test');
+    expect(claudeCodeTranscriptPath(home, 'C:\\DEV\\app', '..\\..\\..\\Windows\\System32\\config\\SAM')).toBeNull();
+    expect(claudeCodeTranscriptPath(home, 'C:\\DEV\\app', '../../etc/passwd')).toBeNull();
+  });
+
+  it('rejects an empty sessionId', () => {
+    const home = path.join('C:', 'Users', 'test');
+    expect(claudeCodeTranscriptPath(home, 'C:\\DEV\\app', '')).toBeNull();
+  });
 });
 
 describe('readClaudeCodeTranscript', () => {
@@ -55,6 +66,10 @@ describe('readClaudeCodeTranscript', () => {
 
   it('returns [] when the transcript file does not exist', () => {
     expect(readClaudeCodeTranscript(home, cwd, sessionId)).toEqual([]);
+  });
+
+  it('returns [] for a path-traversal sessionId instead of escaping the projects dir', () => {
+    expect(readClaudeCodeTranscript(home, cwd, '../../../etc/passwd')).toEqual([]);
   });
 
   it('extracts user/assistant text turns in order', () => {

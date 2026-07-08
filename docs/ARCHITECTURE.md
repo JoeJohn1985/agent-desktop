@@ -102,7 +102,7 @@
 | Interface | Direction | Description |
 |---|---|---|
 | **Copilot CLI (ACP)** | App ↔ CLI | `copilot --acp` — JSON-RPC over NDJSON on stdin/stdout. Methods: `initialize`, `session/new`, `session/load`, `session/prompt`. Events: `session/update` notifications |
-| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`), skills (`~/.copilot/skills/`), logs (`~/.agent-desktop/logs/`), preferences (`app.getPath('userData')/preferences.json`), folders config |
+| **Filesystem** | App ↔ Disk | Sessions (`~/.copilot/session-state/`, Claude Code's own `~/.claude/projects/<cwd>/<sessionId>.jsonl`), skills/agents (Copilot's native `~/.copilot/{skills,agents}/`; every other provider's own `~/.agent-desktop/<provider>/{skills,agents}/`), logs (`~/.agent-desktop/logs/`), preferences (`app.getPath('userData')/preferences.json`), folders config |
 | **Shell** | App → Shell | Test runner spawns `npm test`, `npm run test:coverage`, Playwright |
 | **OS window manager** | App ↔ OS | Native frame disabled; custom titlebar with min/max/close via IPC |
 
@@ -152,10 +152,12 @@
 │     ├── src/main-helpers.js           — buildEnv, sendToRenderer             │
 │     ├── src/renderer-logic.js         — pure logic (parseTokens, pricing, …)│
 │     ├── src/preferences.js            — read/write/migrate preferences       │
-│     ├── src/sessions.js               — checkpoints, plan, todos             │
+│     ├── src/sessions.js               — checkpoints, plan, todos, message history │
+│     ├── src/claude-code-transcript.js — reads Claude Code's own session transcript │
 │     ├── src/named-sessions.js         — user labels for session IDs          │
-│     ├── src/scanners.js               — skills, folder config                │
-│     ├── src/agents.js                 — sub-agent directory                  │
+│     ├── src/data-dir.js               — app data dir; per-provider skills/agents dirs │
+│     ├── src/scanners.js               — skills scanner + lazy skills index    │
+│     ├── src/agents.js                 — agents scanner + lazy agents index (persona switch, not sub-agent delegation) │
 │     ├── src/file-processing.js        — drag&drop pipeline                   │
 │     ├── src/logger.js                 — file logger ~/.agent-desktop/logs  │
 │     └── src/utils.js                  — stripAnsi, safeSessionPath, …       │
@@ -244,7 +246,7 @@ A different backend can be used per tab. **The key contract:** every backend emi
 | `providers/gemini-provider.js` | Gemini adapter: live search (grounding) + file tools, togglable per tab |
 | `providers/agent-tools.js` | Provider-agnostic tools (`shell` via PowerShell on Windows, file/search tools) + deny gating |
 | `providers/session-store.js` | History persistence under `~/.agent-desktop/api-sessions/` |
-| `providers/system-context.js` | Skills + agents + `copilot-instructions.md` → cached system prompt |
+| `providers/system-context.js` | Composes `copilot-instructions.md` + lazy skills/agents indexes (name+description+path — no eager inlining; the model reads a file itself via `read_file` when relevant) → cached system prompt |
 
 API keys are stored encrypted in the OS keychain (`src/secure-store.js`); the plaintext key never leaves the main process. The direct providers' slash commands are local equivalents (`/usage` returns the Copilot token line → the existing cost pipeline applies unchanged).
 
@@ -304,7 +306,7 @@ User              Renderer            Preload          Main            AcpClient
 ```
 
 **Detailed flow:**
-1. `sendMessage()` in the renderer collects: text, active skills, model, session ID, denied tools, CWD, autopilot flag
+1. `sendMessage()` in the renderer collects: text (force-activated skills/agents prepended as a hint, if any), model, session ID, denied tools, CWD, autopilot flag
 2. IPC call `copilot:send` → `main.js` → `client.prompt(text, opts)`
 3. AcpClient sends `session/prompt` to the running `copilot --acp` process
 4. `session/update` notifications come back as an NDJSON stream
@@ -401,6 +403,9 @@ User disables a tool in the session-tools popup
 | `sessions:delete` | handle | Delete the session folder |
 | `sessions:readCheckpoints` | handle | Read checkpoint files |
 | `sessions:readPlan` | handle | Read `plan.md` |
+| `sessions:readRecentMessages` | handle | Last 5 messages from a Copilot session's `events.jsonl` |
+| `sessions:readAllMessages` | handle | Full history from a Copilot session's `events.jsonl` |
+| `sessions:readClaudeCodeTranscript` | handle | Full history from a Claude Code session's own transcript (`~/.claude/projects/<cwd>/<sessionId>.jsonl`) |
 
 #### Namespace: `todos` / `images` / `videos`
 
@@ -417,8 +422,8 @@ User disables a tool in the session-tools popup
 | `preferences:read/write` | Preferences I/O |
 | `instructions:read/write` | `copilot-instructions.md` I/O |
 | `folders:read/save/browse/browse-file` | Folder configuration |
-| `skills:list/listProject/getDisabled/setDisabled` | Skill management |
-| `agents:list/listProject` | Sub-agents |
+| `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`) |
+| `agents:list/listProject/listProvider` | Agents (persona presets — same Copilot-native-vs-per-provider split as skills) |
 | `mcp:listProject` | MCP servers from `mcp.json` |
 | `files:processDropped` | Drag&drop processing |
 | `tests:run/coverage/e2e` | Test runner |

@@ -14,13 +14,23 @@ const fs = require('fs');
 const path = require('path');
 const { extractMessageContent } = require('./sessions');
 
+// Session IDs are UUIDs. Enforced strictly (unlike cwd, which is neutralized
+// by sanitizeCwdForClaudeProjects() below) because sessionId is joined into
+// the path as-is — without this, a sessionId containing '..' or a path
+// separator could escape ~/.claude/projects/<cwd>/ (path traversal).
+const SAFE_SESSION_ID = /^[a-zA-Z0-9-]+$/;
+
 /** Encodes a cwd the way Claude Code names its ~/.claude/projects/<...> folder. */
 function sanitizeCwdForClaudeProjects(cwd) {
   return String(cwd || '').replace(/[:\\/ ]/g, '-');
 }
 
-/** Absolute path to a Claude Code session's own JSONL transcript file. */
+/**
+ * Absolute path to a Claude Code session's own JSONL transcript file, or null
+ * if sessionId isn't a safe, UUID-shaped identifier.
+ */
 function claudeCodeTranscriptPath(homeDir, cwd, sessionId) {
+  if (!SAFE_SESSION_ID.test(String(sessionId || ''))) return null;
   return path.join(homeDir, '.claude', 'projects', sanitizeCwdForClaudeProjects(cwd), `${sessionId}.jsonl`);
 }
 
@@ -41,7 +51,7 @@ function claudeCodeTranscriptPath(homeDir, cwd, sessionId) {
 function readClaudeCodeTranscript(homeDir, cwd, sessionId, limit = 1000) {
   if (!homeDir || !cwd || !sessionId) return [];
   const filePath = claudeCodeTranscriptPath(homeDir, cwd, sessionId);
-  if (!fs.existsSync(filePath)) return [];
+  if (!filePath || !fs.existsSync(filePath)) return [];
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const messages = [];

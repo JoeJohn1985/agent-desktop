@@ -1019,6 +1019,10 @@ ipcMain.handle('skills:list', async () => {
  * @returns {Promise<Array<Object>>} Skills with source 'provider'
  */
 ipcMain.handle('skills:listProvider', async (_event, provider) => {
+  // provider comes straight from the renderer over IPC — validate against the
+  // known allow-list before it's used to build a filesystem path (providerSkillsDir
+  // just path.joins it; an unchecked value could otherwise traverse outside DATA_DIR).
+  if (!LAZY_CONTEXT_PROVIDERS.includes(provider)) return [];
   const dir = providerSkillsDir(provider);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
   return _scanSkillDirectory(dir, 'provider', userSkillIcon, yaml.parse);
@@ -1193,6 +1197,8 @@ ipcMain.handle('agents:list', async () => {
  * @returns {Promise<Array<Object>>} Agents with source 'provider'
  */
 ipcMain.handle('agents:listProvider', async (_event, provider) => {
+  // Same allow-list validation as skills:listProvider — see comment there.
+  if (!LAZY_CONTEXT_PROVIDERS.includes(provider)) return [];
   const dir = providerAgentsDir(provider);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
   return scanAgentsDirectory(dir, yaml.parse).map(a => ({ ...a, source: 'provider' }));

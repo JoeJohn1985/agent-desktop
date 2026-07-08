@@ -32,10 +32,11 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 - 💲 **USD Cost Tracking** — Real per-token cost in USD, grouped by provider or session (Copilot billed via AI Credits, 100 AIC = $1)
 
 ### Skills & Agents
-- 🧠 **Skill Toggles** — Enable/disable AI skills per session; active skills are injected into prompts automatically
-- ⊘ **CLI Skill Disable** — Globally disable skills in the Copilot CLI via `~/.copilot/settings.json` (persisted across sessions)
-- 🤖 **Agent Toggles** — Enable/disable custom agents per session; active agents are injected as an `/agent <name>` prefix automatically
-- 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were active
+- 🧠 **Skills, per provider** — Copilot keeps its native `~/.copilot/skills/`; every other provider (Claude Code, Anthropic, OpenAI, GLM, Ollama) has its own `~/.agent-desktop/<provider>/skills/`. Exposed to the model as a lazy index (name + description + file path) — it reads a skill's `SKILL.md` itself only when it judges it relevant, instead of everything being inlined eagerly.
+- ⊘ **CLI Skill Disable** — Globally disable skills in the Copilot CLI via `~/.copilot/settings.json` (persisted across sessions; Copilot only)
+- 🤖 **Agents, per provider** — same folder structure as Skills (`~/.agent-desktop/<provider>/agents/`), but agents are a **persona switch**: once the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task.
+- 🔘 **Manual toggle (override)** — Skills/Agents can still be force-activated per session on top of the automatic selection; for Copilot this uses its native `/agent <name>` prefix, for every other provider a plain-language hint.
+- 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were force-activated
 
 ### Onboarding & Tutorials
 - 🚀 **First-Run Onboarding Wizard** — Guided setup on first launch:
@@ -61,11 +62,11 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 
 ## Skills
 
-The app dynamically loads skills from your local Copilot installation (`~/.copilot/skills/`). Skills can be toggled on/off per session — active skills are automatically injected into prompts and shown as tags below each message.
+Copilot loads skills from its own installation (`~/.copilot/skills/`, configurable in Settings → Folders); every other provider gets its own `~/.agent-desktop/<provider>/skills/`. Skill files follow the `SKILL.md` format with YAML frontmatter (`name`, `description`). Rather than inlining every skill's full content, the app exposes a lazy index (name + description + file path) to the model — it reads a specific `SKILL.md` itself, via its file tool, only once it decides that skill is relevant to the current task. The sidebar's Skills section always reflects the active tab's provider. A manual toggle still exists to force a skill regardless of the model's own judgment.
 
 ## Agents
 
-The app dynamically loads custom agents from `~/.copilot/agents/` (configurable in Settings → Folders). Agent files follow the `*.agent.md` format with YAML frontmatter (`name`, `description`, `tools`). Active agents are injected as an `/agent <name>` prefix per message.
+Same folder structure as Skills — Copilot's own `~/.copilot/agents/`, every other provider its `~/.agent-desktop/<provider>/agents/`. Agent files follow the `*.agent.md` format with YAML frontmatter (`name`, `description`, `tools`). Unlike skills, agents represent a **persona/approach switch**: once the model judges that a task matches an agent's description (from the same lazy index mechanism as Skills), it reads that agent's file and adopts its instructions for the rest of the task — this is a switch within the same conversation, not a delegated, isolated sub-agent run (that's a separate, not-yet-built feature). A manual toggle still exists to force-activate an agent: for Copilot this uses its native `/agent <name>` slash command, for every other provider a plain-language hint that points at the same lazy index.
 
 ## Requirements
 
@@ -101,12 +102,13 @@ npm start
 agent-desktop/
 ├── main.js              # Electron main process, IPC handlers, skill/agent/tutorial scanner
 ├── src/
-│   ├── data-dir.js      # App data directory + one-shot legacy-data migration
+│   ├── data-dir.js      # App data directory + one-shot legacy-data migration; per-provider skills/agents dirs
 │   ├── providers/       # Provider backends (Anthropic, Gemini, OpenAI-compatible, agent loop)
 │   ├── secure-store.js  # Encrypted API-key storage (safeStorage)
 │   ├── model-discovery.js # Dynamic per-provider model discovery
-│   ├── agents.js        # Agent directory scanner (*.agent.md)
-│   ├── scanners.js      # Skill directory scanner
+│   ├── agents.js        # Agent directory scanner (*.agent.md) + lazy agents index
+│   ├── scanners.js      # Skill directory scanner + lazy skills index
+│   ├── claude-code-transcript.js # Reads Claude Code's own session transcript (history restore)
 │   └── ipc/             # IPC handler modules
 ├── renderer/
 │   ├── app.js           # Frontend logic, chat UI, skill/agent toggles, onboarding, tutorials
