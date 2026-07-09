@@ -1709,7 +1709,9 @@ function initCopilotIPC() {
           tab._contextPercent = pct;
           if (tabId === activeTabId) updateContextButtonPct(pct);
         }
-        if (d.rateLimit) tab._subRateLimit = d.rateLimit;
+        // Each event carries one window (5-hour or weekly …); accumulate them
+        // per family so both limits can be shown together.
+        if (d.rateLimit) tab._subRateLimits = mergeRateLimitWindows(tab._subRateLimits, d.rateLimit);
         if (d.cost && typeof d.cost.amount === 'number') tab._subCostUsd = d.cost.amount;
         if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
         break;
@@ -2930,22 +2932,12 @@ function updateUsageDisplay(parsed, tokens, fullText) {
 function updateSubscriptionUsageDisplay(tab) {
   const el = document.getElementById('sessionUsage');
   if (!el || !tab || getTabProvider(tab) !== 'claude-code') return;
-  const rl = tab._subRateLimit;
-  let txt = 'Abo';
-  let warn = false;
-  if (rl) {
-    if (rl.status && rl.status !== 'allowed') { txt = 'Abo · Limit erreicht'; warn = true; }
-    else if (rl.resetsAt) {
-      const mins = Math.max(0, Math.round((rl.resetsAt * 1000 - Date.now()) / 60000));
-      txt = `Abo · Reset in ${Math.floor(mins / 60)}h ${mins % 60}m`;
-    }
-  }
-  el.textContent = (warn ? '⚠️ ' : '') + txt;
-  const parts = [];
-  if (rl?.rateLimitType) parts.push(`Kontingent: ${rl.rateLimitType}`);
-  if (rl?.overageStatus) parts.push(`Overage: ${rl.overageStatus}${rl.overageDisabledReason ? ' (' + rl.overageDisabledReason + ')' : ''}`);
-  if (typeof tab._subCostUsd === 'number') parts.push(`Token-Äquivalent: $${tab._subCostUsd.toFixed(4)}`);
-  el.title = parts.join('\n') || 'Über dein Claude-Abo abgerechnet';
+  const { text, warn, tooltip } = formatSubscriptionUsage(
+    tab._subRateLimits,
+    typeof tab._subCostUsd === 'number' ? tab._subCostUsd : undefined,
+  );
+  el.textContent = (warn ? '⚠️ ' : '') + text;
+  el.title = tooltip;
 }
 
 // ── Permission requests (ACP session/request_permission) ─────

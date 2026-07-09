@@ -524,6 +524,157 @@ function buildAgentPrefix(activeAgentInfos, provider) {
   return `Nimm für diese Aufgabe die Rolle/Herangehensweise folgender Agenten ein:\n${activeAgentInfos.map(ai => `- ${ai.name}`).join('\n')}\n\n`;
 }
 
+// ── Subscription usage (Claude Code plan quota) ──────────────
+//
+// The claude-agent-acp adapter streams one `SDKRateLimitInfo` per
+// `rate_limit_event` (via `_claude/rateLimit`), and each event carries only a
+// single window — the one currently binding (`rateLimitType`). Claude plans
+// have several windows in parallel (the rolling 5-hour session limit and the
+// 7-day weekly limit, plus overage). To show them together we bucket the live
+// events by a coarse *family* and remember the latest info per family, so the
+// session bar can display e.g. the weekly *and* the 5-hour utilization at once.
+
+/** Short labels for the coarse rate-limit window families. */
+const RATE_LIMIT_FAMILY_LABELS = { weekly: 'Woche', session: '5 Std.', overage: 'Overage', other: 'Limit' };
+/** Display/sort order of the families (weekly first — it's the slow, sticky one). */
+const RATE_LIMIT_FAMILY_ORDER = { weekly: 0, session: 1, overage: 2, other: 3 };
+/** Higher = more urgent; drives which window leads the display. */
+const RATE_LIMIT_STATUS_SEVERITY = { rejected: 2, allowed_warning: 1, allowed: 0 };
+/** German status words appended per window (allowed has none). */
+const RATE_LIMIT_STATUS_WORD = { rejected: 'Limit erreicht', allowed_warning: 'fast erreicht' };
+
+/**
+ * Maps an SDK `rateLimitType` to a coarse window family. All `seven_day*`
+ * variants (incl. opus/sonnet/overage-included) collapse to `weekly`.
+ * @param {string} [type]
+ * @returns {'session'|'weekly'|'overage'|'other'}
+ */
+function rateLimitFamily(type) {
+  if (type === 'five_hour') return 'session';
+  if (type === 'overage') return 'overage';
+  if (typeof type === 'string' && type.startsWith('seven_day')) return 'weekly';
+  return 'other';
+}
+
+/**
+ * Normalizes the SDK's `utilization` field to an integer percentage. The value
+ * may arrive as a fraction (0..1) or already as a percent (0..100); anything
+ * ≤ 1 is treated as a fraction. Returns null when no usable number is present.
+ * @param {*} utilization
+ * @returns {number|null}
+ */
+function normalizeUtilizationPct(utilization) {
+  if (typeof utilization !== 'number' || !isFinite(utilization) || utilization < 0) return null;
+  const pct = utilization <= 1 ? utilization * 100 : utilization;
+  return Math.round(pct);
+}
+
+/** Formats a millisecond delta as `Xh Ym` (never negative). */
+function formatResetIn(msUntilReset) {
+  const mins = Math.max(0, Math.round(msUntilReset / 60000));
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/**
+ * Records a freshly received `SDKRateLimitInfo` into a family-keyed window map
+ * (latest info wins per family), so the 5-hour and weekly limits accumulate
+ * across the single-window `rate_limit_event`s. Pure — returns a new object.
+ * @param {Object<string,Object>|null|undefined} windows - Existing family map.
+ * @param {Object|null} rl - The incoming `_claude/rateLimit` payload.
+ * @returns {Object<string,Object>} New family map.
+ */
+function mergeRateLimitWindows(windows, rl) {
+  const base = (windows && typeof windows === 'object') ? { ...windows } : {};
+  if (rl && typeof rl === 'object') base[rateLimitFamily(rl.rateLimitType)] = rl;
+  return base;
+}
+
+/** Normalizes the `formatSubscriptionUsage` input into a flat array of infos. */
+function rateLimitList(rateLimits) {
+  if (Array.isArray(rateLimits)) return rateLimits.filter(Boolean);
+  if (rateLimits && typeof rateLimits === 'object') {
+    // A bare SDKRateLimitInfo (has status/utilization/rateLimitType) vs. a
+    // family map ({weekly:{…}, session:{…}}).
+    if (rateLimits.status !== undefined || rateLimits.utilization !== undefined || rateLimits.rateLimitType !== undefined) {
+      return [rateLimits];
+    }
+    return Object.values(rateLimits).filter(Boolean);
+  }
+  return [];
+}
+
+/** Compact per-window segment for the session bar, e.g. `Woche 86 % (fast erreicht)`. */
+function formatWindowSegment(rl, nowMs) {
+  const label = RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
+  const pct = normalizeUtilizationPct(rl.utilization);
+  const word = RATE_LIMIT_STATUS_WORD[rl.status];
+  // Prefer the %, else a reset countdown, else the bare label — but always keep
+  // the status word ("fast erreicht"/"erreicht") when present: the live stream
+  // frequently omits `utilization`, so the status is the only warning signal.
+  let head;
+  if (pct != null) head = `${label} ${pct} %`;
+  else if (rl.resetsAt) head = `${label} · Reset in ${formatResetIn(rl.resetsAt * 1000 - nowMs)}`;
+  else head = label;
+  return word ? `${head} (${word})` : head;
+}
+
+/**
+ * Builds the subscription-usage display (Claude Code plan quota) from the live
+ * rate-limit windows. Subscriptions have no per-token price, so instead of a
+ * USD cost we surface each window's utilization %, its three-state status
+ * (allowed / allowed_warning = „fast erreicht" / rejected = „erreicht") and
+ * reset time — the weekly and the 5-hour limit side by side when both are
+ * known. Windows are ordered by urgency so the binding one leads. The caller
+ * prepends a ⚠️ icon when `warn` is set.
+ * @param {Object|Array|null} rateLimits - Family map, array, or a single SDKRateLimitInfo.
+ * @param {number|null} [subCostUsd] - Token-equivalent USD cost, if known.
+ * @param {number} [now] - Current epoch ms (injectable for tests; defaults to Date.now()).
+ * @returns {{ text: string, warn: boolean, tooltip: string }}
+ */
+function formatSubscriptionUsage(rateLimits, subCostUsd, now) {
+  const nowMs = typeof now === 'number' ? now : Date.now();
+  const all = rateLimitList(rateLimits).slice().sort((a, b) => {
+    const sev = (RATE_LIMIT_STATUS_SEVERITY[b.status] || 0) - (RATE_LIMIT_STATUS_SEVERITY[a.status] || 0);
+    if (sev) return sev;
+    return (RATE_LIMIT_FAMILY_ORDER[rateLimitFamily(a.rateLimitType)] ?? 9)
+      - (RATE_LIMIT_FAMILY_ORDER[rateLimitFamily(b.rateLimitType)] ?? 9);
+  });
+
+  // Session bar: stay quiet while healthy — surface a window only when it has a
+  // utilization % to show or is actively warning/blocking. (The live stream
+  // often omits `utilization`, so a plain `allowed` window with only a reset
+  // time would just add noise; it still lives in the tooltip below.)
+  const shown = all.filter(rl =>
+    normalizeUtilizationPct(rl.utilization) != null ||
+    rl.status === 'allowed_warning' || rl.status === 'rejected');
+
+  let text = 'Abo';
+  let warn = false;
+  for (const rl of shown) {
+    text += ' · ' + formatWindowSegment(rl, nowMs);
+    if (rl.status === 'allowed_warning' || rl.status === 'rejected') warn = true;
+  }
+
+  // Tooltip: every known window (incl. healthy ones), so the reset stays discoverable.
+  const parts = [];
+  for (const rl of all) {
+    const label = RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
+    const pct = normalizeUtilizationPct(rl.utilization);
+    const pieces = [];
+    if (pct != null) pieces.push(`${pct} %`);
+    if (RATE_LIMIT_STATUS_WORD[rl.status]) pieces.push(RATE_LIMIT_STATUS_WORD[rl.status]);
+    if (rl.resetsAt) pieces.push(`Reset in ${formatResetIn(rl.resetsAt * 1000 - nowMs)}`);
+    parts.push(`${label}: ${pieces.join(' · ') || '—'}`);
+  }
+  const withOverage = all.find(rl => rl.overageStatus);
+  if (withOverage) {
+    parts.push(`Overage: ${withOverage.overageStatus}${withOverage.overageDisabledReason ? ' (' + withOverage.overageDisabledReason + ')' : ''}`);
+  }
+  if (typeof subCostUsd === 'number') parts.push(`Token-Äquivalent: $${subCostUsd.toFixed(4)}`);
+
+  return { text, warn, tooltip: parts.join('\n') || 'Über dein Claude-Abo abgerechnet' };
+}
+
 // ── Exports ──────────────────────────────────────────────────
 const _api = {
   shortenPath,
@@ -563,6 +714,9 @@ const _api = {
   trimCostLog,
   parseQuotaError,
   buildAgentPrefix,
+  formatSubscriptionUsage,
+  mergeRateLimitWindows,
+  rateLimitFamily,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

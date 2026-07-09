@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.5] - 2026-07-09
+
+### Fixed
+- **Abo-Nutzungsanzeige (Claude Code) war ungenau**: Die Session-Leiste warf
+  `allowed_warning` und `rejected` in einen Topf und zeigte in beiden Fällen
+  „⚠️ Abo · Limit erreicht", obwohl `allowed_warning` nur „fast erreicht"
+  bedeutet (noch nicht geblockt).
+
+### Changed
+- **Abo-Limits: 5-Stunden- und Wochen-Fenster gemeinsam.** Jedes
+  `rate_limit_event` des Claude-Adapters trägt nur das gerade *bindende*
+  Fenster (`rateLimitType`); die Anzeige sammelt die Events jetzt pro
+  Fenster-Familie (`mergeRateLimitWindows()`), sodass 5-Stunden- **und**
+  Wochen-Limit nebeneinander erscheinen. Neue reine, unit-getestete Funktionen
+  in `src/renderer-logic.js`: `rateLimitFamily()`, `mergeRateLimitWindows()`
+  und ein überarbeitetes `formatSubscriptionUsage()`. Die Leiste bleibt ruhig,
+  solange alles im grünen Bereich ist, und zeigt bei Annäherung das dringlichste
+  Fenster zuerst mit sauber getrenntem Status (`allowed_warning` → „fast
+  erreicht" vs. `rejected` → „erreicht"). Reset-Zeit, Overage-Status und
+  Token-Äquivalent stehen (je Fenster) im Tooltip.
+  Hinweis: Der Live-Stream liefert `utilization` (den Prozentwert) meist nicht
+  mit — die konkrete %-Anzeige folgt separat über die `/usage`-Abfrage.
+
 ## [1.2.4] - 2026-07-08
 
 ### Fixed

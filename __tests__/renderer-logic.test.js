@@ -32,6 +32,9 @@ const {
   trimCostLog,
   parseQuotaError,
   buildAgentPrefix,
+  formatSubscriptionUsage,
+  mergeRateLimitWindows,
+  rateLimitFamily,
 } = require('../src/renderer-logic');
 
 // ── parseQuotaError ──────────────────────────────────────────
@@ -790,5 +793,146 @@ describe('buildAgentPrefix', () => {
     const prefixOpenai = buildAgentPrefix([{ name: 'Tester' }], 'openai');
     expect(prefixAnthropic).toBe(prefixOpenai);
     expect(prefixAnthropic).not.toContain('/agent');
+  });
+});
+
+// ── rateLimitFamily ──────────────────────────────────────────
+describe('rateLimitFamily', () => {
+  it('ordnet five_hour der Session zu', () => {
+    expect(rateLimitFamily('five_hour')).toBe('session');
+  });
+  it('fasst alle seven_day*-Varianten zu „weekly" zusammen', () => {
+    expect(rateLimitFamily('seven_day')).toBe('weekly');
+    expect(rateLimitFamily('seven_day_opus')).toBe('weekly');
+    expect(rateLimitFamily('seven_day_sonnet')).toBe('weekly');
+    expect(rateLimitFamily('seven_day_overage_included')).toBe('weekly');
+  });
+  it('erkennt overage und unbekannte/leere Typen', () => {
+    expect(rateLimitFamily('overage')).toBe('overage');
+    expect(rateLimitFamily(undefined)).toBe('other');
+    expect(rateLimitFamily('was_neues')).toBe('other');
+  });
+});
+
+// ── mergeRateLimitWindows ────────────────────────────────────
+describe('mergeRateLimitWindows', () => {
+  it('legt eingehende Infos nach Fenster-Familie ab', () => {
+    const week = { status: 'allowed', utilization: 0.86, rateLimitType: 'seven_day' };
+    const m1 = mergeRateLimitWindows(undefined, week);
+    expect(m1).toEqual({ weekly: week });
+
+    const session = { status: 'allowed', utilization: 0.4, rateLimitType: 'five_hour' };
+    const m2 = mergeRateLimitWindows(m1, session);
+    expect(m2).toEqual({ weekly: week, session });
+  });
+
+  it('überschreibt dieselbe Familie mit dem neuesten Wert und mutiert nicht', () => {
+    const older = { status: 'allowed', utilization: 0.4, rateLimitType: 'seven_day' };
+    const newer = { status: 'allowed_warning', utilization: 0.86, rateLimitType: 'seven_day' };
+    const m1 = mergeRateLimitWindows(undefined, older);
+    const m2 = mergeRateLimitWindows(m1, newer);
+    expect(m2.weekly).toBe(newer);
+    expect(m1.weekly).toBe(older); // Original unverändert
+  });
+
+  it('gibt ohne gültiges rl eine unveränderte Kopie zurück', () => {
+    const m1 = { weekly: { status: 'allowed', rateLimitType: 'seven_day' } };
+    expect(mergeRateLimitWindows(m1, null)).toEqual(m1);
+    expect(mergeRateLimitWindows(m1, null)).not.toBe(m1);
+  });
+});
+
+// ── formatSubscriptionUsage ──────────────────────────────────
+describe('formatSubscriptionUsage', () => {
+  const NOW = 1_700_000_000_000; // fixed epoch ms for deterministic reset math
+
+  it('zeigt nur „Abo" ohne Rate-Limit-Daten', () => {
+    expect(formatSubscriptionUsage(null, undefined, NOW).text).toBe('Abo');
+    expect(formatSubscriptionUsage({}, undefined, NOW).text).toBe('Abo');
+    const r = formatSubscriptionUsage(null, undefined, NOW);
+    expect(r.warn).toBe(false);
+    expect(r.tooltip).toBe('Über dein Claude-Abo abgerechnet');
+  });
+
+  it('zeigt ein einzelnes Fenster mit Label und Prozent (allowed)', () => {
+    const r = formatSubscriptionUsage(
+      { status: 'allowed', utilization: 0.42, rateLimitType: 'seven_day' }, undefined, NOW);
+    expect(r.text).toBe('Abo · Woche 42 %');
+    expect(r.warn).toBe(false);
+    expect(r.tooltip).toContain('Woche: 42 %');
+  });
+
+  it('unterscheidet „fast erreicht" (allowed_warning) von „erreicht" (rejected)', () => {
+    const warnState = formatSubscriptionUsage(
+      { status: 'allowed_warning', utilization: 0.86, rateLimitType: 'seven_day' }, undefined, NOW);
+    expect(warnState.text).toBe('Abo · Woche 86 % (fast erreicht)');
+    expect(warnState.warn).toBe(true);
+
+    const rejected = formatSubscriptionUsage(
+      { status: 'rejected', utilization: 1, rateLimitType: 'seven_day' }, undefined, NOW);
+    expect(rejected.text).toBe('Abo · Woche 100 % (Limit erreicht)');
+    expect(rejected.warn).toBe(true);
+  });
+
+  it('zeigt 5-Std.- UND Wochen-Limit zusammen, Wochenfenster zuerst', () => {
+    const windows = {
+      session: { status: 'allowed', utilization: 0.4, rateLimitType: 'five_hour' },
+      weekly: { status: 'allowed', utilization: 0.86, rateLimitType: 'seven_day' },
+    };
+    const r = formatSubscriptionUsage(windows, undefined, NOW);
+    expect(r.text).toBe('Abo · Woche 86 % · 5 Std. 40 %');
+    expect(r.tooltip).toContain('Woche: 86 %');
+    expect(r.tooltip).toContain('5 Std.: 40 %');
+  });
+
+  it('stellt das dringlichere Fenster (Warnung/abgelehnt) nach vorn', () => {
+    const windows = {
+      weekly: { status: 'allowed', utilization: 0.5, rateLimitType: 'seven_day' },
+      session: { status: 'allowed_warning', utilization: 0.95, rateLimitType: 'five_hour' },
+    };
+    const r = formatSubscriptionUsage(windows, undefined, NOW);
+    expect(r.text).toBe('Abo · 5 Std. 95 % (fast erreicht) · Woche 50 %');
+    expect(r.warn).toBe(true);
+  });
+
+  it('behandelt utilization als Bruch (≤1) oder bereits als Prozent (>1)', () => {
+    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 0.5, rateLimitType: 'seven_day' }, undefined, NOW).text)
+      .toBe('Abo · Woche 50 %');
+    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 73, rateLimitType: 'seven_day' }, undefined, NOW).text)
+      .toBe('Abo · Woche 73 %');
+  });
+
+  it('hält die Leiste ruhig, wenn ein „allowed"-Fenster keine Auslastung liefert (Reset nur im Tooltip)', () => {
+    const resetsAt = (NOW + 90 * 60 * 1000) / 1000; // 1h 30m entfernt, in Sekunden
+    const r = formatSubscriptionUsage({ status: 'allowed', rateLimitType: 'five_hour', resetsAt }, undefined, NOW);
+    expect(r.text).toBe('Abo');
+    expect(r.warn).toBe(false);
+    expect(r.tooltip).toContain('5 Std.: Reset in 1h 30m');
+  });
+
+  it('zeigt eine Warnung auch ohne Auslastungswert (nur Status + Reset)', () => {
+    const resetsAt = (NOW + 2 * 60 * 60 * 1000) / 1000; // 2h
+    const r = formatSubscriptionUsage({ status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt }, undefined, NOW);
+    expect(r.text).toBe('Abo · Woche · Reset in 2h 0m (fast erreicht)');
+    expect(r.warn).toBe(true);
+  });
+
+  it('nimmt Reset-Zeit, Overage und Token-Äquivalent in den Tooltip auf', () => {
+    const resetsAt = (NOW + 2 * 60 * 60 * 1000) / 1000; // 2h
+    const r = formatSubscriptionUsage(
+      { status: 'allowed_warning', utilization: 0.9, rateLimitType: 'five_hour', resetsAt,
+        overageStatus: 'rejected', overageDisabledReason: 'out_of_credits' },
+      0.1234, NOW);
+    expect(r.tooltip).toContain('5 Std.: 90 % · fast erreicht · Reset in 2h 0m');
+    expect(r.tooltip).toContain('Overage: rejected (out_of_credits)');
+    expect(r.tooltip).toContain('Token-Äquivalent: $0.1234');
+  });
+
+  it('akzeptiert auch ein einzelnes Info-Objekt statt einer Fenster-Map', () => {
+    const single = { status: 'allowed', utilization: 0.3, rateLimitType: 'seven_day' };
+    const asMap = formatSubscriptionUsage({ weekly: single }, undefined, NOW);
+    const asObj = formatSubscriptionUsage(single, undefined, NOW);
+    expect(asObj.text).toBe(asMap.text);
+    expect(asObj.text).toBe('Abo · Woche 30 %');
   });
 });
