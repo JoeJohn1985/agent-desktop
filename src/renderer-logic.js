@@ -593,11 +593,47 @@ function formatDurationDe(ms) {
 const RESET_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
 /**
+ * UTC offset (ms) of an IANA timezone at a given instant, DST included. Throws
+ * (via Intl) if the zone name is unknown — the caller falls back to local time.
+ */
+function tzOffsetMs(epochMs, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(new Date(epochMs))) p[part.type] = part.value;
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+  return asUTC - epochMs;
+}
+
+/**
+ * Epoch ms for a wall-clock time interpreted in `timeZone` (honouring DST via a
+ * two-pass offset lookup). With no zone — or an unrecognized one — it falls back
+ * to the machine's local time.
+ */
+function zonedWallClockToEpoch(year, mon, day, hour, min, timeZone) {
+  if (!timeZone) return new Date(year, mon, day, hour, min, 0, 0).getTime();
+  try {
+    const utcGuess = Date.UTC(year, mon, day, hour, min, 0, 0);
+    const off1 = tzOffsetMs(utcGuess, timeZone);
+    let epoch = utcGuess - off1;
+    const off2 = tzOffsetMs(epoch, timeZone); // refine across a DST boundary
+    if (off2 !== off1) epoch = utcGuess - off2;
+    return epoch;
+  } catch (_) {
+    return new Date(year, mon, day, hour, min, 0, 0).getTime();
+  }
+}
+
+/**
  * Parses a `/usage` reset timestamp like `Jul 10, 3:29am (Europe/Berlin)` into
- * epoch ms so it can be rendered as a live countdown. The named timezone is not
- * applied (the value already reflects the user's own account zone, which
- * normally matches their machine); the year is inferred, since reset times are
- * always in the future. Returns null when the text can't be parsed.
+ * epoch ms so it can be rendered as a live countdown. The wall-clock time is
+ * interpreted in the timezone named in parentheses (honouring DST), so the
+ * countdown stays correct even when the machine's local zone differs; the year
+ * is inferred, since reset times are always in the future. Returns null when the
+ * text can't be parsed.
  */
 function parseResetTextToMs(resetText, nowMs) {
   if (typeof resetText !== 'string') return null;
@@ -610,10 +646,12 @@ function parseResetTextToMs(resetText, nowMs) {
   let hour = parseInt(m[3], 10) % 12;
   if (/pm/i.test(m[5])) hour += 12;
   const min = m[4] ? parseInt(m[4], 10) : 0;
+  const tzMatch = resetText.match(/\(([^)]+)\)/);
+  const timeZone = tzMatch ? tzMatch[1].trim() : null;
   const year = new Date(nowMs).getFullYear();
-  let t = new Date(year, mon, day, hour, min, 0, 0).getTime();
+  let t = zonedWallClockToEpoch(year, mon, day, hour, min, timeZone);
   // Reset lies in the future; a computed past time means the year rolled over.
-  if (t < nowMs - 24 * 3600 * 1000) t = new Date(year + 1, mon, day, hour, min, 0, 0).getTime();
+  if (t < nowMs - 24 * 3600 * 1000) t = zonedWallClockToEpoch(year + 1, mon, day, hour, min, timeZone);
   return t;
 }
 

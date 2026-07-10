@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.8] - 2026-07-09
+
+### Fixed
+- **Reset-Countdown ist jetzt zeitzonenrichtig.** Der `/usage`-Reset nennt seine
+  Zeitzone (z. B. `(Europe/Berlin)`); bisher wurde die Wanduhrzeit in der
+  Maschinen-Zeitzone interpretiert, was den Countdown um den Offset verschoben
+  hätte, wenn System- und Account-Zone auseinanderfallen. `parseResetTextToMs()`
+  wertet die genannte Zeitzone jetzt via `Intl.DateTimeFormat` aus (inkl.
+  Sommer-/Winterzeit, mit Fallback auf Lokalzeit bei fehlender/unbekannter Zone).
+  (Fund 2 aus der Code Review.)
+
 ## [1.2.7] - 2026-07-09
 
 ### Fixed

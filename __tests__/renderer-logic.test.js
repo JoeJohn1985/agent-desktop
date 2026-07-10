@@ -1005,21 +1005,30 @@ describe('parseUsageWindows', () => {
   });
 
   it('wandelt den Session-Reset-Text in einen Stunden-Countdown', () => {
-    const now = new Date(2026, 6, 10, 11, 0, 0).getTime(); // 10. Jul 2026, 11:00 lokal
+    const now = Date.UTC(2026, 6, 10, 9, 0, 0); // = 11:00 Europe/Berlin (Sommer, UTC+2)
     const w = parseUsageWindows('Current session: 17% used · resets Jul 10, 2:59pm (Europe/Berlin)', now);
     const r = formatSubscriptionUsage(w, undefined, now);
     expect(r.tooltip).toContain('5 Std.: 17 % · Reset in 3 Std. 59 Min.');
   });
 
+  it('interpretiert die Reset-Zeit in der angegebenen Zeitzone, nicht der lokalen', () => {
+    // Maschinen-Zeitzone-unabhängig: now + Reset beide als absoluter Zeitpunkt.
+    const now = Date.UTC(2026, 6, 10, 12, 0, 0); // 12:00 UTC
+    // 10am New York = EDT (UTC-4) = 14:00 UTC → Countdown 2 Std.
+    const w = parseUsageWindows('Current session: 20% used · resets Jul 10, 10am (America/New_York)', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    expect(r.tooltip).toContain('5 Std.: 20 % · Reset in 2 Std.');
+  });
+
   it('wandelt den Wochen-Reset-Text in einen Tage-Countdown', () => {
-    const now = new Date(2026, 6, 10, 11, 0, 0).getTime();
+    const now = Date.UTC(2026, 6, 10, 9, 0, 0);
     const w = parseUsageWindows('Current week (all models): 2% used · resets Jul 17, 3:59am (Europe/Berlin)', now);
     const r = formatSubscriptionUsage(w, undefined, now);
     expect(r.tooltip).toContain('Woche: 2 % · Reset in 6 Tagen 16 Std.');
   });
 
   it('versteht auch volle Stunden ohne Minuten (z. B. „3pm")', () => {
-    const now = new Date(2026, 6, 10, 11, 0, 0).getTime(); // 11:00
+    const now = Date.UTC(2026, 6, 10, 9, 0, 0); // 11:00
     const w = parseUsageWindows('Current session: 32% used · resets Jul 10, 3pm (Europe/Berlin)', now);
     const r = formatSubscriptionUsage(w, undefined, now);
     // 11:00 → 15:00 = Countdown „4 Std.", nicht der absolute Text.
