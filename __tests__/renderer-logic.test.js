@@ -1017,6 +1017,15 @@ describe('parseUsageWindows', () => {
     const r = formatSubscriptionUsage(w, undefined, now);
     expect(r.tooltip).toContain('Woche: 2 % · Reset in 6 Tagen 16 Std.');
   });
+
+  it('versteht auch volle Stunden ohne Minuten (z. B. „3pm")', () => {
+    const now = new Date(2026, 6, 10, 11, 0, 0).getTime(); // 11:00
+    const w = parseUsageWindows('Current session: 32% used · resets Jul 10, 3pm (Europe/Berlin)', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    // 11:00 → 15:00 = Countdown „4 Std.", nicht der absolute Text.
+    expect(r.tooltip).toContain('5 Std.: 32 % · Reset in 4 Std.');
+    expect(r.tooltip).not.toContain('Reset Jul 10, 3pm');
+  });
 });
 
 // ── formatDurationDe ─────────────────────────────────────────

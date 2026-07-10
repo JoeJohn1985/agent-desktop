@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.7] - 2026-07-09
+
+### Fixed
+- **Reset-Countdown funktionierte nicht bei vollen Stunden.** `/usage` gibt
+  Resets auf der vollen Stunde ohne Minuten aus (z. B. `resets Jul 10, 3pm`
+  statt `3:29am`); `parseResetTextToMs()` verlangte aber `H:MM` und fiel dann
+  auf das absolute Datum zurück. Minuten sind jetzt optional (Default `:00`), so
+  dass der Countdown auch für volle Stunden greift. (Fund aus der Code Review.)
+
 ## [1.2.6] - 2026-07-09
 
 ### Added

@@ -601,14 +601,15 @@ const RESET_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, a
  */
 function parseResetTextToMs(resetText, nowMs) {
   if (typeof resetText !== 'string') return null;
-  const m = resetText.match(/([A-Za-z]{3})\s+(\d{1,2}),\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);
+  // Minutes are optional: on the hour Claude prints e.g. `3pm`, otherwise `3:29am`.
+  const m = resetText.match(/([A-Za-z]{3})\s+(\d{1,2}),\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (!m) return null;
   const mon = RESET_MONTHS[m[1].toLowerCase()];
   if (mon === undefined) return null;
   const day = parseInt(m[2], 10);
   let hour = parseInt(m[3], 10) % 12;
   if (/pm/i.test(m[5])) hour += 12;
-  const min = parseInt(m[4], 10);
+  const min = m[4] ? parseInt(m[4], 10) : 0;
   const year = new Date(nowMs).getFullYear();
   let t = new Date(year, mon, day, hour, min, 0, 0).getTime();
   // Reset lies in the future; a computed past time means the year rolled over.
