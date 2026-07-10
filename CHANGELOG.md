@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.10] - 2026-07-09
+
+### Changed
+- Tests: Reset-Countdown-Fallbacks abgedeckt (kein Zeitzonen-Zusatz → Lokalzeit;
+  unbekannte Zeitzone → `Intl` wirft → Lokalzeit). Damit ist die neue
+  Abo-Nutzungslogik in `renderer-logic.js` ~99 % zeilenabgedeckt.
+
 ## [1.2.9] - 2026-07-09
 
 ### Changed

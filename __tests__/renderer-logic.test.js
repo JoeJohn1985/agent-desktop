@@ -1027,6 +1027,22 @@ describe('parseUsageWindows', () => {
     expect(r.tooltip).toContain('Woche: 2 % · Reset in 6 Tagen 16 Std.');
   });
 
+  it('nutzt Lokalzeit, wenn der Reset-Text keine Zeitzone nennt (Fallback)', () => {
+    // Ohne „(Zone)" wird lokal interpretiert; da now und Reset dieselbe lokale
+    // Zone nutzen, ist der Delta-Countdown maschinen-zeitzonen-unabhängig.
+    const now = new Date(2026, 6, 10, 11, 0, 0).getTime();
+    const w = parseUsageWindows('Current session: 50% used · resets Jul 10, 2:59pm', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    expect(r.tooltip).toContain('5 Std.: 50 % · Reset in 3 Std. 59 Min.');
+  });
+
+  it('fällt bei unbekannter Zeitzone auf Lokalzeit zurück (Intl wirft)', () => {
+    const now = new Date(2026, 6, 10, 11, 0, 0).getTime();
+    const w = parseUsageWindows('Current session: 50% used · resets Jul 10, 2:59pm (Kaputt/Zone)', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    expect(r.tooltip).toContain('5 Std.: 50 % · Reset in 3 Std. 59 Min.');
+  });
+
   it('versteht auch volle Stunden ohne Minuten (z. B. „3pm")', () => {
     const now = Date.UTC(2026, 6, 10, 9, 0, 0); // 11:00
     const w = parseUsageWindows('Current session: 32% used · resets Jul 10, 3pm (Europe/Berlin)', now);

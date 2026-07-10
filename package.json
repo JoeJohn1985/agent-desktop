@@ -1,6 +1,6 @@
 {
   "name": "agent-desktop",
-  "version": "1.2.9",
+  "version": "1.2.10",
   "description": "Agent Desktop — lokale Agent-Anwendung für mehrere LLM-Provider (GitHub Copilot CLI, Claude Code, Anthropic, Gemini, OpenAI, Ollama, GLM)",
   "main": "main.js",
   "scripts": {
