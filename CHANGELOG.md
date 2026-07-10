@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.2.6] - 2026-07-09
+
+### Added
+- **Abo-Limits mit echten Prozentwerten.** Der `rate_limit_event`-Stream liefert
+  zwar Fenster + Status + Reset, aber meist keinen Prozentwert. Die konkrete
+  Auslastung steht im `/usage`-Output, den die App nach jedem Turn ohnehin
+  abruft. Neuer reiner, unit-getesteter Parser `parseUsageWindows()` liest die
+  Zeilen `Current session: … % used` und `Current week (all models): … % used`
+  (inkl. modellspezifischer Wochen-Buckets) und speist sie in die Anzeige. Die
+  Session-Leiste zeigt jetzt z. B. `Abo · 5 Std. 35 % · Woche 3 %` — dieselben
+  Werte wie die offizielle Claude-App. Reset-Zeitpunkte je Fenster stehen im
+  Tooltip; modellspezifische Buckets erscheinen dort ebenfalls.
+  Die Resets werden als **Live-Countdown** angezeigt (z. B. „Reset in 3 Std.
+  59 Min." bzw. „Reset in 6 Tagen 16 Std.") statt als absolutes Datum — der
+  `/usage`-Zeitstempel wird dafür geparst (`parseResetTextToMs`) und über
+  `formatDurationDe()` formatiert.
+
+### Fixed (behebt, dass die %-Anzeige gar nicht erschien)
+- Für Subscription-Provider (Claude Code) wurde `/usage` nach einem Turn bewusst
+  **nicht** abgefragt (Annahme: „Quota kommt live via `usage_update`"). Da der
+  Stream aber keinen Prozentwert liefert, blieb die Anzeige bei „Abo". Neue
+  `refreshSubscriptionUsage()` holt `/usage` jetzt auch für Claude-Code-Tabs.
+
+### Fixed
+- **`utilization` wurde als Bruch fehlinterpretiert.** SDK und `/usage` liefern
+  die Auslastung als 0–100; die vorherige „≤1 → ×100"-Heuristik hätte „1 %
+  genutzt" fälschlich als „100 %" angezeigt. `normalizeUtilizationPct()` rundet
+  und klemmt den Wert jetzt korrekt auf 0–100.
+
 ## [1.2.5] - 2026-07-09
 
 ### Fixed

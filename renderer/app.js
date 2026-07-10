@@ -1854,8 +1854,10 @@ function initCopilotIPC() {
       // command at a time ("Cannot run command while busy" otherwise). Refresh
       // runs for background tabs too so cost tracking stays accurate.
       if (isSubscriptionProvider(getTabProvider(tab))) {
-        // Subscription (Claude Code): no per-token billing, and context + quota
-        // arrive live via usage_update → nothing to poll here.
+        // Subscription (Claude Code): no per-token billing, and the context %
+        // arrives live via usage_update. The rate-limit *percentage*, however,
+        // is NOT in the live stream — fetch it from /usage.
+        refreshSubscriptionUsage(tabId);
       } else {
         refreshUsageDisplay(tabId).finally(() => {
           // /context is free for all providers. Direct-API tabs additionally
@@ -2858,6 +2860,27 @@ async function refreshUsageDisplay(tabId) {
 }
 
 /**
+ * Fetch the Claude Code subscription plan limits via /usage and refresh the Abo
+ * display. Unlike the live usage_update stream (window + status + reset, but no
+ * %), /usage carries the authoritative "Current session/week … % used" numbers
+ * — the same the official app shows. Runs after each turn for subscription tabs.
+ * @param {number} tabId
+ */
+async function refreshSubscriptionUsage(tabId) {
+  try {
+    const result = await window.copilot.chat.silentCommand(tabId, '/usage');
+    if (!result.success) return;
+    const tab = tabs.get(tabId);
+    if (!tab) return;
+    tab._subUsageWindows = parseUsageWindows(result.text, Date.now());
+    tab._lastUsageText = result.text;
+    if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
+  } catch (e) {
+    console.warn('[usage] refreshSubscriptionUsage fehlgeschlagen:', e?.message);
+  }
+}
+
+/**
  * Read & display the context-% for a tab without auto-compacting. Used for
  * Copilot tabs (the CLI manages its own context window). /context is free.
  * @param {number} tabId
@@ -2932,8 +2955,13 @@ function updateUsageDisplay(parsed, tokens, fullText) {
 function updateSubscriptionUsageDisplay(tab) {
   const el = document.getElementById('sessionUsage');
   if (!el || !tab || getTabProvider(tab) !== 'claude-code') return;
+  // Prefer the /usage windows (they carry the authoritative utilization %);
+  // fall back to the live stream events (window + status + reset, usually no %).
+  const windows = (Array.isArray(tab._subUsageWindows) && tab._subUsageWindows.length)
+    ? tab._subUsageWindows
+    : tab._subRateLimits;
   const { text, warn, tooltip } = formatSubscriptionUsage(
-    tab._subRateLimits,
+    windows,
     typeof tab._subCostUsd === 'number' ? tab._subCostUsd : undefined,
   );
   el.textContent = (warn ? '⚠️ ' : '') + text;

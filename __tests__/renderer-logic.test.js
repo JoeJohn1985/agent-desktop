@@ -35,6 +35,8 @@ const {
   formatSubscriptionUsage,
   mergeRateLimitWindows,
   rateLimitFamily,
+  parseUsageWindows,
+  formatDurationDe,
 } = require('../src/renderer-logic');
 
 // ── parseQuotaError ──────────────────────────────────────────
@@ -856,7 +858,7 @@ describe('formatSubscriptionUsage', () => {
 
   it('zeigt ein einzelnes Fenster mit Label und Prozent (allowed)', () => {
     const r = formatSubscriptionUsage(
-      { status: 'allowed', utilization: 0.42, rateLimitType: 'seven_day' }, undefined, NOW);
+      { status: 'allowed', utilization: 42, rateLimitType: 'seven_day' }, undefined, NOW);
     expect(r.text).toBe('Abo · Woche 42 %');
     expect(r.warn).toBe(false);
     expect(r.tooltip).toContain('Woche: 42 %');
@@ -864,42 +866,44 @@ describe('formatSubscriptionUsage', () => {
 
   it('unterscheidet „fast erreicht" (allowed_warning) von „erreicht" (rejected)', () => {
     const warnState = formatSubscriptionUsage(
-      { status: 'allowed_warning', utilization: 0.86, rateLimitType: 'seven_day' }, undefined, NOW);
+      { status: 'allowed_warning', utilization: 86, rateLimitType: 'seven_day' }, undefined, NOW);
     expect(warnState.text).toBe('Abo · Woche 86 % (fast erreicht)');
     expect(warnState.warn).toBe(true);
 
     const rejected = formatSubscriptionUsage(
-      { status: 'rejected', utilization: 1, rateLimitType: 'seven_day' }, undefined, NOW);
+      { status: 'rejected', utilization: 100, rateLimitType: 'seven_day' }, undefined, NOW);
     expect(rejected.text).toBe('Abo · Woche 100 % (Limit erreicht)');
     expect(rejected.warn).toBe(true);
   });
 
-  it('zeigt 5-Std.- UND Wochen-Limit zusammen, Wochenfenster zuerst', () => {
+  it('zeigt 5-Std.- UND Wochen-Limit zusammen, Session-Fenster zuerst', () => {
     const windows = {
-      session: { status: 'allowed', utilization: 0.4, rateLimitType: 'five_hour' },
-      weekly: { status: 'allowed', utilization: 0.86, rateLimitType: 'seven_day' },
+      session: { status: 'allowed', utilization: 40, rateLimitType: 'five_hour' },
+      weekly: { status: 'allowed', utilization: 86, rateLimitType: 'seven_day' },
     };
     const r = formatSubscriptionUsage(windows, undefined, NOW);
-    expect(r.text).toBe('Abo · Woche 86 % · 5 Std. 40 %');
+    expect(r.text).toBe('Abo · 5 Std. 40 % · Woche 86 %');
     expect(r.tooltip).toContain('Woche: 86 %');
     expect(r.tooltip).toContain('5 Std.: 40 %');
   });
 
   it('stellt das dringlichere Fenster (Warnung/abgelehnt) nach vorn', () => {
     const windows = {
-      weekly: { status: 'allowed', utilization: 0.5, rateLimitType: 'seven_day' },
-      session: { status: 'allowed_warning', utilization: 0.95, rateLimitType: 'five_hour' },
+      weekly: { status: 'allowed', utilization: 50, rateLimitType: 'seven_day' },
+      session: { status: 'allowed_warning', utilization: 95, rateLimitType: 'five_hour' },
     };
     const r = formatSubscriptionUsage(windows, undefined, NOW);
     expect(r.text).toBe('Abo · 5 Std. 95 % (fast erreicht) · Woche 50 %');
     expect(r.warn).toBe(true);
   });
 
-  it('behandelt utilization als Bruch (≤1) oder bereits als Prozent (>1)', () => {
-    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 0.5, rateLimitType: 'seven_day' }, undefined, NOW).text)
-      .toBe('Abo · Woche 50 %');
-    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 73, rateLimitType: 'seven_day' }, undefined, NOW).text)
-      .toBe('Abo · Woche 73 %');
+  it('rundet die Auslastung und klemmt sie auf 0–100', () => {
+    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 42.6, rateLimitType: 'seven_day' }, undefined, NOW).text)
+      .toBe('Abo · Woche 43 %');
+    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 3, rateLimitType: 'seven_day' }, undefined, NOW).text)
+      .toBe('Abo · Woche 3 %');
+    expect(formatSubscriptionUsage({ status: 'allowed', utilization: 120, rateLimitType: 'seven_day' }, undefined, NOW).text)
+      .toBe('Abo · Woche 100 %');
   });
 
   it('hält die Leiste ruhig, wenn ein „allowed"-Fenster keine Auslastung liefert (Reset nur im Tooltip)', () => {
@@ -907,32 +911,125 @@ describe('formatSubscriptionUsage', () => {
     const r = formatSubscriptionUsage({ status: 'allowed', rateLimitType: 'five_hour', resetsAt }, undefined, NOW);
     expect(r.text).toBe('Abo');
     expect(r.warn).toBe(false);
-    expect(r.tooltip).toContain('5 Std.: Reset in 1h 30m');
+    expect(r.tooltip).toContain('5 Std.: Reset in 1 Std. 30 Min.');
   });
 
   it('zeigt eine Warnung auch ohne Auslastungswert (nur Status + Reset)', () => {
     const resetsAt = (NOW + 2 * 60 * 60 * 1000) / 1000; // 2h
     const r = formatSubscriptionUsage({ status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt }, undefined, NOW);
-    expect(r.text).toBe('Abo · Woche · Reset in 2h 0m (fast erreicht)');
+    expect(r.text).toBe('Abo · Woche · Reset in 2 Std. (fast erreicht)');
     expect(r.warn).toBe(true);
   });
 
   it('nimmt Reset-Zeit, Overage und Token-Äquivalent in den Tooltip auf', () => {
     const resetsAt = (NOW + 2 * 60 * 60 * 1000) / 1000; // 2h
     const r = formatSubscriptionUsage(
-      { status: 'allowed_warning', utilization: 0.9, rateLimitType: 'five_hour', resetsAt,
+      { status: 'allowed_warning', utilization: 90, rateLimitType: 'five_hour', resetsAt,
         overageStatus: 'rejected', overageDisabledReason: 'out_of_credits' },
       0.1234, NOW);
-    expect(r.tooltip).toContain('5 Std.: 90 % · fast erreicht · Reset in 2h 0m');
+    expect(r.tooltip).toContain('5 Std.: 90 % · fast erreicht · Reset in 2 Std.');
     expect(r.tooltip).toContain('Overage: rejected (out_of_credits)');
     expect(r.tooltip).toContain('Token-Äquivalent: $0.1234');
   });
 
   it('akzeptiert auch ein einzelnes Info-Objekt statt einer Fenster-Map', () => {
-    const single = { status: 'allowed', utilization: 0.3, rateLimitType: 'seven_day' };
+    const single = { status: 'allowed', utilization: 30, rateLimitType: 'seven_day' };
     const asMap = formatSubscriptionUsage({ weekly: single }, undefined, NOW);
     const asObj = formatSubscriptionUsage(single, undefined, NOW);
     expect(asObj.text).toBe(asMap.text);
     expect(asObj.text).toBe('Abo · Woche 30 %');
+  });
+
+  it('nutzt explizite Labels und Reset-Text (z. B. aus /usage) und blendet secondary im Balken aus', () => {
+    const windows = [
+      { rateLimitType: 'five_hour', label: '5 Std.', utilization: 35, status: 'allowed', resetText: 'Jul 10, 3:29am (Europe/Berlin)' },
+      { rateLimitType: 'seven_day', label: 'Woche', utilization: 3, status: 'allowed', resetText: 'Jul 10, 3:59am (Europe/Berlin)' },
+      { rateLimitType: 'seven_day', label: 'Woche (Fable)', utilization: 0, status: 'allowed', secondary: true },
+    ];
+    const r = formatSubscriptionUsage(windows, undefined, NOW);
+    expect(r.text).toBe('Abo · 5 Std. 35 % · Woche 3 %'); // secondary bucket not in bar
+    expect(r.tooltip).toContain('5 Std.: 35 % · Reset Jul 10, 3:29am (Europe/Berlin)');
+    expect(r.tooltip).toContain('Woche (Fable): 0 %'); // but present in tooltip
+  });
+});
+
+// ── parseUsageWindows ────────────────────────────────────────
+describe('parseUsageWindows', () => {
+  // Real `/usage` output captured from the Claude Code CLI.
+  const SAMPLE = [
+    'You are currently using your subscription to power your Claude Code usage',
+    '',
+    'Current session: 35% used · resets Jul 10, 3:29am (Europe/Berlin)',
+    'Current week (all models): 3% used · resets Jul 10, 3:59am (Europe/Berlin)',
+    'Current week (Fable): 0% used',
+    '',
+    "What's contributing to your limits usage?",
+    'Last 24h · 28 requests · 1 session',
+  ].join('\n');
+
+  it('extrahiert Session- und Wochenfenster mit Prozent und Reset-Text', () => {
+    const w = parseUsageWindows(SAMPLE);
+    const session = w.find(x => x.rateLimitType === 'five_hour');
+    const week = w.find(x => x.rateLimitType === 'seven_day' && !x.secondary);
+    expect(session).toMatchObject({
+      utilization: 35, label: '5 Std.', status: 'allowed', resetText: 'Jul 10, 3:29am (Europe/Berlin)',
+    });
+    expect(week).toMatchObject({
+      utilization: 3, label: 'Woche', status: 'allowed', resetText: 'Jul 10, 3:59am (Europe/Berlin)',
+    });
+  });
+
+  it('markiert modellspezifische Wochen-Buckets als secondary (ohne Reset)', () => {
+    const fable = parseUsageWindows(SAMPLE).find(x => x.label === 'Woche (Fable)');
+    expect(fable).toMatchObject({ utilization: 0, secondary: true });
+    expect(fable.resetText).toBeUndefined();
+  });
+
+  it('leitet den Status aus der Auslastung ab (≥80 % → fast erreicht, ≥100 % → erreicht)', () => {
+    const w = parseUsageWindows('Current session: 85% used · resets morgen\nCurrent week (all models): 100% used');
+    expect(w[0].status).toBe('allowed_warning');
+    expect(w[1].status).toBe('rejected');
+  });
+
+  it('gibt [] für leere oder irrelevante Eingaben', () => {
+    expect(parseUsageWindows('')).toEqual([]);
+    expect(parseUsageWindows(null)).toEqual([]);
+    expect(parseUsageWindows('nichts von Belang hier')).toEqual([]);
+  });
+
+  it('ergibt zusammen mit formatSubscriptionUsage die Prozent-Anzeige', () => {
+    const r = formatSubscriptionUsage(parseUsageWindows(SAMPLE), undefined, 0);
+    expect(r.text).toBe('Abo · 5 Std. 35 % · Woche 3 %');
+    expect(r.warn).toBe(false);
+    expect(r.tooltip).toContain('Woche (Fable): 0 %');
+  });
+
+  it('wandelt den Session-Reset-Text in einen Stunden-Countdown', () => {
+    const now = new Date(2026, 6, 10, 11, 0, 0).getTime(); // 10. Jul 2026, 11:00 lokal
+    const w = parseUsageWindows('Current session: 17% used · resets Jul 10, 2:59pm (Europe/Berlin)', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    expect(r.tooltip).toContain('5 Std.: 17 % · Reset in 3 Std. 59 Min.');
+  });
+
+  it('wandelt den Wochen-Reset-Text in einen Tage-Countdown', () => {
+    const now = new Date(2026, 6, 10, 11, 0, 0).getTime();
+    const w = parseUsageWindows('Current week (all models): 2% used · resets Jul 17, 3:59am (Europe/Berlin)', now);
+    const r = formatSubscriptionUsage(w, undefined, now);
+    expect(r.tooltip).toContain('Woche: 2 % · Reset in 6 Tagen 16 Std.');
+  });
+});
+
+// ── formatDurationDe ─────────────────────────────────────────
+describe('formatDurationDe', () => {
+  const MIN = 60000, HOUR = 3600000, DAY = 86400000;
+  it('formatiert Minuten, Stunden und Tage als deutschen Countdown', () => {
+    expect(formatDurationDe(45 * MIN)).toBe('45 Min.');
+    expect(formatDurationDe(2 * HOUR)).toBe('2 Std.');
+    expect(formatDurationDe(3 * HOUR + 12 * MIN)).toBe('3 Std. 12 Min.');
+    expect(formatDurationDe(26 * HOUR)).toBe('1 Tag 2 Std.');
+    expect(formatDurationDe(6 * DAY)).toBe('6 Tagen');
+  });
+  it('klemmt negative Werte auf 0', () => {
+    expect(formatDurationDe(-5000)).toBe('0 Min.');
   });
 });

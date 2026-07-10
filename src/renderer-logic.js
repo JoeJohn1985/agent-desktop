@@ -533,11 +533,15 @@ function buildAgentPrefix(activeAgentInfos, provider) {
 // 7-day weekly limit, plus overage). To show them together we bucket the live
 // events by a coarse *family* and remember the latest info per family, so the
 // session bar can display e.g. the weekly *and* the 5-hour utilization at once.
+//
+// The live stream carries the window + status + reset but usually NOT the
+// percentage. The exact utilization comes from the `/usage` slash command,
+// parsed by `parseUsageWindows()` — the same numbers the official app shows.
 
 /** Short labels for the coarse rate-limit window families. */
 const RATE_LIMIT_FAMILY_LABELS = { weekly: 'Woche', session: '5 Std.', overage: 'Overage', other: 'Limit' };
-/** Display/sort order of the families (weekly first — it's the slow, sticky one). */
-const RATE_LIMIT_FAMILY_ORDER = { weekly: 0, session: 1, overage: 2, other: 3 };
+/** Display/sort order of the families (session first — it's the fast-moving one). */
+const RATE_LIMIT_FAMILY_ORDER = { session: 0, weekly: 1, overage: 2, other: 3 };
 /** Higher = more urgent; drives which window leads the display. */
 const RATE_LIMIT_STATUS_SEVERITY = { rejected: 2, allowed_warning: 1, allowed: 0 };
 /** German status words appended per window (allowed has none). */
@@ -557,22 +561,70 @@ function rateLimitFamily(type) {
 }
 
 /**
- * Normalizes the SDK's `utilization` field to an integer percentage. The value
- * may arrive as a fraction (0..1) or already as a percent (0..100); anything
- * ≤ 1 is treated as a fraction. Returns null when no usable number is present.
+ * Normalizes a utilization value to an integer percentage. Both the SDK
+ * (`SDKRateLimitInfo.utilization`) and `/usage` report this as 0–100 already,
+ * so we only round and clamp. Returns null when no usable number is present.
  * @param {*} utilization
  * @returns {number|null}
  */
 function normalizeUtilizationPct(utilization) {
   if (typeof utilization !== 'number' || !isFinite(utilization) || utilization < 0) return null;
-  const pct = utilization <= 1 ? utilization * 100 : utilization;
-  return Math.round(pct);
+  return Math.min(100, Math.round(utilization));
 }
 
-/** Formats a millisecond delta as `Xh Ym` (never negative). */
-function formatResetIn(msUntilReset) {
-  const mins = Math.max(0, Math.round(msUntilReset / 60000));
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+/**
+ * Formats a millisecond duration as a compact German countdown, e.g.
+ * `45 Min.`, `3 Std. 12 Min.`, `2 Std.`, `1 Tag 2 Std.`, `6 Tagen`. A countdown
+ * is far easier to grasp than an absolute timestamp. Never negative.
+ */
+function formatDurationDe(ms) {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  if (d > 0) {
+    const dayWord = d === 1 ? 'Tag' : 'Tagen';
+    return h ? `${d} ${dayWord} ${h} Std.` : `${d} ${dayWord}`;
+  }
+  if (h > 0) return m ? `${h} Std. ${m} Min.` : `${h} Std.`;
+  return `${m} Min.`;
+}
+
+const RESET_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/**
+ * Parses a `/usage` reset timestamp like `Jul 10, 3:29am (Europe/Berlin)` into
+ * epoch ms so it can be rendered as a live countdown. The named timezone is not
+ * applied (the value already reflects the user's own account zone, which
+ * normally matches their machine); the year is inferred, since reset times are
+ * always in the future. Returns null when the text can't be parsed.
+ */
+function parseResetTextToMs(resetText, nowMs) {
+  if (typeof resetText !== 'string') return null;
+  const m = resetText.match(/([A-Za-z]{3})\s+(\d{1,2}),\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);
+  if (!m) return null;
+  const mon = RESET_MONTHS[m[1].toLowerCase()];
+  if (mon === undefined) return null;
+  const day = parseInt(m[2], 10);
+  let hour = parseInt(m[3], 10) % 12;
+  if (/pm/i.test(m[5])) hour += 12;
+  const min = parseInt(m[4], 10);
+  const year = new Date(nowMs).getFullYear();
+  let t = new Date(year, mon, day, hour, min, 0, 0).getTime();
+  // Reset lies in the future; a computed past time means the year rolled over.
+  if (t < nowMs - 24 * 3600 * 1000) t = new Date(year + 1, mon, day, hour, min, 0, 0).getTime();
+  return t;
+}
+
+/**
+ * Human "Reset …" phrase for a window: a live countdown from the epoch
+ * `resetsAt` (from the stream, or parsed out of `/usage`), else the literal
+ * reset text as a fallback. Returns null when neither is present.
+ */
+function resetPhrase(rl, nowMs) {
+  if (rl.resetsAt) return `Reset in ${formatDurationDe(rl.resetsAt * 1000 - nowMs)}`;
+  if (rl.resetText) return `Reset ${rl.resetText}`;
+  return null;
 }
 
 /**
@@ -605,7 +657,7 @@ function rateLimitList(rateLimits) {
 
 /** Compact per-window segment for the session bar, e.g. `Woche 86 % (fast erreicht)`. */
 function formatWindowSegment(rl, nowMs) {
-  const label = RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
+  const label = rl.label || RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
   const pct = normalizeUtilizationPct(rl.utilization);
   const word = RATE_LIMIT_STATUS_WORD[rl.status];
   // Prefer the %, else a reset countdown, else the bare label — but always keep
@@ -613,8 +665,10 @@ function formatWindowSegment(rl, nowMs) {
   // frequently omits `utilization`, so the status is the only warning signal.
   let head;
   if (pct != null) head = `${label} ${pct} %`;
-  else if (rl.resetsAt) head = `${label} · Reset in ${formatResetIn(rl.resetsAt * 1000 - nowMs)}`;
-  else head = label;
+  else {
+    const reset = resetPhrase(rl, nowMs);
+    head = reset ? `${label} · ${reset}` : label;
+  }
   return word ? `${head} (${word})` : head;
 }
 
@@ -643,10 +697,13 @@ function formatSubscriptionUsage(rateLimits, subCostUsd, now) {
   // Session bar: stay quiet while healthy — surface a window only when it has a
   // utilization % to show or is actively warning/blocking. (The live stream
   // often omits `utilization`, so a plain `allowed` window with only a reset
-  // time would just add noise; it still lives in the tooltip below.)
-  const shown = all.filter(rl =>
-    normalizeUtilizationPct(rl.utilization) != null ||
-    rl.status === 'allowed_warning' || rl.status === 'rejected');
+  // time would just add noise; it still lives in the tooltip below.) Secondary
+  // windows (e.g. model-scoped weekly buckets) only appear when actively warning.
+  const shown = all.filter(rl => {
+    const active = rl.status === 'allowed_warning' || rl.status === 'rejected';
+    if (rl.secondary) return active;
+    return normalizeUtilizationPct(rl.utilization) != null || active;
+  });
 
   let text = 'Abo';
   let warn = false;
@@ -658,12 +715,13 @@ function formatSubscriptionUsage(rateLimits, subCostUsd, now) {
   // Tooltip: every known window (incl. healthy ones), so the reset stays discoverable.
   const parts = [];
   for (const rl of all) {
-    const label = RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
+    const label = rl.label || RATE_LIMIT_FAMILY_LABELS[rateLimitFamily(rl.rateLimitType)];
     const pct = normalizeUtilizationPct(rl.utilization);
+    const reset = resetPhrase(rl, nowMs);
     const pieces = [];
     if (pct != null) pieces.push(`${pct} %`);
     if (RATE_LIMIT_STATUS_WORD[rl.status]) pieces.push(RATE_LIMIT_STATUS_WORD[rl.status]);
-    if (rl.resetsAt) pieces.push(`Reset in ${formatResetIn(rl.resetsAt * 1000 - nowMs)}`);
+    if (reset) pieces.push(reset);
     parts.push(`${label}: ${pieces.join(' · ') || '—'}`);
   }
   const withOverage = all.find(rl => rl.overageStatus);
@@ -673,6 +731,56 @@ function formatSubscriptionUsage(rateLimits, subCostUsd, now) {
   if (typeof subCostUsd === 'number') parts.push(`Token-Äquivalent: $${subCostUsd.toFixed(4)}`);
 
   return { text, warn, tooltip: parts.join('\n') || 'Über dein Claude-Abo abgerechnet' };
+}
+
+/** Utilization (%) at/above which a plan window is flagged „fast erreicht". */
+const SUBSCRIPTION_WARN_PCT = 80;
+/** Matches a `/usage` plan line: `Current session: 35% used · resets …`. */
+const USAGE_LINE_RE = /Current (session|week)(?:\s*\(([^)]+)\))?:\s*(\d+)\s*%\s*used(?:\s*[·•]\s*resets\s+([^\n]+?))?\s*(?:\n|$)/gi;
+
+/**
+ * Parses the plan rate-limit lines from a Claude Code `/usage` response, e.g.
+ * `Current session: 35% used · resets Jul 10, 3:29am (Europe/Berlin)` and
+ * `Current week (all models): 3% used · resets …`. Returns display-ready window
+ * infos (utilization %, literal reset text, status derived from the %). The
+ * `Current week (<model>)` buckets are flagged `secondary` so they stay in the
+ * tooltip only. The literal reset timestamp is also converted to an epoch
+ * (`resetsAt`) so the UI can show a live countdown. Returns [] when nothing
+ * matches.
+ * @param {string} text - Raw `/usage` output.
+ * @param {number} [now] - Current epoch ms (for reset parsing; defaults to Date.now()).
+ * @returns {Array<Object>}
+ */
+function parseUsageWindows(text, now) {
+  if (typeof text !== 'string' || !text) return [];
+  const nowMs = typeof now === 'number' ? now : Date.now();
+  const out = [];
+  USAGE_LINE_RE.lastIndex = 0;
+  let m;
+  while ((m = USAGE_LINE_RE.exec(text)) !== null) {
+    const [, scope, qualifierRaw, pctRaw, resetRaw] = m;
+    const pct = parseInt(pctRaw, 10);
+    const status = pct >= 100 ? 'rejected' : pct >= SUBSCRIPTION_WARN_PCT ? 'allowed_warning' : 'allowed';
+    const resetText = resetRaw ? resetRaw.trim() : undefined;
+    const resetMs = resetText ? parseResetTextToMs(resetText, nowMs) : null;
+    const resetsAt = resetMs != null ? Math.round(resetMs / 1000) : undefined;
+    if (scope.toLowerCase() === 'session') {
+      out.push({ rateLimitType: 'five_hour', label: RATE_LIMIT_FAMILY_LABELS.session, utilization: pct, status, resetText, resetsAt });
+    } else {
+      const qualifier = qualifierRaw ? qualifierRaw.trim() : '';
+      const allModels = qualifier === '' || /^all models$/i.test(qualifier);
+      out.push({
+        rateLimitType: 'seven_day',
+        label: allModels ? RATE_LIMIT_FAMILY_LABELS.weekly : `${RATE_LIMIT_FAMILY_LABELS.weekly} (${qualifier})`,
+        utilization: pct,
+        status,
+        resetText,
+        resetsAt,
+        secondary: !allModels,
+      });
+    }
+  }
+  return out;
 }
 
 // ── Exports ──────────────────────────────────────────────────
@@ -717,6 +825,8 @@ const _api = {
   formatSubscriptionUsage,
   mergeRateLimitWindows,
   rateLimitFamily,
+  parseUsageWindows,
+  formatDurationDe,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
