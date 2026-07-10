@@ -2873,7 +2873,6 @@ async function refreshSubscriptionUsage(tabId) {
     const tab = tabs.get(tabId);
     if (!tab) return;
     tab._subUsageWindows = parseUsageWindows(result.text, Date.now());
-    tab._lastUsageText = result.text;
     if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
   } catch (e) {
     console.warn('[usage] refreshSubscriptionUsage fehlgeschlagen:', e?.message);

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.9] - 2026-07-09
+
+### Changed
+- Aufräumen: `refreshSubscriptionUsage()` setzte `tab._lastUsageText`, das für
+  Subscription-Tabs (Claude Code) nie gelesen wird (der einzige Leser ist der
+  Nicht-Abo-Zweig der Anzeige-Aktualisierung). Der tote Schreibzugriff wurde
+  entfernt. (Fund 4 aus der Code Review.)
+
 ## [1.2.8] - 2026-07-09
 
 ### Fixed
