@@ -1531,28 +1531,29 @@ function initCopilotIPC() {
         // A real tool call ends the current message — close its bubble so the
         // text after the tool renders as a separate message.
         finalizeResponseBubble(tab);
-        // Render the tool call itself so it's always visible — even if the
-        // matching completion carries no result content. MCP/unknown tools get a
-        // generic icon. (report_intent already returned above.)
+        // Render the tool call as ONE element per callId, in a "pending" state
+        // (⏳ + name + args). tool.execution_complete updates THIS same element
+        // in place (→ ✓/✗ + result) instead of appending a second line, so each
+        // tool call shows exactly once. MCP/unknown tools get a generic icon.
+        // (report_intent already returned above.)
         {
           const callIcon = toolIcon(event.data.toolName) || '🔧';
           const callArgs = formatToolArgs(event.data.toolName, event.data.arguments || {});
           const callFull = toolArgFullText(event.data.arguments || {});
-          const summaryHtml = `<span class="stream-tool-call__icon">${callIcon}</span> <span class="stream-tool-call__name">${escapeHtml(toolDisplayName(event.data.toolName))}</span> <span class="stream-tool-call__args">${escapeHtml(callArgs)}</span>`;
+          const summaryHtml = `<span class="stream-tool-result__status">⏳</span> ${callIcon} <strong>${escapeHtml(toolDisplayName(event.data.toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(callArgs)}</span>`;
+          if (!tab._toolResultEls) tab._toolResultEls = new Map();
+          const callId = event.data.toolCallId || '';
           const callEl = document.createElement('details');
-          callEl.className = 'stream-tool-call';
+          callEl.className = 'stream-tool-result';
           const summary = document.createElement('summary');
           summary.innerHTML = summaryHtml;
           callEl.appendChild(summary);
-          // Only add the expandable full-text block when there's actually more
-          // to see than the collapsed preview already shows.
-          if (callFull && callFull !== callArgs) {
-            const full = document.createElement('pre');
-            full.className = 'stream-tool-call__full';
-            full.textContent = callFull;
-            callEl.appendChild(full);
-          }
+          const content = document.createElement('pre');
+          content.className = 'stream-tool-result__content';
+          content.textContent = (callFull && callFull !== callArgs) ? callFull : '';
+          callEl.appendChild(content);
           tab.streamEl.insertBefore(callEl, tab.statusEl);
+          if (callId) tab._toolResultEls.set(callId, callEl);
         }
         if (event.data.toolName === 'ask_user') {
           setTabStatus(tabId, 'question');
@@ -1576,6 +1577,10 @@ function initCopilotIPC() {
           const toolInfo = pendingToolCalls.get(event.data.toolCallId) || {};
           const toolName = toolInfo.toolName || event.data.toolName || 'unbekannt';
           const toolArgs = toolInfo.arguments || {};
+          // Drop the pending call element from tool.execution_start — the denial
+          // line below replaces it (otherwise a ⏳ would linger).
+          const pendingEl = tab._toolResultEls?.get(event.data.toolCallId);
+          if (pendingEl) { pendingEl.remove(); tab._toolResultEls.delete(event.data.toolCallId); }
           // Show denial in stream
           const deniedEl = document.createElement('div');
           deniedEl.className = 'stream-error';
@@ -1587,7 +1592,7 @@ function initCopilotIPC() {
           // Let the process continue — the agent will find alternative approaches
           break;
         }
-        if (!event.data || !event.data.result) break;
+        if (!event.data) break;
         const toolName = event.data.toolName || '';
         if (toolName === 'report_intent') break;
         // MCP/unknown tools have no built-in icon → show a generic one instead of
@@ -1596,22 +1601,23 @@ function initCopilotIPC() {
 
         const success = event.data.success !== false;
         const statusIcon = success ? '✓' : '✗';
-        const resultContent = event.data.result.content || '';
-        // Collapsed summary is short — the untruncated resultContent stays
-        // available below in the expandable .stream-tool-result__content, so
-        // nothing is actually lost, just not dumped into the always-visible line.
-        const preview = formatToolResultPreview(resultContent);
-        const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
-
-        // ACP emits multiple tool_call_update events per call (pending →
-        // in_progress → completed). Keyed by toolCallId, update the SAME result
-        // element in place instead of appending a duplicate for every status.
+        const resultContent = event.data.result?.content || '';
         if (!tab._toolResultEls) tab._toolResultEls = new Map();
         const callId = event.data.toolCallId || '';
+        // Keep the call's arguments in the collapsed line (what ran) — more
+        // identifying at a glance than the result; the full result stays one
+        // click away in the expandable .stream-tool-result__content.
+        const callArgs = formatToolArgs(toolName, (pendingToolCalls.get(callId) || {}).arguments || {});
+        const preview = callArgs || formatToolResultPreview(resultContent);
+        const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
+
+        // Finalize the pending element created in tool.execution_start in place
+        // (ACP also emits several updates per call: pending → in_progress →
+        // completed). Only fall back to creating one if the start was missed.
         let toolEl = callId ? tab._toolResultEls.get(callId) : null;
         if (toolEl) {
           toolEl.querySelector('summary').innerHTML = summaryHtml;
-          toolEl.querySelector('.stream-tool-result__content').textContent = resultContent;
+          if (resultContent) toolEl.querySelector('.stream-tool-result__content').textContent = resultContent;
         } else {
           toolEl = document.createElement('details');
           toolEl.className = 'stream-tool-result';

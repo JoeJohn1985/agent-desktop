@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.11] - 2026-07-09
+
+### Fixed
+- **Tool-Aufrufe wurden doppelt angezeigt** — einmal kurz beim Start
+  (`.stream-tool-call`) und einmal im Detail beim Abschluss
+  (`.stream-tool-result`). Beide sind jetzt zu **einem** Element pro
+  `toolCallId` zusammengefasst: Beim Start rendert eine „läuft"-Zeile
+  (⏳ + Name + Argumente), die `tool.execution_complete` an Ort und Stelle zu
+  ✓/✗ finalisiert; das Ergebnis bleibt zum Aufklappen darunter. Die
+  eingeklappte Zeile zeigt jetzt die Argumente (identifiziert den Aufruf), nicht
+  mehr die Ergebnis-Vorschau. Bei „keine Berechtigung" wird die Pending-Zeile
+  entfernt und durch die 🔐-Meldung ersetzt.
+
 ## [1.2.10] - 2026-07-09
 
 ### Changed
