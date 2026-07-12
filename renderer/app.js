@@ -595,7 +595,8 @@ async function createTab(label, initialModel, provider) {
     _unlockBtnEl: null,
     allowedTools: new Set(),
     sessionDeniedTools: [],
-    mode: DEFAULT_MODE_ID,
+    // Restore the provider's last-picked mode, else the default.
+    mode: getSavedModeForProvider(tabProvider) || DEFAULT_MODE_ID,
     _lastUsageParsed: null,
     _lastUsageText: null,
     _lastUsageTokens: null,
@@ -2045,6 +2046,25 @@ function saveDefaultModelForProvider(provider, modelId) {
   saveSetting('defaultModels', map);
 }
 
+/**
+ * The mode a provider was last set to, remembered across restarts. Validated
+ * against the provider's known modes (an ACP provider whose modes aren't
+ * discovered yet trusts the saved id — modes_available corrects an invalid one).
+ * @param {string} provider
+ * @returns {string|null}
+ */
+function getSavedModeForProvider(provider) {
+  const saved = (getPref('lastModes', {}) || {})[provider];
+  return pickSavedMode(saved, getModesForProvider(provider));
+}
+
+/** Remember the mode a provider was last set to (persisted to preferences). */
+function saveModeForProvider(provider, modeId) {
+  const map = { ...(getPref('lastModes', {}) || {}) };
+  map[provider] = modeId;
+  setPref('lastModes', map);
+}
+
 const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)', sub: ' (Abo)' };
 
 /** Render the "default provider" + "default model per provider" settings controls. */
@@ -2605,6 +2625,7 @@ function initTabModeSelector() {
         const t = tabs.get(openedForTabId);
         if (!t) return;
         t.mode = m.id;
+        saveModeForProvider(getTabProvider(t), m.id); // remember per provider across restarts
         updateModeSelectBtn(openedForTabId);
       });
       dropdown.appendChild(item);

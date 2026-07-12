@@ -822,6 +822,25 @@ function parseUsageWindows(text, now) {
   return out;
 }
 
+// ── Mode persistence ─────────────────────────────────────────
+
+/**
+ * Chooses which mode to restore for a provider from a remembered id and the
+ * provider's currently-known modes. Returns the saved id when it's still valid,
+ * or when the mode list isn't known yet (ACP providers like Claude Code discover
+ * their modes only after connecting and will correct an invalid one). Returns
+ * null when the saved id is absent or no longer offered by a known list.
+ * @param {string|null|undefined} savedModeId
+ * @param {Array<{id: string}>} availableModes
+ * @returns {string|null}
+ */
+function pickSavedMode(savedModeId, availableModes) {
+  if (!savedModeId) return null;
+  const modes = Array.isArray(availableModes) ? availableModes : [];
+  if (modes.length && !modes.some(m => m && m.id === savedModeId)) return null;
+  return savedModeId;
+}
+
 // ── Exports ──────────────────────────────────────────────────
 const _api = {
   shortenPath,
@@ -866,6 +885,7 @@ const _api = {
   rateLimitFamily,
   parseUsageWindows,
   formatDurationDe,
+  pickSavedMode,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

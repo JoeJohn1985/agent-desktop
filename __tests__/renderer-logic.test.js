@@ -37,6 +37,7 @@ const {
   rateLimitFamily,
   parseUsageWindows,
   formatDurationDe,
+  pickSavedMode,
 } = require('../src/renderer-logic');
 
 // ── parseQuotaError ──────────────────────────────────────────
@@ -1065,5 +1066,29 @@ describe('formatDurationDe', () => {
   });
   it('klemmt negative Werte auf 0', () => {
     expect(formatDurationDe(-5000)).toBe('0 Min.');
+  });
+});
+
+// ── pickSavedMode ────────────────────────────────────────────
+describe('pickSavedMode', () => {
+  const modes = [{ id: 'agent' }, { id: 'plan' }];
+
+  it('gibt den gespeicherten Modus zurück, wenn er in der bekannten Liste gültig ist', () => {
+    expect(pickSavedMode('plan', modes)).toBe('plan');
+  });
+
+  it('verwirft einen ungültigen Modus bei bekannter Liste', () => {
+    expect(pickSavedMode('kaputt', modes)).toBeNull();
+  });
+
+  it('vertraut dem gespeicherten Modus, wenn die Liste noch leer/unbekannt ist (ACP entdeckt später)', () => {
+    expect(pickSavedMode('plan', [])).toBe('plan');
+    expect(pickSavedMode('plan', undefined)).toBe('plan');
+  });
+
+  it('gibt null zurück, wenn kein Modus gespeichert ist', () => {
+    expect(pickSavedMode(null, modes)).toBeNull();
+    expect(pickSavedMode('', modes)).toBeNull();
+    expect(pickSavedMode(undefined, modes)).toBeNull();
   });
 });

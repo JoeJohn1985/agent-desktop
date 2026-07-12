@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.12] - 2026-07-09
+
+### Added
+- **Zuletzt gewählter Modus wird pro Provider gemerkt.** Bei Providern mit
+  Modus-Auswahl (Copilot, Claude Code, Anthropic) wird der zuletzt gewählte
+  Modus in den Preferences gespeichert (`lastModes` je Provider) und für neue
+  Tabs wiederhergestellt. Die Validierung (`pickSavedMode()`, unit-getestet)
+  verwirft einen nicht mehr angebotenen Modus; bei ACP-Providern, deren Modi
+  erst nach dem Verbinden entdeckt werden, wird der gespeicherte Modus vertraut
+  und ggf. durch `modes_available` korrigiert.
+
 ## [1.2.11] - 2026-07-09
 
 ### Fixed
