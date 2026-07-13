@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.13] - 2026-07-13
+
+### Fixed
+- **Code-Coverage-Abfrage schlug mit „Unterminated string in JSON" fehl.**
+  `tests:coverage` (und `tests:run`/`tests:e2e`) riefen `execFile` ohne
+  `maxBuffer`-Option auf — Node begrenzt `stdout` dabei standardmäßig auf 1 MB.
+  Der Coverage-Report (volle `coverageMap` über alle Testdateien) sprengt das
+  bei der aktuellen Suitengröße, wodurch `stdout` mitten im JSON-String
+  abgeschnitten wurde. `maxBuffer` ist jetzt für alle drei IPC-Handler auf
+  64 MB gesetzt.
+
 ## [1.2.12] - 2026-07-09
 
 ### Added

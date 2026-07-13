@@ -4,6 +4,13 @@
 
 const { ipcMain } = require('electron');
 
+// Node's execFile defaults stdout/stderr to a 1 MB maxBuffer — jest's --json
+// output (esp. --coverage, which embeds a full per-file coverageMap) regularly
+// exceeds that as the suite grows, silently truncating stdout mid-string and
+// making JSON.parse fail with "Unterminated string in JSON". Raise it well
+// past any output we currently produce.
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024; // 64 MB
+
 function registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOUT_MS }) {
 
   ipcMain.handle('tests:run', async () => {
@@ -13,6 +20,7 @@ function registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOU
         cwd: __dirname,
         shell: true,
         timeout: TEST_RUN_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER_BYTES,
       }, (_error, stdout, stderr) => {
         try {
           const jsonOutput = JSON.parse(stdout);
@@ -58,6 +66,7 @@ function registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOU
         cwd: __dirname,
         shell: true,
         timeout: TEST_COVERAGE_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER_BYTES,
       }, (_error, stdout, _stderr) => {
         try {
           const jsonOutput = JSON.parse(stdout);
@@ -91,6 +100,7 @@ function registerTestsIPC({ __dirname, TEST_RUN_TIMEOUT_MS, TEST_COVERAGE_TIMEOU
         cwd: __dirname,
         shell: true,
         timeout: TEST_COVERAGE_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER_BYTES,
       }, (error, stdout, stderr) => {
         try {
           const jsonOutput = JSON.parse(stdout);
