@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.14] - 2026-07-13
+
+### Added
+- **Kostenübersicht: Monat-Ansicht + Vergangenheits-Navigation.** Die
+  Kostenseite bot bisher nur ein rollierendes „letzte 7 Tage"/„letzte 24h"-
+  Fenster ohne Möglichkeit, in die Vergangenheit zu blättern. Neu:
+  - Dritter Umschalter **Monat** (neben Tag/Woche), als Tages-Balken über den
+    Kalendermonat.
+  - **◀ / ▶-Navigation** mit Perioden-Label (z. B. „KW 29 · 13.–19. Juli",
+    „Juli 2026", „Gestern"); ▶ ist deaktiviert auf der aktuellen Periode.
+  - Alle drei Bereiche sind jetzt **kalender-ausgerichtet** statt rollierend:
+    Tag = lokale Mitternacht bis Mitternacht, Woche = Montag–Sonntag, Monat =
+    1. bis Letzter.
+  - Neue reine, unit-getestete Funktion `costPeriod()` in
+    `src/renderer-logic.js` berechnet Fenstergrenzen, Bucket-Größe/-Anzahl und
+    das deutsche Label für Tag/Woche/Monat + Offset.
+- `costLog`-Cap von 5.000 auf **50.000 Einträge** angehoben (≈ 1 Jahr bei
+  aktueller Nutzung), damit Vergangenheits-/Monatsansichten nicht vorzeitig
+  an fehlenden Altdaten scheitern.
+
 ## [1.2.13] - 2026-07-13
 
 ### Fixed

@@ -10,12 +10,12 @@
 // depend on app.js destructuring them.
 'use strict';
 
-const { buildCostBuckets, aggregateCostBySession, trimCostLog } = window.RendererLogic;
+const { buildCostBuckets, aggregateCostBySession, trimCostLog, costPeriod } = window.RendererLogic;
 
 // ── Cost Log ─────────────────────────────────────────────────
 
 const COST_LOG_KEY = 'costLog';
-const COST_LOG_MAX_ENTRIES = 5000;
+const COST_LOG_MAX_ENTRIES = 50000; // ~1 year of entries; keep past-period views usable
 
 function getCostLog() {
   return getPref(COST_LOG_KEY, []);
@@ -46,7 +46,8 @@ function migrateCostLogToUsd() {
 
 // ── Cost Settings Panel ──────────────────────────────────────
 
-let _costsRange = 'week';     // 'week' | 'day'
+let _costsRange = 'week';     // 'day' | 'week' | 'month'
+let _costsOffset = 0;         // 0 = current period, 1 = previous, … (calendar-aligned)
 let _costsProvider = 'all';   // 'all' → je Provider; sonst Provider-ID → dessen Sessions
 
 // Display names for provider grouping.
@@ -75,8 +76,17 @@ function initCostsPanel() {
       document.querySelectorAll('.costs-view__toggle-btn').forEach(b => b.classList.remove('costs-view__toggle-btn--active'));
       btn.classList.add('costs-view__toggle-btn--active');
       _costsRange = btn.dataset.range;
+      _costsOffset = 0; // switching granularity jumps back to the current period
       renderCostsPanel();
     });
+  });
+  // ◀ / ▶ step through calendar-aligned periods (▶ is disabled at the present).
+  document.getElementById('costsPrev')?.addEventListener('click', () => {
+    _costsOffset += 1;
+    renderCostsPanel();
+  });
+  document.getElementById('costsNext')?.addEventListener('click', () => {
+    if (_costsOffset > 0) { _costsOffset -= 1; renderCostsPanel(); }
   });
   document.getElementById('costsProviderFilter')?.addEventListener('change', (e) => {
     _costsProvider = e.target.value;
@@ -96,17 +106,19 @@ function initCostsPanel() {
 
 function renderCostsPanel() {
   const log = getCostLog();
-  const now = Date.now();
-  const isWeek = _costsRange === 'week';
-  const bucketCount = isWeek ? 7 : 24;
-  const bucketMs = isWeek ? 86400000 : 3600000;
-  const windowMs = bucketCount * bucketMs;
-  const startMs = now - windowMs;
+  const { startMs, bucketMs, bucketCount, isCurrent, range, label } = costPeriod(_costsRange, _costsOffset, Date.now());
+  const endMs = startMs + bucketMs * bucketCount;
+
+  // Period label + navigation state (no stepping into the future).
+  const labelEl = document.getElementById('costsPeriodLabel');
+  if (labelEl) labelEl.textContent = label;
+  const nextBtn = document.getElementById('costsNext');
+  if (nextBtn) nextBtn.disabled = isCurrent;
 
   // Keep the provider dropdown in sync with the providers present in the log.
   populateProviderFilter(log);
 
-  const inWindow = log.filter(e => e.ts >= startMs);
+  const inWindow = log.filter(e => e.ts >= startMs && e.ts < endMs);
 
   // "Alle Provider" → ein Balken/Eintrag je Provider. Ein konkreter Provider →
   // nur dessen Einträge, aufgeschlüsselt nach Session (#1).
@@ -126,7 +138,7 @@ function renderCostsPanel() {
 
   const buckets = buildCostBuckets(entries, startMs, bucketMs, bucketCount, groupBy);
 
-  drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucketMs);
+  drawCostsChart(buckets, sessionMap, bucketCount, range, startMs, bucketMs);
   renderCostsBreakdown(entries, sessionMap, groupBy);
 }
 
@@ -144,7 +156,7 @@ function populateProviderFilter(log) {
   sel.value = _costsProvider;
 }
 
-function drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucketMs) {
+function drawCostsChart(buckets, sessionMap, bucketCount, range, startMs, bucketMs) {
   const canvas = document.getElementById('costsChart');
   if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
@@ -206,15 +218,18 @@ function drawCostsChart(buckets, sessionMap, bucketCount, isWeek, startMs, bucke
     }
   }
 
-  // X labels
+  // X labels. Month has ~30 bars → only label every 5th (plus the 1st) to keep
+  // it readable; day shows hours, week shows weekday + date.
   ctx.fillStyle = colorMuted;
   ctx.font = '10px sans-serif';
   ctx.textAlign = 'center';
   for (let i = 0; i < bucketCount; i++) {
     const d = new Date(startMs + i * bucketMs);
-    const label = isWeek
-      ? d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric' })
-      : d.getHours() + ':00';
+    let label;
+    if (range === 'day') label = d.getHours() + ':00';
+    else if (range === 'month') label = (i === 0 || (i + 1) % 5 === 0) ? String(d.getDate()) : '';
+    else label = d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric' });
+    if (!label) continue;
     const x = padL + i * barGap + barGap / 2;
     ctx.fillText(label, x, padT + chartH + 18);
   }

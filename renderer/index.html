@@ -174,8 +174,14 @@
           </div>
           <div class="plugins-view__header-center">
             <div class="costs-view__toggle">
-              <button class="costs-view__toggle-btn costs-view__toggle-btn--active" data-range="week">Woche</button>
               <button class="costs-view__toggle-btn" data-range="day">Tag</button>
+              <button class="costs-view__toggle-btn costs-view__toggle-btn--active" data-range="week">Woche</button>
+              <button class="costs-view__toggle-btn" data-range="month">Monat</button>
+            </div>
+            <div class="costs-view__nav">
+              <button class="costs-view__nav-btn" id="costsPrev" data-tooltip="Frühere Periode">◀</button>
+              <span class="costs-view__period" id="costsPeriodLabel"></span>
+              <button class="costs-view__nav-btn" id="costsNext" data-tooltip="Spätere Periode">▶</button>
             </div>
             <select class="costs-view__provider-filter" id="costsProviderFilter" data-tooltip="Provider wählen – zeigt dessen Sessions">
               <option value="all">Alle Provider</option>

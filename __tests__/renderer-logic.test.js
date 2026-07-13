@@ -30,6 +30,7 @@ const {
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  costPeriod,
   parseQuotaError,
   buildAgentPrefix,
   formatSubscriptionUsage,
@@ -1090,5 +1091,53 @@ describe('pickSavedMode', () => {
     expect(pickSavedMode(null, modes)).toBeNull();
     expect(pickSavedMode('', modes)).toBeNull();
     expect(pickSavedMode(undefined, modes)).toBeNull();
+  });
+});
+
+// ── costPeriod ───────────────────────────────────────────────
+describe('costPeriod', () => {
+  const NOW = new Date(2026, 6, 13, 15, 30, 0).getTime(); // 13. Juli 2026, 15:30 lokal
+
+  it('Tag: aktueller Tag → 24 Stundenbuckets ab lokaler Mitternacht', () => {
+    const p = costPeriod('day', 0, NOW);
+    expect(p).toMatchObject({ bucketMs: 3600000, bucketCount: 24, isCurrent: true, label: 'Heute' });
+    expect(p.startMs).toBe(new Date(2026, 6, 13, 0, 0, 0).getTime());
+  });
+
+  it('Tag: Offset 1 → „Gestern", nicht mehr aktuell', () => {
+    const p = costPeriod('day', 1, NOW);
+    expect(p.label).toBe('Gestern');
+    expect(p.isCurrent).toBe(false);
+    expect(p.startMs).toBe(new Date(2026, 6, 12, 0, 0, 0).getTime());
+  });
+
+  it('Woche: Mo–So, 7 Tagesbuckets, Label mit KW', () => {
+    const p = costPeriod('week', 0, NOW);
+    expect(p).toMatchObject({ bucketMs: 86400000, bucketCount: 7, isCurrent: true });
+    expect(new Date(p.startMs).getDay()).toBe(1); // Montag
+    expect(p.label).toMatch(/^KW \d+ · /);
+  });
+
+  it('Woche: Offset 1 → genau 7 Tage früher', () => {
+    const cur = costPeriod('week', 0, NOW);
+    const prev = costPeriod('week', 1, NOW);
+    expect(cur.startMs - prev.startMs).toBe(7 * 86400000);
+    expect(prev.isCurrent).toBe(false);
+  });
+
+  it('Monat: Tagesbuckets über den ganzen Kalendermonat', () => {
+    const p = costPeriod('month', 0, NOW);
+    expect(p.bucketMs).toBe(86400000);
+    expect(p.bucketCount).toBe(31); // Juli
+    expect(p.startMs).toBe(new Date(2026, 6, 1, 0, 0, 0).getTime());
+    expect(p.label).toBe('Juli 2026');
+  });
+
+  it('Monat: Offset 1 → Vormonat (Juni, 30 Tage)', () => {
+    const p = costPeriod('month', 1, NOW);
+    expect(p.bucketCount).toBe(30);
+    expect(p.startMs).toBe(new Date(2026, 5, 1, 0, 0, 0).getTime());
+    expect(p.label).toBe('Juni 2026');
+    expect(p.isCurrent).toBe(false);
   });
 });

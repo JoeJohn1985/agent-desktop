@@ -452,6 +452,58 @@ function trimCostLog(log, maxEntries) {
   return log;
 }
 
+const DE_MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const DE_WEEKDAYS_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+/** ISO-8601 week number (weeks start Monday; week 1 holds the first Thursday). */
+function isoWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3); // Thursday of this week
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+  return 1 + Math.round((d - firstThu) / (7 * 86400000));
+}
+
+/**
+ * Calendar-aligned cost period for the chart. `range` is 'day' | 'week' |
+ * 'month'; `offset` steps into the past (0 = current period, 1 = previous, …).
+ * Returns the local window start, the stacked-chart bucket size/count, whether
+ * it is the current period (→ disable the "next" arrow), the range, and a German
+ * label. Bucket size is a fixed 24h/1h (a calendar day can differ by an hour at
+ * a DST switch — negligible for a cost chart). `now` is injectable for tests.
+ * @returns {{startMs:number, bucketMs:number, bucketCount:number, isCurrent:boolean, range:string, label:string}}
+ */
+function costPeriod(range, offset, now) {
+  const o = Math.max(0, Math.floor(offset) || 0);
+  const base = new Date(typeof now === 'number' ? now : Date.now());
+  if (range === 'day') {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() - o);
+    const label = o === 0 ? 'Heute' : o === 1 ? 'Gestern'
+      : `${DE_WEEKDAYS_SHORT[d.getDay()]}, ${d.getDate()}. ${DE_MONTHS[d.getMonth()]}`;
+    return { startMs: d.getTime(), bucketMs: 3600000, bucketCount: 24, isCurrent: o === 0, range, label };
+  }
+  if (range === 'month') {
+    const d = new Date(base.getFullYear(), base.getMonth() - o, 1);
+    const days = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return {
+      startMs: d.getTime(), bucketMs: 86400000, bucketCount: days, isCurrent: o === 0, range,
+      label: `${DE_MONTHS[d.getMonth()]} ${d.getFullYear()}`,
+    };
+  }
+  // week (Mon–Sun)
+  const today = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const dow = (today.getDay() + 6) % 7; // Mon=0 … Sun=6
+  const mon = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow - o * 7);
+  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+  const span = mon.getMonth() === sun.getMonth()
+    ? `${mon.getDate()}.–${sun.getDate()}. ${DE_MONTHS[mon.getMonth()]}`
+    : `${mon.getDate()}. ${DE_MONTHS[mon.getMonth()]} – ${sun.getDate()}. ${DE_MONTHS[sun.getMonth()]}`;
+  return {
+    startMs: mon.getTime(), bucketMs: 86400000, bucketCount: 7, isCurrent: o === 0, range,
+    label: `KW ${isoWeekNumber(mon)} · ${span}`,
+  };
+}
+
 // ── Provider error parsing ───────────────────────────────────
 
 /**
@@ -878,6 +930,7 @@ const _api = {
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  costPeriod,
   parseQuotaError,
   buildAgentPrefix,
   formatSubscriptionUsage,
