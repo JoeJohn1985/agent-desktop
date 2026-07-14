@@ -3124,9 +3124,9 @@ function exportChat() {
       // Use raw markdown if available, otherwise extract text
       const raw = tab._responseRaw && el === tab._responseEl ? tab._responseRaw : el.textContent.trim();
       lines.push(`\n## 🤖 ${providerName}\n\n${raw}\n`);
-    } else if (el.classList.contains('stream-tool-call')) {
-      const toolName = el.querySelector('.stream-tool-call__name')?.textContent || '';
-      const toolArgs = el.querySelector('.stream-tool-call__args')?.textContent || '';
+    } else if (el.classList.contains('stream-tool-result')) {
+      const toolName = el.querySelector('strong')?.textContent || '';
+      const toolArgs = el.querySelector('.stream-tool-result__preview')?.textContent || '';
       lines.push(`\n> 🔧 **${toolName}** ${toolArgs}\n`);
     }
   }

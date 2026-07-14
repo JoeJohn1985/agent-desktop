@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.15] - 2026-07-13
+
+### Fixed
+- **Chat-Export (Markdown) verlor stillschweigend alle Tool-Aufrufe.**
+  `exportChat()` suchte noch nach der Klasse `stream-tool-call`, die die
+  Tool-Aufruf-Konsolidierung (1.2.11) durch `stream-tool-result` ersetzt hat —
+  seitdem fehlten Tool-Zeilen im exportierten `.md` ohne Fehlermeldung. Fund
+  aus der Code Review über die letzten Entwicklungen. Export liest die
+  Argumente jetzt aus `.stream-tool-result__preview`.
+- Verwaiste `.stream-tool-call*`-CSS-Regeln entfernt (keine Erzeuger mehr seit
+  1.2.11).
+
+### Changed
+- Tests: `costPeriod()`s ISO-Kalenderwochen-Berechnung wird jetzt an zwei
+  Jahreswechsel-Grenzfällen exakt geprüft (KW 53 vs. KW 1), statt nur lose per
+  Regex auf das Label-Format.
+
 ## [1.2.14] - 2026-07-13
 
 ### Added

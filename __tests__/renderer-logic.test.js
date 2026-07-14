@@ -1118,6 +1118,15 @@ describe('costPeriod', () => {
     expect(p.label).toMatch(/^KW \d+ · /);
   });
 
+  it('ISO-Kalenderwoche: Jahreswechsel wird korrekt aufgelöst (KW 53 vs. KW 1)', () => {
+    // 1. Jan. 2027 ist ein Freitag → gehört noch zu KW 53/2026 (2026 hat 53
+    // ISO-Wochen, da der 1. Jan. 2026 ein Donnerstag ist).
+    expect(costPeriod('week', 0, new Date(2027, 0, 1).getTime()).label).toMatch(/^KW 53 · /);
+    // 31. Dez. 2029 ist ein Montag → gehört bereits zu KW 1/2030 (Ende
+    // Dezember kann laut ISO 8601 in die erste Woche des Folgejahres fallen).
+    expect(costPeriod('week', 0, new Date(2029, 11, 31).getTime()).label).toMatch(/^KW 1 · /);
+  });
+
   it('Woche: Offset 1 → genau 7 Tage früher', () => {
     const cur = costPeriod('week', 0, NOW);
     const prev = costPeriod('week', 1, NOW);

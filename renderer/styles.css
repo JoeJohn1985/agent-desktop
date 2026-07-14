@@ -1572,33 +1572,6 @@ mark.chat-search-highlight--active {
 .stream-thinking__content { white-space: pre-wrap; }
 
 /* ── Stream Tool Calls ───────────────────────────────── */
-.stream-tool-call {
-  margin: 8px 0;
-  padding: 4px 10px;
-  font-size: 15px;
-  color: var(--text-muted);
-  border-left: 2px solid var(--yellow);
-  max-width: 80%;
-}
-.stream-tool-call summary {
-  cursor: pointer;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-.stream-tool-call__args {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-.stream-tool-call__full {
-  margin-top: 6px;
-  white-space: pre-wrap;
-  font-size: 14px;
-  color: var(--text-muted);
-  max-height: 300px;
-  overflow: auto;
-}
 .stream-tool-result {
   margin: 8px 0;
   padding: 4px 10px;
