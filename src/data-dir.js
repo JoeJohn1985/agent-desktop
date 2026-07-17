@@ -41,6 +41,17 @@ function providerAgentsDir(provider) {
   return path.join(DATA_DIR, provider, 'agents');
 }
 
+/**
+ * Absolute path to a provider's instructions directory, under ~/.agent-desktop.
+ * Only used for direct-API providers (Claude Code/Copilot have their own
+ * native CLAUDE.md/copilot-instructions.md discovery).
+ * @param {string} provider - Provider id, e.g. 'anthropic', 'openai'.
+ * @returns {string}
+ */
+function providerInstructionsDir(provider) {
+  return path.join(DATA_DIR, provider, 'instructions');
+}
+
 /** Recursively copy src→dest without overwriting existing files. Never throws. */
 function copyMerge(src, dest, fsImpl) {
   try {
@@ -88,4 +99,4 @@ function migrateLegacyData(opts = {}, fsImpl = fs) {
   return moved;
 }
 
-module.exports = { DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge, providerSkillsDir, providerAgentsDir };
+module.exports = { DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge, providerSkillsDir, providerAgentsDir, providerInstructionsDir };

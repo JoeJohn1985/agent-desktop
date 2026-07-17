@@ -1,3 +1,34 @@
+# Release Notes v1.3.0
+
+## What's new?
+
+### Provider-Instructions 📋
+
+Neben Skills und Agents gibt es jetzt **Instructions** — aber gezielt nur für
+die vier Direkt-API-Provider (Anthropic, OpenAI, GLM, Ollama). Copilot und
+Claude Code brauchen das nicht: beide lesen ihre eigenen Instructions-Dateien
+(`.github/copilot-instructions.md` bzw. `CLAUDE.md`) bereits selbst.
+
+- **Anders als Skills/Agents** wird der Inhalt jeder Instructions-Datei bei
+  jeder Nachricht **vollständig** in den Kontext eingebettet, statt dem
+  Modell nur einen Hinweis zu geben, dass es die Datei bei Bedarf selbst
+  liest — Instructions sollen unbedingt gelten, nicht optional sein.
+- Dateien liegen unter `~/.agent-desktop/<provider>/instructions/` als
+  `*.instructions.md`. **Kein Ein/Aus-Schalter, keine Sidebar-Ansicht** —
+  eine Datei dort abzulegen aktiviert sie automatisch, sie zu entfernen
+  deaktiviert sie wieder.
+
+### Technical details
+- Neue Module `src/instructions.js`, `buildInstructionsBlock()` in
+  `src/providers/system-context.js`, `resolveInstructions()` in `main.js`.
+- 23 neue Tests, insgesamt 1432 Tests grün.
+
+> **Hinweis:** Diese Datei wurde eine Weile nicht gepflegt (letzter Eintrag
+> zuvor: v1.0.0/v0.32.0) — die Zwischenversionen sind vollständig im
+> [CHANGELOG](./CHANGELOG.md) dokumentiert.
+
+---
+
 # Release Notes v1.0.0
 
 **First stable release.** GitHub Copilot (CLI/ACP) is the fully-tested core. In addition, direct-API providers are available — labelled by maturity: **Gemini = Beta** ("tested, not final"), **Anthropic/OpenAI/GLM/Ollama = Alpha** ("untested"). Copilot carries no label.

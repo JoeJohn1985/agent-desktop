@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { migrateLegacyData, providerSkillsDir, providerAgentsDir, DATA_DIR } = require('../src/data-dir');
+const { migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, DATA_DIR } = require('../src/data-dir');
 
 function mkTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agentdesk-mig-'));
@@ -90,5 +90,20 @@ describe('data-dir: providerAgentsDir', () => {
 
   it('liegt getrennt vom Skills-Ordner desselben Providers', () => {
     expect(providerAgentsDir('claude-code')).not.toBe(providerSkillsDir('claude-code'));
+  });
+});
+
+describe('data-dir: providerInstructionsDir', () => {
+  it('liegt unter ~/.agent-desktop/<provider>/instructions', () => {
+    expect(providerInstructionsDir('anthropic')).toBe(path.join(DATA_DIR, 'anthropic', 'instructions'));
+  });
+
+  it('trennt Provider in eigene Unterordner', () => {
+    expect(providerInstructionsDir('anthropic')).not.toBe(providerInstructionsDir('openai'));
+  });
+
+  it('liegt getrennt von Skills- und Agents-Ordner desselben Providers', () => {
+    expect(providerInstructionsDir('anthropic')).not.toBe(providerSkillsDir('anthropic'));
+    expect(providerInstructionsDir('anthropic')).not.toBe(providerAgentsDir('anthropic'));
   });
 });

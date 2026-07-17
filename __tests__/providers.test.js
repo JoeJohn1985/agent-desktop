@@ -269,6 +269,56 @@ describe('System-Context-Komposition', () => {
     const out = composeSystemContext({ cwd, agents: [] });
     expect(out).not.toContain('Verfügbare Agenten');
   });
+
+  it('bettet Instructions-Sets vollständig ein (eager, kein Lazy-Index, kein Toggle)', () => {
+    const out = composeSystemContext({
+      cwd,
+      instructions: [{ name: 'Tonfall', content: 'Sei kurz und direkt.' }],
+    });
+    expect(out).toContain('Provider-Instructions');
+    expect(out).toContain('Tonfall');
+    expect(out).toContain('Sei kurz und direkt.');
+  });
+
+  it('bettet mehrere Instructions-Sets ein', () => {
+    const out = composeSystemContext({
+      cwd,
+      instructions: [
+        { name: 'A', content: 'Inhalt A.' },
+        { name: 'B', content: 'Inhalt B.' },
+      ],
+    });
+    expect(out).toContain('Inhalt A.');
+    expect(out).toContain('Inhalt B.');
+  });
+
+  it('kombiniert die globale Instructions-Basisdatei additiv mit den Provider-Instructions-Sets', () => {
+    const out = composeSystemContext({
+      cwd,
+      instructions: [{ name: 'Tonfall', content: 'Sei kurz und direkt.' }],
+    });
+    // Beide Layer sind vorhanden: globale Basis-Instructions.md UND die Provider-Sets.
+    expect(out).toContain('Antworte immer auf Deutsch.');
+    expect(out).toContain('Sei kurz und direkt.');
+    // Basis-Layer steht vor den Provider-Instructions-Sets.
+    expect(out.indexOf('Antworte immer auf Deutsch.')).toBeLessThan(out.indexOf('Sei kurz und direkt.'));
+  });
+
+  it('ignoriert leere/undefinierte Instructions-Liste', () => {
+    const out = composeSystemContext({ cwd, instructions: [] });
+    expect(out).not.toContain('Provider-Instructions');
+    const out2 = composeSystemContext({ cwd });
+    expect(out2).not.toContain('Provider-Instructions');
+  });
+
+  it('filtert Instructions-Einträge ohne Inhalt heraus', () => {
+    const out = composeSystemContext({
+      cwd,
+      instructions: [{ name: 'Leer', content: '' }, { name: 'Voll', content: 'x' }],
+    });
+    expect(out).not.toContain('Leer');
+    expect(out).toContain('Voll');
+  });
 });
 
 describe('Session-Persistenz (ApiAgentClient)', () => {

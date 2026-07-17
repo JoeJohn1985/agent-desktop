@@ -37,6 +37,7 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 - 🤖 **Agents, per provider** — same folder structure as Skills (`~/.agent-desktop/<provider>/agents/`), but agents are a **persona switch**: once the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task.
 - 🔘 **Manual toggle (override)** — Skills/Agents can still be force-activated per session on top of the automatic selection; for Copilot this uses its native `/agent <name>` prefix, for every other provider a plain-language hint.
 - 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were force-activated
+- 📋 **Instructions, direct-API providers only** — Anthropic/OpenAI/GLM/Ollama get a provider-scoped `~/.agent-desktop/<provider>/instructions/`; every `.instructions.md` file placed there is always inlined in full into the system prompt (not a lazy index like Skills/Agents — instructions are meant to apply unconditionally, no toggle needed). Copilot and Claude Code already have their own native instructions discovery and don't use this.
 
 ### Onboarding & Tutorials
 - 🚀 **First-Run Onboarding Wizard** — Guided setup on first launch:
@@ -67,6 +68,10 @@ Copilot loads skills from its own installation (`~/.copilot/skills/`, configurab
 ## Agents
 
 Same folder structure as Skills — Copilot's own `~/.copilot/agents/`, every other provider its `~/.agent-desktop/<provider>/agents/`. Agent files follow the `*.agent.md` format with YAML frontmatter (`name`, `description`, `tools`). Unlike skills, agents represent a **persona/approach switch**: once the model judges that a task matches an agent's description (from the same lazy index mechanism as Skills), it reads that agent's file and adopts its instructions for the rest of the task — this is a switch within the same conversation, not a delegated, isolated sub-agent run (that's a separate, not-yet-built feature). A manual toggle still exists to force-activate an agent: for Copilot this uses its native `/agent <name>` slash command, for every other provider a plain-language hint that points at the same lazy index.
+
+## Instructions
+
+Direct-API providers only (Anthropic, OpenAI, GLM, Ollama) — Copilot and Claude Code already have their own native instructions discovery (`.github/copilot-instructions.md` / `CLAUDE.md`, read by the CLI itself) and don't need this. Each provider gets its own `~/.agent-desktop/<provider>/instructions/` with flat `*.instructions.md` files (YAML frontmatter `name`/`description` + a markdown body). Unlike Skills/Agents, every file present is always inlined in full into the system prompt for every message — there's no "the model decides whether to read it" step and no on/off toggle: dropping a file into the folder activates it, removing it deactivates it. This is additive to the existing global `copilot-instructions.md`/`AGENTS.md` base layer. There's no dedicated sidebar UI — Settings → Features shows which providers support it.
 
 ## Requirements
 

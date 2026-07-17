@@ -152,7 +152,11 @@ function truncateInline(text, maxLen) {
  */
 function toolArgFullText(args) {
   if (!args) return '';
+  // `path` (Copilot's own tool schema) vs. `file_path` (Claude's native
+  // Read/Edit/Write/NotebookEdit tools, forwarded as-is via the Claude Code
+  // ACP adapter's `rawInput`) — same meaning, different provider, both real.
   if (args.path) return args.path;
+  if (args.file_path) return args.file_path;
   if (args.pattern) return args.pattern;
   if (args.command) return args.command;
   if (args.query) return args.query;
@@ -172,6 +176,7 @@ function toolArgFullText(args) {
 function formatToolArgs(name, args, maxLen) {
   if (!args) return '';
   if (args.path) return truncatePath(args.path);
+  if (args.file_path) return truncatePath(args.file_path);
   const full = toolArgFullText(args);
   return full ? truncateInline(full, maxLen || TOOL_ARGS_MAX_LENGTH) : '';
 }

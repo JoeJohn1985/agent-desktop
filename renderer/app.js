@@ -2259,29 +2259,36 @@ function isSubscriptionProvider(provider) {
 // (Claude Code and the direct-API providers use the app's own lazy-loaded
 // per-provider Skills/Agents (see LAZY_CONTEXT_PROVIDERS in main.js) — Gemini
 // is deliberately excluded to keep it context-light. MCP and Marketplace stay
-// Copilot-only; the Copilot CLI supports the full feature set.)
+// Copilot-only; the Copilot CLI supports the full feature set. Instructions is
+// narrower still (see INSTRUCTIONS_PROVIDERS in main.js): only the direct-API
+// providers, since Copilot/Claude Code already have their own native
+// copilot-instructions.md/CLAUDE.md discovery. Instructions has no dedicated
+// sidebar section — it's purely informational here (Settings → Features);
+// every file dropped into the provider's instructions folder is always
+// active, no in-app toggle.)
 const PROVIDER_CAPABILITIES = {
-  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: true,  sessions: true,  marketplace: true },
-  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: true,  marketplace: false },
-  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
-  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
-  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, mcp: false, sessions: false, marketplace: false },
-  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
-  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  mcp: false, sessions: false, marketplace: false },
+  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: true,  sessions: true,  marketplace: true },
+  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: false, sessions: true,  marketplace: false },
+  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
+  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
+  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: false, marketplace: false },
+  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
+  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
 };
 
 // Feature metadata for the settings comparison matrix (label + icon + hint).
 const PROVIDER_FEATURE_META = [
-  { key: 'models',      icon: '🧠', label: 'Modellauswahl', hint: 'Zwischen mehreren Modellen des Providers wählen.' },
-  { key: 'modes',       icon: '⚙️', label: 'Modi',          hint: 'Betriebs-/Denkmodi (z.B. Reasoning, Agent-Modi).' },
-  { key: 'tools',       icon: '🔧', label: 'Toolverwendung', hint: 'Ausführung von Tools/Funktionen (Dateien, Shell …).' },
-  { key: 'context',     icon: '📏', label: 'Kontext',        hint: 'Kontextauslastung wird angezeigt/verwaltet.' },
-  { key: 'costs',       icon: '💰', label: 'Kosten',         hint: 'Kosten-/Token-Tracking verfügbar.' },
-  { key: 'skills',      icon: '🧩', label: 'Skills',         hint: 'SKILL.md-basierte KI-Skills.' },
-  { key: 'agents',      icon: '🤖', label: 'Agents',         hint: 'Wiederverwendbare Agent-Definitionen.' },
-  { key: 'mcp',         icon: '🔌', label: 'MCP',            hint: 'Model-Context-Protocol-Server.' },
-  { key: 'sessions',    icon: '💾', label: 'Sessions speichern', hint: 'Gesprächsverlauf persistent speichern/fortsetzen.' },
-  { key: 'marketplace', icon: '🛒', label: 'Marketplace',    hint: 'Erweiterungen/Extensions aus dem Marketplace.' },
+  { key: 'models',       icon: '🧠', label: 'Modellauswahl', hint: 'Zwischen mehreren Modellen des Providers wählen.' },
+  { key: 'modes',        icon: '⚙️', label: 'Modi',          hint: 'Betriebs-/Denkmodi (z.B. Reasoning, Agent-Modi).' },
+  { key: 'tools',        icon: '🔧', label: 'Toolverwendung', hint: 'Ausführung von Tools/Funktionen (Dateien, Shell …).' },
+  { key: 'context',      icon: '📏', label: 'Kontext',        hint: 'Kontextauslastung wird angezeigt/verwaltet.' },
+  { key: 'costs',        icon: '💰', label: 'Kosten',         hint: 'Kosten-/Token-Tracking verfügbar.' },
+  { key: 'skills',       icon: '🧩', label: 'Skills',         hint: 'SKILL.md-basierte KI-Skills.' },
+  { key: 'agents',       icon: '🤖', label: 'Agents',         hint: 'Wiederverwendbare Agent-Definitionen.' },
+  { key: 'instructions', icon: '📋', label: 'Instructions',  hint: 'Mehrere, togglebare Instructions-Sets (voll eingebettet).' },
+  { key: 'mcp',          icon: '🔌', label: 'MCP',            hint: 'Model-Context-Protocol-Server.' },
+  { key: 'sessions',     icon: '💾', label: 'Sessions speichern', hint: 'Gesprächsverlauf persistent speichern/fortsetzen.' },
+  { key: 'marketplace',  icon: '🛒', label: 'Marketplace',    hint: 'Erweiterungen/Extensions aus dem Marketplace.' },
 ];
 
 // Providers shown as columns in the feature matrix (order matters).

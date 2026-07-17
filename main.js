@@ -16,12 +16,13 @@ const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, scanSkillsIndex: _scanSkillsIndex, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory, scanAgentsIndex: _scanAgentsIndex } = require('./src/agents');
+const { readAllInstructions } = require('./src/instructions');
 const { AcpClient } = require('./src/acp-client');
 const { getModelProvider, createApiBackend } = require('./src/providers');
 const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
-const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir } = require('./src/data-dir');
+const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir } = require('./src/data-dir');
 
 app.name = 'agent-desktop';
 
@@ -115,12 +116,25 @@ let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
  */
 const LAZY_CONTEXT_PROVIDERS = ['claude-code', 'anthropic', 'openai', 'glm', 'ollama'];
 
-/** Creates the per-provider skills/agents folders (if missing) so they show up on disk right away. */
+/**
+ * Providers that get their own ~/.agent-desktop/<provider>/instructions folder,
+ * whose active files are inlined in full into the system prompt. Deliberately
+ * narrower than LAZY_CONTEXT_PROVIDERS: Claude Code already has its own native
+ * CLAUDE.md discovery (hierarchical, unconditional), so duplicating an
+ * app-managed instructions mechanism for it would only add confusion.
+ * @type {string[]}
+ */
+const INSTRUCTIONS_PROVIDERS = ['anthropic', 'openai', 'glm', 'ollama'];
+
+/** Creates the per-provider skills/agents/instructions folders (if missing) so they show up on disk right away. */
 function ensureProviderContextDirs() {
   for (const provider of LAZY_CONTEXT_PROVIDERS) {
     for (const dir of [providerSkillsDir(provider), providerAgentsDir(provider)]) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { console.warn(`[context] Ordner ${dir} konnte nicht angelegt werden:`, e.message); }
     }
+  }
+  for (const provider of INSTRUCTIONS_PROVIDERS) {
+    try { fs.mkdirSync(providerInstructionsDir(provider), { recursive: true }); } catch (e) { console.warn(`[context] Ordner ${providerInstructionsDir(provider)} konnte nicht angelegt werden:`, e.message); }
   }
 }
 
@@ -353,6 +367,19 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
 }
 
 /**
+ * Resolves ALL instruction sets for a provider into {name, content} pairs
+ * ready for `buildInstructionsBlock`. There is no active/inactive selection —
+ * every `.instructions.md` file present in the provider's instructions
+ * folder is always inlined (see src/instructions.js for the reasoning).
+ * @param {string} provider
+ * @returns {Array<{name: string, content: string}>}
+ */
+function resolveInstructions(provider) {
+  if (!INSTRUCTIONS_PROVIDERS.includes(provider)) return [];
+  return readAllInstructions(providerInstructionsDir(provider), yaml.parse);
+}
+
+/**
  * Sends a prompt to a direct-API backend (Anthropic/Gemini/OpenAI). Constructs
  * the backend on first use with the decrypted API key from the secure store.
  * @param {number} tabId
@@ -391,6 +418,9 @@ async function sendApiPrompt(tabId, prompt, options) {
         providerSkillsDir(provider),
         path.join(cwd, '.github', 'skills'),
       ], yaml.parse),
+      // Instructions are eager, not lazy (see buildInstructionsBlock): every
+      // file in the provider's instructions folder is always inlined in full.
+      instructions: resolveInstructions(provider),
     });
   } catch (e) {
     console.warn('[api] composeSystemContext failed:', e?.message);

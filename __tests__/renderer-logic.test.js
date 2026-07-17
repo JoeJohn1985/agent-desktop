@@ -265,6 +265,15 @@ describe('formatToolArgs', () => {
     expect(formatToolArgs('view', { path: 'C:/Users/Test/src/file.js' })).toBe('…/src/file.js');
   });
 
+  it('falls back to file_path (Claude Code\'s native Read/Edit/Write schema)', () => {
+    expect(formatToolArgs('edit', { file_path: 'C:/Users/Test/src/file.js', old_string: 'a', new_string: 'b' }))
+      .toBe('…/src/file.js');
+  });
+
+  it('prefers path over file_path when both are present', () => {
+    expect(formatToolArgs('edit', { path: 'a.js', file_path: 'b.js' })).toBe('a.js');
+  });
+
   it('returns pattern directly', () => {
     expect(formatToolArgs('grep', { pattern: 'TODO' })).toBe('TODO');
   });
@@ -324,6 +333,15 @@ describe('toolArgFullText', () => {
   it('returns empty string for null/undefined/unrecognized args', () => {
     expect(toolArgFullText(null)).toBe('');
     expect(toolArgFullText({ foo: 'bar' })).toBe('');
+  });
+
+  it('falls back to file_path (Claude Code\'s native Read/Edit/Write/NotebookEdit schema)', () => {
+    expect(toolArgFullText({ file_path: '/repo/src/index.js', old_string: 'a', new_string: 'b' }))
+      .toBe('/repo/src/index.js');
+  });
+
+  it('prefers path over file_path when both are present', () => {
+    expect(toolArgFullText({ path: 'a.js', file_path: 'b.js' })).toBe('a.js');
   });
 });
 

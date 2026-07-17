@@ -55,10 +55,29 @@ function buildAgentsIndex(agents) {
 }
 
 /**
+ * Builds the eagerly-inlined block for the provider's instruction sets.
+ * Unlike skills/agents (lazy index — the model decides whether to read a
+ * file), instructions apply unconditionally, so their full content is
+ * embedded directly — no model judgment call, and no on/off selection either:
+ * every entry passed in gets inlined (the caller decides what to pass, e.g.
+ * "every file present in the provider's instructions folder").
+ * @param {Array<{name: string, content: string}>} [instructions] - Already-resolved {name, content} pairs.
+ * @returns {string} Empty string if there are none.
+ */
+function buildInstructionsBlock(instructions) {
+  if (!instructions || !instructions.length) return '';
+  return instructions
+    .filter(it => it && it.content)
+    .map(it => `## ${it.name}\n\n${it.content}`)
+    .join('\n\n');
+}
+
+/**
  * Builds the composed system-context string (may be empty).
  * @param {Object} opts
  * @param {string} opts.cwd - Working directory (for project-level files).
  * @param {string} [opts.instructionsFile] - Configured instructions file path.
+ * @param {Array<{name: string, content: string}>} [opts.instructions] - Provider-scoped instruction sets (see buildInstructionsBlock) — inlined in full, in addition to the base instructions file below.
  * @param {Array<{name: string, description?: string, file: string}>} [opts.agents] - Pre-scanned agents (provider-global + project) to expose as a lazy index.
  * @param {Array<{name: string, description?: string, file: string}>} [opts.skills] - Pre-scanned skills (provider-global + project) to expose as a lazy index.
  * @returns {string}
@@ -75,15 +94,20 @@ function composeSystemContext(opts = {}) {
   ]);
   if (instr) parts.push(`# Projekt-Instructions\n\n${instr}`);
 
-  // 2. Agents — lazy index (see buildAgentsIndex).
+  // 2. Provider-scoped instruction sets — eager, full content, no toggle (see
+  // buildInstructionsBlock). Additive to the base instructions above.
+  const instructionsBlock = buildInstructionsBlock(opts.instructions);
+  if (instructionsBlock) parts.push(`# Provider-Instructions\n\n${instructionsBlock}`);
+
+  // 3. Agents — lazy index (see buildAgentsIndex).
   const agentsBlock = buildAgentsIndex(opts.agents);
   if (agentsBlock) parts.push(agentsBlock);
 
-  // 3. Skills — lazy index (see buildSkillsIndex).
+  // 4. Skills — lazy index (see buildSkillsIndex).
   const skillsBlock = buildSkillsIndex(opts.skills);
   if (skillsBlock) parts.push(skillsBlock);
 
   return parts.join('\n\n---\n\n');
 }
 
-module.exports = { composeSystemContext, buildSkillsIndex, buildAgentsIndex };
+module.exports = { composeSystemContext, buildSkillsIndex, buildAgentsIndex, buildInstructionsBlock };

@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.3.0] - 2026-07-17
+
+### Added
+- **Provider-Instructions** — Instructions-Funktionalität simultan zu
+  Skills/Agents, aber **nur für die vier Direkt-API-Provider** (Anthropic,
+  OpenAI, GLM, Ollama). Copilot und Claude Code bleiben bewusst außen vor:
+  beide haben bereits eine eigene, native, hierarchische Instructions-
+  Discovery (`.github/copilot-instructions.md` bzw. `CLAUDE.md`), die die
+  jeweilige CLI selbst liest — ein App-verwalteter Zweitmechanismus würde nur
+  Verwirrung stiften.
+  - Neuer provider-eigener Ordner `~/.agent-desktop/<provider>/instructions/`
+    mit flachen `*.instructions.md`-Dateien (YAML-Frontmatter `name`/
+    `description` + Markdown-Body), analog `*.agent.md`.
+  - **Anders als Skills/Agents (Lazy-Index — das Modell liest die Datei nur
+    bei Bedarf selbst) wird der Inhalt jeder Datei im Ordner bei jeder
+    Nachricht vollständig in den System-Prompt eingebettet** — ihr Sinn ist
+    unbedingte Anwendung, keine Modell-Entscheidung. Ergänzt (additiv) die
+    bestehende globale `copilot-instructions.md`/`AGENTS.md`-Basisebene.
+  - **Kein Ein/Aus-Toggle, keine Sidebar-Sektion**: Eine Datei im Ordner
+    abzulegen aktiviert sie, sie zu entfernen deaktiviert sie — das ist der
+    gesamte Aktivierungsmechanismus. Alles rein serverseitig in `main.js`
+    aufgelöst, ohne Renderer-Roundtrip; die Settings-„Features"-Matrix zeigt
+    weiterhin an, welche Provider das unterstützen.
+  - Neue Module: `src/instructions.js` (Scanner, Content-Reader,
+    `readAllInstructions()`), `buildInstructionsBlock()` in
+    `src/providers/system-context.js`, `resolveInstructions()` in `main.js`.
+  - 23 neue Tests in `__tests__/instructions.test.js` + Erweiterungen in
+    `data-dir.test.js`/`providers.test.js` — 46 Suiten, 1432 Tests grün.
+
+### Fixed
+- **Tool-Aufrufe von Claude Code zeigten keine Argumente** (z. B. `edit` ohne
+  erkennbaren Dateipfad in der Session-Leiste). Ursache: Claude Codes eigene
+  Read/Edit/Write/NotebookEdit-Tools melden den Pfad als `file_path`, unser
+  `toolArgFullText()`/`formatToolArgs()` kannten aber nur `path` (Copilots
+  Schema). `Bash` (`command`) und `Glob`/`Grep` (`pattern`) waren bereits
+  korrekt abgedeckt — betroffen war ausschließlich die Pfad-basierten Tools.
+  4 neue Tests in `__tests__/renderer-logic.test.js`.
+
 ## [1.2.15] - 2026-07-13
 
 ### Fixed

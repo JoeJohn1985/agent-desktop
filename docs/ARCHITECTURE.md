@@ -246,7 +246,7 @@ A different backend can be used per tab. **The key contract:** every backend emi
 | `providers/gemini-provider.js` | Gemini adapter: live search (grounding) + file tools, togglable per tab |
 | `providers/agent-tools.js` | Provider-agnostic tools (`shell` via PowerShell on Windows, file/search tools) + deny gating |
 | `providers/session-store.js` | History persistence under `~/.agent-desktop/api-sessions/` |
-| `providers/system-context.js` | Composes `copilot-instructions.md` + lazy skills/agents indexes (name+description+path — no eager inlining; the model reads a file itself via `read_file` when relevant) → cached system prompt |
+| `providers/system-context.js` | Composes `copilot-instructions.md` + every provider-scoped instruction set present under `~/.agent-desktop/<provider>/instructions/` (eager, full content, no toggle — see `INSTRUCTIONS_PROVIDERS` in `main.js`) + lazy skills/agents indexes (name+description+path — no eager inlining; the model reads a file itself via `read_file` when relevant) → cached system prompt |
 
 API keys are stored encrypted in the OS keychain (`src/secure-store.js`); the plaintext key never leaves the main process. The direct providers' slash commands are local equivalents (`/usage` returns the Copilot token line → the existing cost pipeline applies unchanged).
 
@@ -395,6 +395,8 @@ User disables a tool in the session-tools popup
 | `providers:listModels` | Dynamic model discovery per provider |
 | `providers:loadSessionHistory` | Persisted direct-API conversation history |
 
+Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instructions.md`, direct-API providers only — see `INSTRUCTIONS_PROVIDERS`) have **no dedicated IPC channel**: `resolveInstructions()` in `main.js` reads every file present in the folder server-side, on each `sendApiPrompt` call, with no renderer round-trip and no active/inactive selection to synchronize.
+
 #### Namespace: `sessions`
 
 | Channel | Type | Description |
@@ -420,7 +422,7 @@ User disables a tool in the session-tools popup
 | Channel | Description |
 |---|---|
 | `preferences:read/write` | Preferences I/O |
-| `instructions:read/write` | `copilot-instructions.md` I/O |
+| `instructions:read/write` | `copilot-instructions.md` I/O (Copilot's single native instructions file — an editor convenience, the Copilot CLI reads this itself) |
 | `folders:read/save/browse/browse-file` | Folder configuration |
 | `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`) |
 | `agents:list/listProject/listProvider` | Agents (persona presets — same Copilot-native-vs-per-provider split as skills) |

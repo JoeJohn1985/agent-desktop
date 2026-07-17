@@ -289,6 +289,23 @@ Drag files directly into the chat area — the file paths are sent as context to
 - The **sidebar badge** shows the total number of loaded agents for the active tab's provider.
 - **Project agents** (`Project` badge): from `.github/agents/` in the active CWD.
 
+### Instructions
+
+- Direct-API providers only (Anthropic, OpenAI, GLM, Ollama) — Copilot and
+  Claude Code already have their own native instructions discovery
+  (`.github/copilot-instructions.md` / `CLAUDE.md`, read by the CLI itself)
+  and don't need this.
+- Each provider gets its own `~/.agent-desktop/<provider>/instructions/` with
+  flat `*.instructions.md` files (YAML frontmatter `name`/`description` + a
+  markdown body).
+- **No sidebar UI and no on/off toggle**: every file present is always
+  inlined in full into the system prompt for every message — unlike
+  Skills/Agents, there's no "the model decides whether to read it" step,
+  since instructions are meant to apply unconditionally. Dropping a file into
+  the folder activates it; removing it deactivates it.
+- Additive to the existing global `copilot-instructions.md`/`AGENTS.md` base
+  layer. Settings → Features shows which providers support it.
+
 ### MCP servers (sidebar)
 
 - The **badge** shows `connected/total`.
