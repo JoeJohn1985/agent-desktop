@@ -662,6 +662,71 @@ describe('AcpClient', () => {
         })
       );
     });
+
+    it('tool_call_update ohne status (Claude Code Refine) → tool.execution_update, NICHT execution_complete', async () => {
+      // Claude Code streams large tool inputs (e.g. Edit) incrementally: a
+      // mid-stream tool_call_update refines the pending call with the now-
+      // complete rawInput but carries no `status` — the tool hasn't run yet.
+      sendNotification(proc, 'session/update', {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-edit',
+          rawInput: { file_path: '/foo.js', old_string: 'a', new_string: 'b' },
+        },
+      });
+      await flushPromises();
+
+      expect(mockSendToRenderer).toHaveBeenCalledWith(
+        'copilot:event',
+        'tab-1',
+        expect.objectContaining({
+          type: 'tool.execution_update',
+          data: expect.objectContaining({
+            toolCallId: 'tc-edit',
+            arguments: { file_path: '/foo.js', old_string: 'a', new_string: 'b' },
+          }),
+        })
+      );
+      expect(mockSendToRenderer).not.toHaveBeenCalledWith(
+        'copilot:event', 'tab-1', expect.objectContaining({ type: 'tool.execution_complete' }),
+      );
+    });
+
+    it('Refine gefolgt vom echten Abschluss: execution_complete trägt die verfeinerten arguments', async () => {
+      // tool_call arrives with partial input (streaming just started)...
+      sendNotification(proc, 'session/update', {
+        sessionId: 's1',
+        update: { sessionUpdate: 'tool_call', toolCallId: 'tc-edit', kind: 'edit', rawInput: { file_path: '/foo.js' } },
+      });
+      // ...then a refine once the full input has streamed in...
+      sendNotification(proc, 'session/update', {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-edit',
+          rawInput: { file_path: '/foo.js', old_string: 'a', new_string: 'b' },
+        },
+      });
+      // ...then the real completion, which (per the real adapter) carries no rawInput at all.
+      sendNotification(proc, 'session/update', {
+        sessionId: 's1',
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-edit', status: 'completed', content: [] },
+      });
+      await flushPromises();
+
+      expect(mockSendToRenderer).toHaveBeenCalledWith(
+        'copilot:event',
+        'tab-1',
+        expect.objectContaining({
+          type: 'tool.execution_complete',
+          data: expect.objectContaining({
+            toolCallId: 'tc-edit',
+            arguments: { file_path: '/foo.js', old_string: 'a', new_string: 'b' },
+          }),
+        })
+      );
+    });
   });
 
   // ════════════════════════════════════════════════════════════════

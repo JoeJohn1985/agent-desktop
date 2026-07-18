@@ -205,3 +205,8 @@ Freigabe zum Committen steht noch aus.
 - Keine Rückwirkung auf die bestehende einzelne `copilot-instructions.md`
   (bleibt als globaler Basis-Layer für alle Provider bestehen, additiv zu
   den neuen provider-scoped Instructions).
+
+## Status
+
+Committet (`bd6e625`, `87879bc`), noch nicht gepusht — Nutzer testet gerade
+ausgiebig in der laufenden App, bevor gepusht wird.

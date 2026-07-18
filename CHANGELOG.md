@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.3.2] - 2026-07-18
+
+### Fixed
+- **Claude-Code-Tool-Aufrufe (z. B. `edit`) zeigten trotz des `file_path`-Fixes
+  (1.3.1) weiterhin keine Argumente.** Tieferliegende Ursache: Claude Codes
+  ACP-Adapter streamt große Tool-Inputs (z. B. Edits `old_string`/
+  `new_string`) inkrementell und schickt dafür **zwei** `tool_call_update`-
+  Events — eines, um den ausstehenden Aufruf zu „verfeinern", sobald der
+  Input fertig gestreamt ist (noch **kein** `status`-Feld, Tool ist noch
+  nicht gelaufen), und eines für den echten Abschluss (`status: 'completed'`/
+  `'failed'`). Unser Code behandelte **beide** identisch als „fertig" und
+  übernahm dabei nur die (oft noch unvollständigen) Argumente vom allerersten
+  `tool_call`-Moment — der eigentliche vollständige Input aus dem Verfeinerungs-
+  Event wurde nie an den Renderer weitergereicht.
+  - `src/acp-client.js`: neue `#toolArgs`-Map hält den jeweils aktuellsten
+    Input pro Tool-Aufruf nach; ein `tool_call_update` **ohne** `status` löst
+    jetzt ein neues `tool.execution_update`-Event aus (aktualisiert nur die
+    Anzeige, ohne den Aufruf als abgeschlossen zu markieren); der echte
+    Abschluss (`status` vorhanden) trägt jetzt die verfeinerten Argumente.
+  - `renderer/app.js`: neuer `tool.execution_update`-Fall aktualisiert die
+    ausstehende Zeile in-place; `tool.execution_complete` bevorzugt jetzt die
+    direkt am Event mitgelieferten Argumente.
+  - Betrifft nur Claude Code — Copilot und die Direkt-API-Provider streamen
+    ihre Tool-Inputs nicht inkrementell und waren nicht betroffen.
+  - 2 neue Tests in `__tests__/acp-client.test.js` (Refine-ohne-Status,
+    Refine-gefolgt-von-Abschluss).
+
 ## [1.3.1] - 2026-07-17
 
 ### Fixed

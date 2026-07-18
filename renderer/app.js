@@ -1571,6 +1571,32 @@ function initCopilotIPC() {
         break;
       }
 
+      // Claude Code streams large tool inputs (e.g. Edit's old_string/new_string)
+      // incrementally: the initial tool.execution_start can carry partial/empty
+      // arguments, refined here once the input finishes streaming — well before
+      // the tool actually runs (see acp-client.js's tool_call_update handling).
+      // Refresh the pending element's displayed args in place; the ⏳ status,
+      // icon position, and expand state are untouched — this isn't a completion.
+      case 'tool.execution_update': {
+        const callId = event.data.toolCallId || '';
+        if (event.data.toolCallId) {
+          const existing = pendingToolCalls.get(callId) || {};
+          pendingToolCalls.set(callId, { toolName: existing.toolName || event.data.toolName, arguments: event.data.arguments || {} });
+        }
+        const toolEl = callId ? tab._toolResultEls?.get(callId) : null;
+        if (!toolEl) break;
+        const callIcon = toolIcon(event.data.toolName) || '🔧';
+        const callArgs = formatToolArgs(event.data.toolName, event.data.arguments || {});
+        const callFull = toolArgFullText(event.data.arguments || {});
+        const summary = toolEl.querySelector('summary');
+        if (summary) {
+          summary.innerHTML = `<span class="stream-tool-result__status">⏳</span> ${callIcon} <strong>${escapeHtml(toolDisplayName(event.data.toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(callArgs)}</span>`;
+        }
+        const contentEl = toolEl.querySelector('.stream-tool-result__content');
+        if (contentEl) contentEl.textContent = (callFull && callFull !== callArgs) ? callFull : '';
+        break;
+      }
+
       case 'tool.execution_complete': {
         tab.lastActivityAt = Date.now();
         // Detect permission denied → show info, don't kill process
@@ -1607,8 +1633,13 @@ function initCopilotIPC() {
         const callId = event.data.toolCallId || '';
         // Keep the call's arguments in the collapsed line (what ran) — more
         // identifying at a glance than the result; the full result stays one
-        // click away in the expandable .stream-tool-result__content.
-        const callArgs = formatToolArgs(toolName, (pendingToolCalls.get(callId) || {}).arguments || {});
+        // click away in the expandable .stream-tool-result__content. Prefer
+        // the arguments carried directly on this event (acp-client.js resolves
+        // these from the latest refine, not just the original tool_call) —
+        // fall back to the pendingToolCalls snapshot for backends that don't
+        // supply them here (Copilot, direct-API providers — neither streams
+        // tool input incrementally, so their original snapshot is already complete).
+        const callArgs = formatToolArgs(toolName, event.data.arguments || (pendingToolCalls.get(callId) || {}).arguments || {});
         const preview = callArgs || formatToolResultPreview(resultContent);
         const summaryHtml = `<span class="stream-tool-result__status ${success ? '' : 'stream-tool-result__status--error'}">${statusIcon}</span> ${icon} <strong>${escapeHtml(toolDisplayName(toolName))}</strong> <span class="stream-tool-result__preview">${escapeHtml(preview)}</span>`;
 

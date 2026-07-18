@@ -57,6 +57,7 @@ class AcpClient extends EventEmitter {
   #localCmdBuf = '';       // stderr buffer while capturing a <local-command-stdout> block (Claude Code)
   #localCmdWaiter = null;  // resolver awaited by silentCommand until the block arrives
   #toolKinds = new Map(); // Map<toolCallId, kind> — ACP sends `kind` on tool_call but often omits it on tool_call_update
+  #toolArgs = new Map(); // Map<toolCallId, args> — latest known rawInput, refined across tool_call_update events (see tool_call_update handling)
 
   // ── Recovery ─────────────────────────────────────────────────
   #restartTimestamps = [];
@@ -801,27 +802,54 @@ class AcpClient extends EventEmitter {
         // Remember the kind so the follow-up tool_call_update (which frequently
         // omits `kind`) still resolves to the right tool name/icon in the UI.
         if (callId && update.kind) this.#toolKinds.set(callId, update.kind);
+        const args = update.rawInput || update.input || {};
+        if (callId) this.#toolArgs.set(callId, args);
         this.#emitToRenderer({
           type: 'tool.execution_start',
           data: {
             toolCallId: callId,
             toolName: AcpClient.#mapToolKind(update.kind, update.title),
-            arguments: update.rawInput || update.input || {},
+            arguments: args,
           },
         });
         break;
       }
 
       case 'tool_call_update': {
-        // → tool.execution_complete { toolCallId, toolName, success, result }
         const callId = update.toolCallId || update.id || '';
         // Fall back to the kind captured at tool_call time when this update omits it.
         const kind = update.kind || this.#toolKinds.get(callId);
+        // Claude Code's ACP adapter (unlike Copilot's) emits `tool_call_update`
+        // twice for tools whose input streams in (e.g. Edit's old_string/
+        // new_string): once mid-stream to "refine" the pending call with its
+        // now-complete input — no `status`, no `content`, the tool hasn't run
+        // yet — and once for the real completion (`status: 'completed'|
+        // 'failed'`, with `content`). Treating every update as a completion
+        // finalized the UI using whatever partial input had arrived at the
+        // original tool_call moment, which for a streamed Edit is often just
+        // `file_path` with no old_string/new_string yet — rendering the
+        // eventual summary as if the call had no arguments at all.
+        if (update.rawInput) this.#toolArgs.set(callId, update.rawInput);
+        if (!update.status) {
+          // Refine only — update the pending element's displayed args, don't
+          // finalize (no tool.execution_complete for this one).
+          this.#emitToRenderer({
+            type: 'tool.execution_update',
+            data: {
+              toolCallId: callId,
+              toolName: AcpClient.#mapToolKind(kind, update.title),
+              arguments: this.#toolArgs.get(callId) || {},
+            },
+          });
+          break;
+        }
+        // → tool.execution_complete { toolCallId, toolName, arguments, success, result }
         this.#emitToRenderer({
           type: 'tool.execution_complete',
           data: {
             toolCallId: callId,
             toolName: AcpClient.#mapToolKind(kind, update.title),
+            arguments: this.#toolArgs.get(callId) || {},
             success: update.error ? false : true,
             result: {
               content: AcpClient.#extractToolContent(update.content),
@@ -829,6 +857,7 @@ class AcpClient extends EventEmitter {
             error: update.error || undefined,
           },
         });
+        this.#toolArgs.delete(callId);
         break;
       }
 
