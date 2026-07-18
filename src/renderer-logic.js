@@ -112,6 +112,11 @@ const TOOL_ICONS = {
   view: '📄', edit: '✏️', create: '📝', grep: '🔍', glob: '📂',
   powershell: '⚡', task: '🤖', ask_user: '❓', sql: '🗄️',
   web_search: '🌐', web_fetch: '🌐',
+  // Direct-API providers' own tool runtime (src/providers/agent-tools.js) —
+  // a separate, custom-built tool set (not translated through a shared "kind"
+  // vocabulary like Copilot/Claude Code's ACP tool_call events), so its names
+  // need their own entries here rather than reusing the ones above.
+  shell: '⚡', read_file: '📄', write_file: '📝', edit_file: '✏️', list_dir: '📂',
 };
 
 const TOOL_DISPLAY_NAMES = {
@@ -119,6 +124,7 @@ const TOOL_DISPLAY_NAMES = {
   edit: 'edit', create: 'create', powershell: 'run',
   task: 'task', ask_user: 'ask', sql: 'query',
   web_search: 'web search', web_fetch: 'web fetch',
+  shell: 'run', read_file: 'read', write_file: 'write', edit_file: 'edit', list_dir: 'list',
 };
 
 /**

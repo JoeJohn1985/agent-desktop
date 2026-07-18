@@ -238,6 +238,14 @@ describe('toolIcon', () => {
     expect(toolIcon('unknown_tool')).toBeNull();
     expect(toolIcon('')).toBeNull();
   });
+
+  it('returns emoji for the direct-API providers\' own tool set (agent-tools.js)', () => {
+    expect(toolIcon('shell')).toBe('⚡');
+    expect(toolIcon('read_file')).toBe('📄');
+    expect(toolIcon('write_file')).toBe('📝');
+    expect(toolIcon('edit_file')).toBe('✏️');
+    expect(toolIcon('list_dir')).toBe('📂');
+  });
 });
 
 // ── toolDisplayName ──────────────────────────────────────────
@@ -251,6 +259,14 @@ describe('toolDisplayName', () => {
 
   it('returns original name for unknown tools', () => {
     expect(toolDisplayName('custom_tool')).toBe('custom_tool');
+  });
+
+  it('maps the direct-API providers\' own tool set (agent-tools.js) to display names', () => {
+    expect(toolDisplayName('shell')).toBe('run');
+    expect(toolDisplayName('read_file')).toBe('read');
+    expect(toolDisplayName('write_file')).toBe('write');
+    expect(toolDisplayName('edit_file')).toBe('edit');
+    expect(toolDisplayName('list_dir')).toBe('list');
   });
 });
 

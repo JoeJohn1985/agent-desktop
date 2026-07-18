@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.1] - 2026-07-17
+
+### Fixed
+- **Tool-Aufrufe der Direkt-API-Provider (Anthropic/OpenAI/GLM/Ollama/Gemini)
+  zeigten ein generisches 🔧-Icon und den rohen Tool-Namen** statt Icon +
+  verständlichem Label. Ursache: Deren eigenes Tool-Set
+  (`src/providers/agent-tools.js`: `shell`, `read_file`, `write_file`,
+  `edit_file`, `list_dir`) wird — anders als bei Copilot/Claude Code, deren
+  ACP-`kind`-Werte über `AcpClient.#mapToolKind()` übersetzt werden —
+  unverändert durchgereicht und matchte die Icon-/Label-Tabelle nicht (nur
+  `glob`/`grep` trafen zufällig zu). `TOOL_ICONS`/`TOOL_DISPLAY_NAMES` um die
+  fünf fehlenden Namen ergänzt. 6 neue Tests in `renderer-logic.test.js`.
+
 ## [1.3.0] - 2026-07-17
 
 ### Added
