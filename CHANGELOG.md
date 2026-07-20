@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.3] - 2026-07-20
+
+### Fixed
+- **Abo-Reset-Countdown im Tooltip war eingefroren.** `formatSubscriptionUsage()`
+  berechnet „Reset in …" relativ zum Aufrufzeitpunkt, aber
+  `updateSubscriptionUsageDisplay()` wurde nur bei neuen Nutzungsdaten (nach
+  jedem Turn) aufgerufen — dazwischen blieb die Anzeige stehen und stimmte
+  nach wenigen Minuten nicht mehr. Neuer `initSubscriptionUsageTicker()`
+  rendert die Anzeige alle 30 s aus den bereits vorhandenen Daten neu (kein
+  zusätzlicher `/usage`-Aufruf) — der Countdown zählt jetzt sichtbar runter.
+
 ## [1.3.2] - 2026-07-18
 
 ### Fixed

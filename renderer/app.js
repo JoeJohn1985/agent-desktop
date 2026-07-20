@@ -3032,6 +3032,24 @@ function updateSubscriptionUsageDisplay(tab) {
   el.title = tooltip;
 }
 
+/** How often the "Reset in …" countdown re-renders against the current time. */
+const SUBSCRIPTION_USAGE_TICK_MS = 30_000;
+
+/**
+ * Keeps the "Reset in …" countdown live: formatSubscriptionUsage() computes
+ * the remaining time from Date.now() at render time, but updateSubscriptionUsageDisplay()
+ * is otherwise only called when new usage data arrives (after each turn) — so
+ * without this, the tooltip would show a countdown frozen at whenever /usage
+ * was last fetched, drifting further from reality the longer you look at it.
+ * Re-renders from the already-stored data (no new /usage call) every tick.
+ */
+function initSubscriptionUsageTicker() {
+  setInterval(() => {
+    const tab = tabs.get(activeTabId);
+    if (tab) updateSubscriptionUsageDisplay(tab);
+  }, SUBSCRIPTION_USAGE_TICK_MS);
+}
+
 // ── Permission requests (ACP session/request_permission) ─────
 // The agent asks whether to run an action; we show a dropup above the chat
 // input with the offered options and route the answer back to the backend.
@@ -7028,4 +7046,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   refreshProviderStatus();
   initUpdateChecker();
   initDynamicPricing();
+  initSubscriptionUsageTicker();
 });
