@@ -208,5 +208,7 @@ Freigabe zum Committen steht noch aus.
 
 ## Status
 
-Committet (`bd6e625`, `87879bc`), noch nicht gepusht — Nutzer testet gerade
-ausgiebig in der laufenden App, bevor gepusht wird.
+Committet (`bd6e625`, `87879bc`, `1fb864b`) und nach ausgiebigem Testen durch
+den Nutzer verifiziert — der Tool-Argument-Fix griff erst nach komplettem
+App-Neustart (Main-Prozess lädt `acp-client.js`, ein reiner Renderer-Reload
+reicht dafür nicht). Gepusht.
