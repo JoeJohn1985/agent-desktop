@@ -319,15 +319,17 @@
     <div class="overlay__dialog overlay__dialog--settings">
       <div class="overlay__title">⚙️ Einstellungen</div>
       <div class="settings__tabs">
-        <button class="settings__tab settings__tab--active" data-tab="ui">Oberfläche</button>
-        <button class="settings__tab" data-tab="copilot">Konfiguration</button>
+        <button class="settings__tab settings__tab--active" data-tab="ui">App</button>
         <button class="settings__tab" data-tab="providers">Provider</button>
+        <button class="settings__tab" data-tab="provider-copilot">Copilot</button>
+        <!-- Ein Reiter pro verbundenem Provider (Claude Code, sowie Anthropic/OpenAI/GLM/
+             Ollama/Gemini mit hinterlegtem Key) wird hier von renderProviderConfigTabs()
+             eingefügt — abhängig davon, was tatsächlich verbunden ist. -->
         <button class="settings__tab" data-tab="features">Features</button>
-        <button class="settings__tab" data-tab="folders">Ordner</button>
         <button class="settings__tab" data-tab="shortcuts">Tastenkürzel</button>
       </div>
       <div class="settings">
-        <!-- Tab: UI -->
+        <!-- Tab: App -->
         <div class="settings__panel settings__panel--active" data-panel="ui">
           <div class="settings__group">
             <label class="settings__label">Theme</label>
@@ -350,6 +352,52 @@
               <input type="checkbox" id="settSound" checked />
               <span class="settings__toggle-slider"></span>
             </label>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <label class="settings__label">Standard-Provider</label>
+            <div class="settings__hint">Provider, mit dem neue Tabs und das „+“ starten.</div>
+            <select class="settings__select" id="settDefaultProvider"></select>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <label class="settings__label">📂 Arbeitsverzeichnis (CWD)</label>
+            <div class="settings__hint">Hauptverzeichnis, in dem alle Provider standardmäßig arbeiten. Änderung erfordert einen Neustart der App.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderCwd" placeholder="z.B. C:\Users\Name\Copilot" readonly />
+              <button class="action-btn" id="btnBrowseCwd" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">🖼️ Bilder</label>
+            <div class="settings__hint">Ordner für die Bildergalerie (providerunabhängig).</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderImages" placeholder="z.B. C:\Users\Name\Copilot\images" readonly />
+              <button class="action-btn" id="btnBrowseImages" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <button class="action-btn action-btn--primary" id="btnFoldersSave" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <label class="settings__label">Verbotene Shell-Tools (global)</label>
+            <div class="settings__hint">Gilt für Copilot und die Direkt-API-Provider (Anthropic/OpenAI/GLM/Ollama). Claude Code hat einen eigenen Freigabe-Mechanismus und ist hiervon nicht betroffen (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
+            <div class="settings__tool-list" id="settDeniedToolsList"></div>
+            <div class="settings__tool-add">
+              <input type="text" class="settings__tool-input" id="settDeniedToolInput" placeholder="z.B. git push" />
+              <button class="action-btn" id="btnAddDeniedTool" data-tooltip="Tool blockieren">+</button>
+            </div>
+          </div>
+          <div class="settings__group settings__dev-only" id="settAdminToolsGroup" style="display:none;">
+            <div class="settings__separator"></div>
+            <label class="settings__label">🔒 Admin-Verbote (unveränderbar für User)</label>
+            <div class="settings__hint">Diese Tools werden in allen Sessions blockiert und können nur hier verwaltet werden.</div>
+            <div class="settings__tool-list" id="settAdminDeniedToolsList"></div>
+            <div class="settings__tool-add">
+              <input type="text" class="settings__tool-input" id="settAdminDeniedToolInput" placeholder="z.B. git push --force" />
+              <button class="action-btn" id="btnAddAdminDeniedTool" data-tooltip="Admin-Tool blockieren">+</button>
+            </div>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
@@ -381,36 +429,63 @@
             </div>
           </div>
         </div>
-        <!-- Tab: Konfiguration -->
-        <div class="settings__panel" data-panel="copilot">
+        <!-- Tab: API-Provider (Keys) -->
+        <div class="settings__panel" data-panel="providers">
           <div class="settings__group">
-            <label class="settings__label">Standard-Provider</label>
-            <div class="settings__hint">Provider, mit dem neue Tabs und das „+“ starten.</div>
-            <select class="settings__select" id="settDefaultProvider"></select>
+            <div class="settings__hint" style="margin-bottom:12px;">
+              API-Keys für direkte LLM-Provider. Die Keys werden über den OS-Schlüsselbund
+              verschlüsselt gespeichert und verlassen den Hauptprozess nicht.
+            </div>
+            <div id="providersKeyList" class="providers-list"></div>
+            <div class="settings__hint" id="providersUnavailable" style="display:none;color:var(--red,#e74c3c);">
+              ⚠️ OS-Verschlüsselung ist nicht verfügbar — Keys können nicht sicher gespeichert werden.
+            </div>
           </div>
+        </div>
+        <!-- Tab: Copilot (eigener Reiter, immer vorhanden — die native CLI-Konfiguration) -->
+        <div class="settings__panel" data-panel="provider-copilot">
           <div class="settings__group">
-            <label class="settings__label">Standard-Modell pro Provider</label>
-            <div class="settings__hint">Modell, mit dem ein neuer Tab des jeweiligen Providers startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
-            <div id="settDefaultModelsPerProvider" class="settings__provider-defaults"></div>
+            <label class="settings__label">Standard-Modell</label>
+            <div class="settings__hint">Modell, mit dem ein neuer Copilot-Tab startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
+            <select class="settings__select" id="settProviderModel-copilot"></select>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
-            <label class="settings__label">Verbotene Shell Tools (global)</label>
-            <div class="settings__hint">Diese Shell-Befehle werden in allen Sessions blockiert (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
-            <div class="settings__tool-list" id="settDeniedToolsList"></div>
-            <div class="settings__tool-add">
-              <input type="text" class="settings__tool-input" id="settDeniedToolInput" placeholder="z.B. git push" />
-              <button class="action-btn" id="btnAddDeniedTool" data-tooltip="Tool blockieren">+</button>
+            <label class="settings__label">💾 Sessions</label>
+            <div class="settings__hint">Speicherort der Copilot-Sessions.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderSessions" placeholder="z.B. C:\Users\Name\.copilot\session-state" readonly />
+              <button class="action-btn" id="btnBrowseSessions" data-tooltip="Ordner auswählen">📁</button>
             </div>
           </div>
-          <div class="settings__group settings__dev-only" id="settAdminToolsGroup" style="display:none;">
-            <div class="settings__separator"></div>
-            <label class="settings__label">🔒 Admin-Verbote (unveränderbar für User)</label>
-            <div class="settings__hint">Diese Tools werden in allen Sessions blockiert und können nur hier verwaltet werden.</div>
-            <div class="settings__tool-list" id="settAdminDeniedToolsList"></div>
-            <div class="settings__tool-add">
-              <input type="text" class="settings__tool-input" id="settAdminDeniedToolInput" placeholder="z.B. git push --force" />
-              <button class="action-btn" id="btnAddAdminDeniedTool" data-tooltip="Admin-Tool blockieren">+</button>
+          <div class="settings__group">
+            <label class="settings__label">🧩 Skills</label>
+            <div class="settings__hint">Ordner mit SKILL.md Dateien für KI-Skills.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderSkills" placeholder="z.B. C:\Users\Name\.copilot\skills" readonly />
+              <button class="action-btn" id="btnBrowseSkills" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">🤖 Agents</label>
+            <div class="settings__hint">Ordner mit .agent.md Dateien für KI-Agents.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderAgents" placeholder="z.B. C:\Users\Name\.copilot\agents" readonly />
+              <button class="action-btn" id="btnBrowseAgents" data-tooltip="Ordner auswählen">📁</button>
+            </div>
+          </div>
+          <div class="settings__group">
+            <button class="action-btn action-btn--primary" id="btnFoldersSaveCopilot" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
+            <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <label class="settings__label">📝 Instructions</label>
+            <div class="settings__hint">Pfad zur copilot-instructions.md — Copilots eigene, native Instructions-Datei.</div>
+            <div class="settings__folder-row">
+              <input type="text" class="settings__folder-input" id="settFolderInstructions" placeholder="z.B. C:\Users\Name\.copilot\copilot-instructions.md" readonly />
+              <button class="action-btn" id="btnBrowseInstructions" data-tooltip="Datei auswählen">📄</button>
+              <button class="action-btn" id="btnEditInstructions" data-tooltip="Instructions bearbeiten">✏️</button>
             </div>
           </div>
           <div class="settings__separator"></div>
@@ -443,21 +518,9 @@
               <button class="action-btn" id="btnAddDir" data-tooltip="Ordner hinzufügen">+</button>
             </div>
           </div>
-
         </div>
-        <!-- Tab: API-Provider -->
-        <div class="settings__panel" data-panel="providers">
-          <div class="settings__group">
-            <div class="settings__hint" style="margin-bottom:12px;">
-              API-Keys für direkte LLM-Provider. Die Keys werden über den OS-Schlüsselbund
-              verschlüsselt gespeichert und verlassen den Hauptprozess nicht.
-            </div>
-            <div id="providersKeyList" class="providers-list"></div>
-            <div class="settings__hint" id="providersUnavailable" style="display:none;color:var(--red,#e74c3c);">
-              ⚠️ OS-Verschlüsselung ist nicht verfügbar — Keys können nicht sicher gespeichert werden.
-            </div>
-          </div>
-        </div>
+        <!-- Weitere Provider-Reiter (Claude Code, Anthropic, OpenAI, GLM, Ollama, Gemini)
+             werden hier dynamisch von renderProviderConfigTabs() eingefügt. -->
         <!-- Tab: Features -->
         <div class="settings__panel" data-panel="features">
           <div class="settings__group">
@@ -466,65 +529,6 @@
               Nicht unterstützte Funktionen werden im aktiven Tab automatisch ausgeblendet.
             </div>
             <div id="featuresMatrix" class="feature-matrix-wrap"></div>
-          </div>
-        </div>
-        <!-- Tab: Ordner -->
-        <div class="settings__panel" data-panel="folders">
-          <div class="settings__group">
-            <div class="settings__hint" style="margin-bottom:12px;">Konfiguriere die Verzeichnisse, die Agent Desktop verwendet. Änderungen erfordern einen Neustart der App.</div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">📂 Arbeitsverzeichnis (CWD)</label>
-            <div class="settings__hint">Hauptverzeichnis in dem Copilot arbeitet.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderCwd" placeholder="z.B. C:\Users\Name\Copilot" readonly />
-              <button class="action-btn" id="btnBrowseCwd" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">💾 Sessions</label>
-            <div class="settings__hint">Speicherort der Copilot-Sessions.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderSessions" placeholder="z.B. C:\Users\Name\.copilot\session-state" readonly />
-              <button class="action-btn" id="btnBrowseSessions" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">🧩 Skills</label>
-            <div class="settings__hint">Ordner mit SKILL.md Dateien für KI-Skills.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderSkills" placeholder="z.B. C:\Users\Name\.copilot\skills" readonly />
-              <button class="action-btn" id="btnBrowseSkills" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">🤖 Agents</label>
-            <div class="settings__hint">Ordner mit .agent.md Dateien für KI-Agents.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderAgents" placeholder="z.B. C:\Users\Name\.copilot\agents" readonly />
-              <button class="action-btn" id="btnBrowseAgents" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">🖼️ Bilder</label>
-            <div class="settings__hint">Ordner für die Bildergalerie.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderImages" placeholder="z.B. C:\Users\Name\Copilot\images" readonly />
-              <button class="action-btn" id="btnBrowseImages" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <label class="settings__label">📝 Copilot Instructions</label>
-            <div class="settings__hint">Pfad zur copilot-instructions.md — globale Anweisungen für alle Sessions.</div>
-            <div class="settings__folder-row">
-              <input type="text" class="settings__folder-input" id="settFolderInstructions" placeholder="z.B. C:\Users\Name\.copilot\copilot-instructions.md" readonly />
-              <button class="action-btn" id="btnBrowseInstructions" data-tooltip="Datei auswählen">📄</button>
-              <button class="action-btn" id="btnEditInstructions" data-tooltip="Instructions bearbeiten">✏️</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <button class="action-btn action-btn--primary" id="btnFoldersSave" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
-            <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
           </div>
         </div>
         <div class="settings__panel" data-panel="shortcuts">

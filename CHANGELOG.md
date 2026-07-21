@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.4.0] - 2026-07-21
+
+### Changed
+- **Einstellungen grundlegend umgebaut**, um die Multi-Provider-Architektur
+  abzubilden statt der ursprünglichen, Copilot-only gewachsenen Struktur.
+  Vorher waren „Konfiguration"/„Ordner" ein Sammelsurium aus global gedachten,
+  tatsächlich aber inkonsistent providerabhängigen Einstellungen (z. B. galt
+  „Alle Pfade erlauben" nur für Copilot, „Manuelle Bestätigung" hatte für
+  Claude Code und Direkt-API-Provider gar keine Wirkung) — ohne dass das
+  irgendwo sichtbar war.
+  - **Neue Reiter-Struktur**: „App" (Theme/Sound/CWD/Bilder/Standard-Provider/
+    globale Deny-Liste/Updates/Entwicklermodus), „Provider" (API-Keys,
+    unverändert), **„Copilot"** (eigener, immer vorhandener Reiter mit allem
+    Copilot-Spezifischen: Sessions-/Skills-/Agents-Ordner, Instructions-Editor,
+    „Alle Pfade erlauben", Zusätzliche Ordner, Manuelle Bestätigung), **ein
+    Reiter pro tatsächlich verbundenem weiteren Provider** (Claude Code, sobald
+    die CLI installiert ist; Anthropic/OpenAI/GLM/Ollama/Gemini, sobald ein Key
+    hinterlegt ist), „Features" (Matrix, unverändert), „Tastenkürzel"
+    (unverändert). Der „Ordner"-Reiter entfällt komplett.
+  - Jeder Provider-Reiter zeigt nur, was für diesen Provider tatsächlich gilt:
+    Standard-Modell überall; Skills-/Agents-/Instructions-Ordner nur wo
+    unterstützt (`providerSupports()`) — z. B. Gemini zeigt nur das
+    Standard-Modell, Claude Code zeigt seinen **nativen** `~/.claude/skills/`
+    (read-only, „Ordner öffnen"-Button) statt eines app-eigenen Pfads.
+  - **Instructions für Direkt-API-Provider getrennt**: `sendApiPrompt()`
+    übergibt die globale `copilot-instructions.md` nicht mehr additiv an
+    `composeSystemContext()` — Anthropic/OpenAI/GLM/Ollama nutzen jetzt
+    ausschließlich ihren eigenen `~/.agent-desktop/<provider>/instructions/`-
+    Ordner. Die globale Datei bleibt Copilots eigene, native Instructions-Datei.
+  - Neue IPC `folders:openPath` (öffnet einen beliebigen Pfad im Explorer,
+    legt ihn bei Bedarf an) und `folders:providerPaths` (liefert die
+    Skills-/Agents-/Instructions-Pfade eines Providers für die Anzeige).
+  - Tab-Umschaltung auf Event-Delegation umgestellt, damit die dynamisch
+    erzeugten Provider-Reiter ohne zusätzliche Verdrahtung funktionieren.
+  - Bekannte, bewusst nicht in diesem Zug behobene Inkonsistenz (siehe Doku):
+    Direkt-API-Provider haben weiterhin keinen echten Freigabe-Mechanismus für
+    Tool-Aufrufe (der „Manuelle Bestätigung"-Schalter existiert nur bei
+    Copilot) — als eigenes Folgeprojekt vorgemerkt.
+
 ## [1.3.4] - 2026-07-21
 
 ### Fixed

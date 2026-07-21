@@ -287,6 +287,10 @@ contextBridge.exposeInMainWorld('copilot', {
      * @returns {Promise<string|null>} Selected file path or null
      */
     browseFile: (filters) => ipcRenderer.invoke('folders:browse-file', filters),
+    /** @ipc folders:openPath — Opens an arbitrary absolute path in the OS file explorer (creates it first if missing). @param {string} targetPath */
+    openPath: (targetPath) => ipcRenderer.invoke('folders:openPath', targetPath),
+    /** @ipc folders:providerPaths @param {string} provider @returns {Promise<{skillsDir?: string, agentsDir?: string, instructionsDir?: string}>} */
+    providerPaths: (provider) => ipcRenderer.invoke('folders:providerPaths', provider),
   },
 
   // ── Instructions ──────────────────────────────────────────

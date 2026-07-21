@@ -63,7 +63,7 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 
 ## Skills
 
-Copilot loads skills from its own installation (`~/.copilot/skills/`, configurable in Settings → Folders); every other provider gets its own `~/.agent-desktop/<provider>/skills/`. Skill files follow the `SKILL.md` format with YAML frontmatter (`name`, `description`). Rather than inlining every skill's full content, the app exposes a lazy index (name + description + file path) to the model — it reads a specific `SKILL.md` itself, via its file tool, only once it decides that skill is relevant to the current task. The sidebar's Skills section always reflects the active tab's provider. A manual toggle still exists to force a skill regardless of the model's own judgment.
+Copilot loads skills from its own installation (`~/.copilot/skills/`); Claude Code discovers its own native `~/.claude/skills/` (confirmed empirically — no app-side injection, would just load the same skills twice); every other provider gets its own app-managed `~/.agent-desktop/<provider>/skills/`. Each provider's Skills folder is shown (read-only, "open in explorer") in its own Settings tab. Skill files follow the `SKILL.md` format with YAML frontmatter (`name`, `description`). Rather than inlining every skill's full content, the app exposes a lazy index (name + description + file path) to the model — it reads a specific `SKILL.md` itself, via its file tool, only once it decides that skill is relevant to the current task. The sidebar's Skills section always reflects the active tab's provider. A manual toggle still exists to force a skill regardless of the model's own judgment.
 
 ## Agents
 

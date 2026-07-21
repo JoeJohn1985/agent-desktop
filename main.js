@@ -411,13 +411,18 @@ async function sendApiPrompt(tabId, prompt, options) {
   // Compose the system context (instructions + active agents + skills index)
   // from their .md files — for direct APIs there is no CLI to read them.
   // Gemini is intentionally kept context-light (no tool access trusted yet).
+  // NOTE: the single global instructionsFile (copilot-instructions.md) is
+  // deliberately NOT passed here — direct-API providers use only their own
+  // provider-scoped ~/.agent-desktop/<provider>/instructions/ folder (via
+  // `instructions` below), kept separate rather than additive so it's clear
+  // which instructions apply to which provider (that global file remains
+  // Copilot's own single native instructions file, untouched by this).
   let systemContext = '';
   try {
     const { composeSystemContext } = require('./src/providers/system-context');
     const CONTEXT_PROVIDERS = new Set(LAZY_CONTEXT_PROVIDERS.filter(p => p !== 'claude-code'));
     if (CONTEXT_PROVIDERS.has(provider)) systemContext = composeSystemContext({
       cwd,
-      instructionsFile: folderConfig.instructionsFile,
       // Agents/Skills are provider-scoped (~/.agent-desktop/<provider>/…) plus
       // any project-level ones (cwd/.github/…) — exposed as lazy indexes, not
       // inlined. The model reloads a file itself via read_file only once it
@@ -1464,6 +1469,43 @@ ipcMain.handle('folders:browse-file', async (_event, filters) => {
   });
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
+});
+
+/**
+ * @ipc folders:openPath — Opens an arbitrary absolute path in the OS file
+ * explorer, creating the directory first if it doesn't exist yet (so a
+ * "browse" button next to an auto-created-but-still-empty provider folder,
+ * e.g. a fresh ~/.agent-desktop/<provider>/skills, doesn't silently no-op).
+ * Used by the per-provider settings tabs (Skills/Agents/Instructions folder
+ * links) instead of one hardcoded IPC per fixed path.
+ * @param {string} targetPath - Absolute path to open.
+ */
+ipcMain.handle('folders:openPath', (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== 'string') return;
+  try { fs.mkdirSync(targetPath, { recursive: true }); } catch (_) { /* best effort */ }
+  shell.openPath(targetPath);
+});
+
+/**
+ * @ipc folders:providerPaths — Absolute skills/agents/instructions folder
+ * paths for a given provider, for read-only display + "open folder" buttons
+ * in that provider's settings tab. Validated against the same allow-lists
+ * as skills:listProvider/agents:listProvider/instructionSets — an unknown
+ * provider gets {} for the fields it has no folder for (e.g. Gemini has
+ * none of the three; Claude Code has no instructions folder).
+ * @param {string} provider
+ * @returns {Promise<{skillsDir?: string, agentsDir?: string, instructionsDir?: string}>}
+ */
+ipcMain.handle('folders:providerPaths', (_event, provider) => {
+  const result = {};
+  if (LAZY_CONTEXT_PROVIDERS.includes(provider)) {
+    result.skillsDir = providerSkillsDir(provider);
+    result.agentsDir = providerAgentsDir(provider);
+  }
+  if (INSTRUCTIONS_PROVIDERS.includes(provider)) {
+    result.instructionsDir = providerInstructionsDir(provider);
+  }
+  return result;
 });
 
 /** @ipc instructions:read — Reads the copilot-instructions.md file. @returns {Promise<{success: boolean, content: string, path: string}>} */

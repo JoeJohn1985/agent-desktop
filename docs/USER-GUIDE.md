@@ -381,36 +381,45 @@ Reopening a saved session restores its full history in the tab and scrolls to th
 
 ### Settings
 
-Open the settings via the ⚙️ icon in the sidebar footer. There are five tabs:
+Open the settings via the ⚙️ icon in the sidebar footer. Settings are organized by scope — app-wide, then one tab per actually-connected provider — rather than one grab-bag of mixed global/provider-specific options:
 
-#### UI tab
+#### App tab
+
+Everything that applies across every provider, not to one specific backend.
 
 | Setting | Options |
 |---|---|
 | **Theme** | Light, Dark, GEBIT |
 | **Chat font size** | 12–24 px (slider) |
 | **Notification sound** | On / Off |
+| **Default provider** | Provider new tabs and "+" start with |
+| **CWD** | Working directory every provider uses by default |
+| **Images folder** | Gallery folder (provider-independent) |
+| **Denied shell tools (global)** | Blocked for Copilot and the direct-API providers — Claude Code has its own approval flow and isn't affected |
 | **Developer mode** | Enables the test runner (🧪) and developer console (🖥️) in the sidebar |
 
-#### Configuration tab
-
-| Setting | Description |
-|---|---|
-| **Default model** | Model for new tabs (overridable per tab) |
-| **Denied shell tools (global)** | Shell commands blocked in all sessions |
-| **Additional directories** | Extra paths the CLI is allowed to search |
-
-#### API providers tab
+#### Provider tab
 
 Here you store API keys for the direct LLM providers (e.g. Anthropic). The keys are stored **encrypted via the OS keychain** and never leave the main process.
 
 - One masked key field per provider with **Save**/**Delete** and status (set/empty).
-- Once a key is set, the provider can be selected in the session bar (🔌).
+- Once a key is set, the provider can be selected in the session bar (🔌) — and gets its own settings tab, see below.
 - Direct-API tabs run fully agentic (own tool loop) with exact token cost accounting, prompt caching, automatic context compaction, and session resume.
 
-#### Folders tab
+#### Per-provider tabs
 
-Configures the default directories for sessions, skills, agents, plugins, and images.
+A dedicated tab per provider that's actually usable right now: **Copilot** is always present (static, its native CLI configuration); **Claude Code** appears once its CLI is installed; the direct-API providers appear once a key is stored (Ollama needs none, so it's always shown). Each tab only shows what applies to that provider:
+
+| Tab | Contains |
+|---|---|
+| **Copilot** | Default model, its native Sessions/Skills/Agents folders (editable, browse + save), its own `copilot-instructions.md` editor, "allow all paths", additional directories, manual-approval default |
+| **Claude Code** | Default model, its native `~/.claude/skills/` (read-only, opens in the file explorer — Claude discovers this on its own) and its app-managed Agents folder |
+| **Anthropic / OpenAI / GLM / Ollama** | Default model, plus its Skills/Agents/Instructions folders (auto-created under `~/.agent-desktop/<provider>/`, read-only, opens in the file explorer) |
+| **Gemini** | Default model only — kept context-light, no Skills/Agents/Instructions |
+
+#### Features tab
+
+A comparison matrix of which core features each provider currently supports — unsupported ones are automatically hidden in that provider's active tab.
 
 #### Shortcuts tab
 
@@ -430,7 +439,7 @@ The ⌨️ icon in the sidebar footer (or `Ctrl+/`) opens an overlay with all cu
 | **Dark** | Dark theme |
 | **GEBIT** | Corporate theme by GEBIT Solutions |
 
-Switch via: **Settings → UI → Theme**.
+Switch via: **Settings → App → Theme**.
 
 ---
 

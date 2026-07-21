@@ -2098,37 +2098,32 @@ function saveModeForProvider(provider, modeId) {
 
 const MODEL_TIER_TEXT = { paid: ' (kostenpflichtig)', free: ' (kostenlos)', aic: ' (AIC)', sub: ' (Abo)' };
 
-/** Render the "default provider" + "default model per provider" settings controls. */
+/** Render the global "default provider" (which provider new tabs/"+" start with) select. */
 function renderDefaultModelSettings() {
   const provSel = document.getElementById('settDefaultProvider');
-  const container = document.getElementById('settDefaultModelsPerProvider');
+  if (!provSel) return;
   const providers = getProvidersWithModels();
-  if (provSel) {
-    provSel.innerHTML = providers
-      .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(PROVIDER_SHORT[p] || p)}</option>`)
-      .join('');
-    provSel.value = getDefaultProvider();
-  }
-  if (container) {
-    container.innerHTML = '';
-    for (const p of providers) {
-      const row = document.createElement('div');
-      row.className = 'settings__provider-default-row';
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'settings__provider-default-label';
-      labelSpan.textContent = PROVIDER_SHORT[p] || p;
-      const sel = document.createElement('select');
-      sel.className = 'settings__select';
-      sel.innerHTML = getModelsForProvider(p)
-        .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
-        .join('');
-      sel.value = getDefaultModelForProvider(p);
-      sel.addEventListener('change', () => saveDefaultModelForProvider(p, sel.value));
-      row.appendChild(labelSpan);
-      row.appendChild(sel);
-      container.appendChild(row);
-    }
-  }
+  provSel.innerHTML = providers
+    .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(PROVIDER_SHORT[p] || p)}</option>`)
+    .join('');
+  provSel.value = getDefaultProvider();
+}
+
+/**
+ * Fills one provider's "default model" <select> (used both by Copilot's static
+ * settings tab and by each dynamically-generated provider-config tab, so the
+ * per-provider default model setting lives in that provider's own tab instead
+ * of one long combined list).
+ * @param {string} provider
+ * @param {HTMLSelectElement} sel
+ */
+function renderProviderModelSelect(provider, sel) {
+  if (!sel) return;
+  sel.innerHTML = getModelsForProvider(provider)
+    .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
+    .join('');
+  sel.value = getDefaultModelForProvider(provider);
+  sel.addEventListener('change', () => saveDefaultModelForProvider(provider, sel.value));
 }
 
 /**
@@ -5115,14 +5110,18 @@ function initSettings() {
   const settAllowAllPaths = document.getElementById('settAllowAllPaths');
   const settDefaultProvider = document.getElementById('settDefaultProvider');
 
-  document.querySelectorAll('.settings__tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.settings__tab').forEach(t => t.classList.remove('settings__tab--active'));
-      document.querySelectorAll('.settings__panel').forEach(p => p.classList.remove('settings__panel--active'));
-      tab.classList.add('settings__tab--active');
-      const panel = document.querySelector(`.settings__panel[data-panel="${tab.dataset.tab}"]`);
-      if (panel) panel.classList.add('settings__panel--active');
-    });
+  // Event delegation (not a per-button listener loop): provider-config tabs
+  // are inserted dynamically after this runs once at startup (see
+  // renderProviderConfigTabs) — a listener bound only to buttons that exist
+  // right now would silently never fire for those.
+  document.querySelector('.settings__tabs')?.addEventListener('click', (e) => {
+    const tab = e.target.closest('.settings__tab');
+    if (!tab) return;
+    document.querySelectorAll('.settings__tab').forEach(t => t.classList.remove('settings__tab--active'));
+    document.querySelectorAll('.settings__panel').forEach(p => p.classList.remove('settings__panel--active'));
+    tab.classList.add('settings__tab--active');
+    const panel = document.querySelector(`.settings__panel[data-panel="${tab.dataset.tab}"]`);
+    if (panel) panel.classList.add('settings__panel--active');
   });
 
   const savedSettings = getSettings();
@@ -5141,8 +5140,15 @@ function initSettings() {
     settManualApproval.addEventListener('change', () => saveSetting('manualApproval', settManualApproval.checked));
   }
 
-  // Default provider (#3) + default model per provider (#2).
+  // Default provider (App tab).
   renderDefaultModelSettings();
+  // Copilot's own default-model select lives in its static provider tab.
+  renderProviderModelSelect('copilot', document.getElementById('settProviderModel-copilot'));
+  // Claude Code / Anthropic / OpenAI / GLM / Ollama / Gemini each get their own
+  // tab only when actually connected (CLI installed / key stored) — built
+  // dynamically since that set changes at runtime (a key can be added while
+  // Settings is open).
+  renderProviderConfigTabs();
 
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
@@ -5221,37 +5227,54 @@ function initSettings() {
     openInstructionsEditor(result.content, result.path);
   });
 
+  // App tab: just CWD + Bilder (providerunabhängig).
   document.getElementById('btnFoldersSave').addEventListener('click', async () => {
     const config = {
       cwd: document.getElementById('settFolderCwd').value || undefined,
-      sessionsDir: document.getElementById('settFolderSessions').value || undefined,
-      skillsDir: document.getElementById('settFolderSkills').value || undefined,
-      agentsDir: document.getElementById('settFolderAgents').value || undefined,
       imagesDir: document.getElementById('settFolderImages').value || undefined,
-      instructionsFile: document.getElementById('settFolderInstructions').value || undefined,
     };
     Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
     const result = await copilot.folders.save(config);
     if (result.success) {
-      showNotification('Ordner gespeichert — bitte App neu starten', 'success');
+      showNotification('Gespeichert — bitte App neu starten', 'success');
     } else {
       showNotification(`Fehler: ${result.error}`, 'error');
     }
   });
 
+  // Copilot tab: its own native Sessions/Skills/Agents/Instructions paths.
+  document.getElementById('btnFoldersSaveCopilot')?.addEventListener('click', async () => {
+    const config = {
+      sessionsDir: document.getElementById('settFolderSessions').value || undefined,
+      skillsDir: document.getElementById('settFolderSkills').value || undefined,
+      agentsDir: document.getElementById('settFolderAgents').value || undefined,
+      instructionsFile: document.getElementById('settFolderInstructions').value || undefined,
+    };
+    Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
+    const result = await copilot.folders.save(config);
+    if (result.success) {
+      showNotification('Gespeichert — bitte App neu starten', 'success');
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
+  });
+
+  // Resets ALL folder config (App + Copilot tab fields) back to defaults.
   document.getElementById('btnFoldersReset').addEventListener('click', async () => {
     const result = await copilot.folders.save({});
     if (result.success) {
       await loadFolderSettings();
-      showNotification('Ordner auf Standard zurückgesetzt — bitte App neu starten', 'success');
+      showNotification('Auf Standard zurückgesetzt — bitte App neu starten', 'success');
     }
   });
 
-  document.querySelector('.settings__tab[data-tab="folders"]')?.addEventListener('click', loadFolderSettings);
   loadFolderSettings();
   initShortcutsSettings();
 
-  document.querySelector('.settings__tab[data-tab="providers"]')?.addEventListener('click', renderProvidersSettings);
+  document.querySelector('.settings__tab[data-tab="providers"]')?.addEventListener('click', () => {
+    renderProvidersSettings();
+    renderProviderConfigTabs(); // a key may have just been added/removed
+  });
   document.querySelector('.settings__tab[data-tab="features"]')?.addEventListener('click', renderFeatureMatrix);
 
   // Dev tools: Onboarding toggle
@@ -5467,6 +5490,142 @@ const PROVIDER_SETTINGS = [
  * (Re)render the API-provider key settings panel: one row per provider with a
  * masked input, save/delete buttons and the stored/empty status.
  */
+/**
+ * Providers that get their own dynamically-generated settings tab. Copilot is
+ * static HTML (always present, handled separately) — this covers everything
+ * else: Claude Code appears once its CLI is installed, the direct-API
+ * providers once a key is stored (Ollama is keyless, so it's always shown).
+ * @returns {Promise<Array<{id: string, label: string}>>}
+ */
+async function getConnectedProviderConfigs() {
+  const configs = [];
+  let cc = { installed: false };
+  try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+  if (cc.installed) configs.push({ id: 'claude-code', label: PROVIDER_LABELS['claude-code'] || 'Claude Code' });
+
+  await refreshProviderStatus();
+  for (const p of PROVIDER_SETTINGS) {
+    if (p.cli) continue; // Copilot/Claude Code handled separately (native, not key-based)
+    const connected = p.keyless || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    if (connected) configs.push({ id: p.id, label: PROVIDER_LABELS[p.id] || p.id });
+  }
+  return configs;
+}
+
+/**
+ * Builds the inner HTML for one dynamically-generated provider settings tab:
+ * a default-model select (every provider), plus a read-only Skills/Agents/
+ * Instructions folder row (with an "open in explorer" button) for whichever
+ * of those features that provider actually supports — see providerSupports();
+ * e.g. Gemini has none of the three, Claude Code has no instructions folder.
+ * @param {string} providerId
+ * @returns {string}
+ */
+function buildProviderConfigPanelHtml(providerId) {
+  const label = PROVIDER_LABELS[providerId] || providerId;
+  const parts = [`
+    <div class="settings__group">
+      <label class="settings__label">Standard-Modell</label>
+      <div class="settings__hint">Modell, mit dem ein neuer ${escapeHtml(label)}-Tab startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
+      <select class="settings__select" data-provider-model-select="${escapeAttr(providerId)}"></select>
+    </div>
+  `];
+
+  const folderRows = [];
+  if (providerSupports(providerId, 'skills')) folderRows.push({ key: 'skillsDir', icon: '🧩', title: 'Skills' });
+  if (providerSupports(providerId, 'agents')) folderRows.push({ key: 'agentsDir', icon: '🤖', title: 'Agents' });
+  if (providerSupports(providerId, 'instructions')) folderRows.push({ key: 'instructionsDir', icon: '📝', title: 'Instructions' });
+
+  if (folderRows.length) {
+    parts.push('<div class="settings__separator"></div>');
+    for (const row of folderRows) {
+      parts.push(`
+        <div class="settings__group">
+          <label class="settings__label">${row.icon} ${row.title}</label>
+          <div class="settings__hint">Wird automatisch angelegt — hier abgelegte Dateien werden bei ${escapeHtml(label)} eingebunden.</div>
+          <div class="settings__folder-row">
+            <input type="text" class="settings__folder-input" data-provider-folder-input="${escapeAttr(providerId)}:${row.key}" readonly />
+            <button class="action-btn" data-provider-folder-open="${escapeAttr(providerId)}:${row.key}" data-tooltip="Ordner öffnen">📁</button>
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  if (providerId === 'claude-code') {
+    parts.push(`
+      <div class="settings__hint" style="margin-top:8px;">
+        Claude Code entdeckt Skills selbst nativ unter <code>~/.claude/skills/</code> — eine dort abgelegte Datei wird automatisch erkannt, ohne dass hier etwas konfiguriert werden muss.
+      </div>
+    `);
+  }
+
+  return parts.join('');
+}
+
+/**
+ * Wires one dynamically-generated provider tab's controls after it's been
+ * inserted into the DOM: fills the default-model select, loads and displays
+ * the Skills/Agents/Instructions folder paths, and wires the "open" buttons.
+ * @param {string} providerId
+ * @param {HTMLElement} panel
+ */
+async function wireProviderConfigPanel(providerId, panel) {
+  renderProviderModelSelect(providerId, panel.querySelector(`[data-provider-model-select="${providerId}"]`));
+
+  const folderInputs = panel.querySelectorAll('[data-provider-folder-input]');
+  if (!folderInputs.length) return;
+  let paths = {};
+  try { paths = await window.copilot.folders.providerPaths(providerId) || {}; } catch (_) { /* old build */ }
+  folderInputs.forEach((input) => {
+    const key = input.dataset.providerFolderInput.split(':')[1];
+    input.value = paths[key] || '';
+  });
+  panel.querySelectorAll('[data-provider-folder-open]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.providerFolderOpen.split(':')[1];
+      if (paths[key]) window.copilot.folders.openPath(paths[key]);
+    });
+  });
+}
+
+/**
+ * (Re)builds the dynamic per-provider settings tabs (Claude Code + whichever
+ * direct-API providers currently have a key stored). Removes any previously
+ * generated tabs/panels first, so this is safe to call repeatedly — e.g.
+ * whenever a key is added/removed on the "Provider" tab — without
+ * accumulating duplicates. Inserted right before the Features tab.
+ */
+async function renderProviderConfigTabs() {
+  const tabsBar = document.querySelector('.settings__tabs');
+  const panelsHost = document.querySelector('.settings');
+  const featuresTab = document.querySelector('.settings__tab[data-tab="features"]');
+  const featuresPanel = document.querySelector('.settings__panel[data-panel="features"]');
+  if (!tabsBar || !panelsHost || !featuresTab || !featuresPanel) return;
+
+  document.querySelectorAll('.settings__tab[data-provider-tab]').forEach(el => el.remove());
+  document.querySelectorAll('.settings__panel[data-provider-panel]').forEach(el => el.remove());
+
+  const configs = await getConnectedProviderConfigs();
+  for (const cfg of configs) {
+    const btn = document.createElement('button');
+    btn.className = 'settings__tab';
+    btn.dataset.tab = `provider-${cfg.id}`;
+    btn.dataset.providerTab = '1';
+    btn.textContent = cfg.label;
+    tabsBar.insertBefore(btn, featuresTab);
+
+    const panel = document.createElement('div');
+    panel.className = 'settings__panel';
+    panel.dataset.panel = `provider-${cfg.id}`;
+    panel.dataset.providerPanel = '1';
+    panel.innerHTML = buildProviderConfigPanelHtml(cfg.id);
+    panelsHost.insertBefore(panel, featuresPanel);
+
+    wireProviderConfigPanel(cfg.id, panel);
+  }
+}
+
 async function renderProvidersSettings() {
   const list = document.getElementById('providersKeyList');
   if (!list) return;

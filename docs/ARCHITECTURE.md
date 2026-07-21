@@ -423,7 +423,9 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 |---|---|
 | `preferences:read/write` | Preferences I/O |
 | `instructions:read/write` | `copilot-instructions.md` I/O (Copilot's single native instructions file — an editor convenience, the Copilot CLI reads this itself) |
-| `folders:read/save/browse/browse-file` | Folder configuration |
+| `folders:read/save/browse/browse-file` | Folder configuration (Copilot's own native paths + CWD/images) |
+| `folders:openPath` | Opens an arbitrary absolute path in the OS file explorer (creates it first if missing) — used by the per-provider settings tabs' Skills/Agents/Instructions folder links |
+| `folders:providerPaths` | Absolute skills/agents/instructions folder paths for a given provider, for read-only display in that provider's settings tab |
 | `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`) |
 | `agents:list/listProject/listProvider` | Agents (persona presets — same Copilot-native-vs-per-provider split as skills) |
 | `mcp:listProject` | MCP servers from `mcp.json` |
