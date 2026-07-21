@@ -344,10 +344,6 @@ function getDeniedTools() {
   return getSettings().deniedTools || [];
 }
 
-function getAdminDeniedTools() {
-  return getSettings().adminDeniedTools || [];
-}
-
 function getExtraDirs() {
   return getSettings().extraDirs || [];
 }
@@ -394,25 +390,6 @@ function removeDeniedTool(idx) {
 
 function renderDeniedTools() { renderTagList('settDeniedToolsList', getDeniedTools(), 'removeDeniedTool'); }
 
-function addAdminDeniedTool(toolName) {
-  const wrapped = toolName.startsWith('shell(') ? toolName : `shell(${toolName})`;
-  const tools = getAdminDeniedTools();
-  if (!tools.includes(wrapped)) {
-    tools.push(wrapped);
-    saveSetting('adminDeniedTools', tools);
-  }
-  renderAdminDeniedTools();
-}
-
-function removeAdminDeniedTool(idx) {
-  const tools = getAdminDeniedTools();
-  tools.splice(idx, 1);
-  saveSetting('adminDeniedTools', tools);
-  renderAdminDeniedTools();
-}
-
-function renderAdminDeniedTools() { renderTagList('settAdminDeniedToolsList', getAdminDeniedTools(), 'removeAdminDeniedTool'); }
-
 function addExtraDir(dir) {
   const dirs = getExtraDirs();
   if (!dirs.includes(dir)) {
@@ -440,17 +417,14 @@ function applyChatFontSize(size) {
 
 // ── Developer Mode ──────────────────────────────────────────
 /**
- * Show or hide developer-mode UI elements (test runner, dev console,
- * admin tools section).
+ * Show or hide developer-mode UI elements (test runner, dev console).
  * @param {boolean} enabled
  */
 function applyDevMode(enabled) {
   const btnTests = document.getElementById('btnTests');
   const btnDevConsole = document.getElementById('btnDevConsole');
-  const adminToolsGroup = document.getElementById('settAdminToolsGroup');
   if (btnTests) btnTests.style.display = enabled ? '' : 'none';
   if (btnDevConsole) btnDevConsole.style.display = enabled ? '' : 'none';
-  if (adminToolsGroup) adminToolsGroup.style.display = enabled ? '' : 'none';
   // Hide console panel when devMode is disabled
   if (!enabled) {
     const panel = document.getElementById('devConsolePanel');
@@ -1208,7 +1182,7 @@ function sendMessage() {
   // Send to Copilot via JSON API
   const settings = getSettings();
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
-  const mergedDenied = [...new Set([...getAdminDeniedTools(), ...getDeniedTools(), ...sessionDenied])];
+  const mergedDenied = [...new Set([...getDeniedTools(), ...sessionDenied])];
 
   const sendTabId = activeTabId;
   // Freeze the model this prompt actually runs on. The token delta measured after
@@ -5180,9 +5154,7 @@ function initSettings() {
 
   renderDeniedTools();
   renderExtraDirs();
-  renderAdminDeniedTools();
   initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
-  initTagInput('btnAddAdminDeniedTool', 'settAdminDeniedToolInput', addAdminDeniedTool);
   initTagInput('btnAddDir', 'settDirInput', addExtraDir);
 
   // Folder settings

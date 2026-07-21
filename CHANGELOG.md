@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.1] - 2026-07-21
+
+### Removed
+- **Admin-Tool-Verbote komplett entfernt.** Diese Funktion (ein zweites,
+  angeblich "unveränderbares" Deny-Tool-Set neben der normalen globalen
+  Deny-Liste, nur im Entwicklermodus sichtbar) hatte keinen praktischen
+  Nutzen mehr für eine Desktop-App ohne Mehrbenutzer-/Admin-Kontext und
+  wurde auf expliziten Wunsch entfernt: `getAdminDeniedTools()`/
+  `addAdminDeniedTool()`/`removeAdminDeniedTool()`/`renderAdminDeniedTools()`
+  in `renderer/app.js`, der `#settAdminToolsGroup`-Block in
+  `renderer/index.html`, der `adminDeniedTools`-Default in
+  `src/preferences.js` sowie die Doku-Erwähnung in `docs/ARCHITECTURE.md`.
+  Die Merge-Logik für den effektiv angewendeten Deny-Tool-Set
+  (`renderer/app.js`, `renderer/modules/session-tools.js`) berücksichtigt
+  jetzt nur noch globale Deny-Liste + Session-Deny-Liste.
+
 ## [1.4.0] - 2026-07-21
 
 ### Changed

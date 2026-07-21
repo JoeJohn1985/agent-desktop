@@ -492,7 +492,6 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 ### 8.2 Tool permissions
 
 - **Global deny list** (`settings.deniedTools`): applies to all sessions
-- **Admin deny list** (`settings.adminDeniedTools`): not user-editable
 - **Session deny list** (`tab.sessionDeniedTools`): per session; changes trigger a process restart
 - All lists are merged into `--deny-tool=<name>` flags at spawn
 
