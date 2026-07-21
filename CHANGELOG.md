@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.3.4] - 2026-07-21
+
+### Fixed
+- **Skills wurden für Claude Code doppelt geladen.** Claude Code entdeckt
+  `SKILL.md`-Dateien unter `~/.claude/skills/` **selbst** — empirisch
+  bestätigt (ein dort abgelegter Test-Skill wurde aus einem völlig
+  unbeteiligten Arbeitsverzeichnis erkannt, also user-weit, nicht nur
+  projektlokal). Unsere App injizierte parallel dazu einen eigenen Lazy-Index
+  aus `~/.agent-desktop/claude-code/skills/` — ein zweiter, verwirrender
+  Ablageort für dieselbe Funktion, der zudem doppelt in den Kontext geladen
+  wurde.
+  - `providerSkillsDir('claude-code')` löst jetzt direkt zu Claudes nativem
+    `~/.claude/skills/` auf (`claudeCodeNativeSkillsDir()` in
+    `src/data-dir.js`) — betrifft automatisch auch die Sidebar-Skill-Liste
+    (`skills:listProvider`).
+  - Die Skills-Injektion in den ersten Prompt einer neuen Claude-Code-Session
+    (`main.js`) entfällt komplett — nur die Agents-Injektion (echtes,
+    verschiedenes Feature, siehe unten) bleibt bestehen; projektlokales
+    `.github/skills/` wird weiterhin injiziert (kein Claude-natives Äquivalent).
+  - Einmalige, nicht-destruktive Migration (`migrateClaudeCodeSkills()`):
+    bereits vorhandene Skills aus dem alten `~/.agent-desktop/claude-code/skills/`
+    werden beim Start automatisch nach `~/.claude/skills/` kopiert, damit
+    nichts Bestehendes verloren geht.
+  - **Agents bleiben unverändert** — Claude Codes natives „Agent"-Konzept
+    (isolierte, delegierte Unteraufträge über das Agent-/Task-Tool) ist ein
+    anderes Feature als unser App-eigener Persona-Wechsel innerhalb derselben
+    Konversation; keine Dopplung.
+  - `docs/USER-GUIDE.md` korrigiert (nannte fälschlich `~/.agent-desktop/…`
+    auch für Claude Code). 5 neue/angepasste Tests.
+
 ## [1.3.3] - 2026-07-20
 
 ### Fixed

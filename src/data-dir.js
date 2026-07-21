@@ -20,15 +20,31 @@ const LEGACY_APP_DIR = '.copilot-desktop';
 const DATA_DIR = path.join(os.homedir(), APP_DIR);
 const LEGACY_DATA_DIR = path.join(os.homedir(), LEGACY_APP_DIR);
 
+/**
+ * Absolute path to Claude Code's own native, user-level skills folder. Claude
+ * Code discovers SKILL.md files here itself (confirmed empirically: a skill
+ * placed here is recognized from any cwd, no app-side injection needed) — the
+ * same file format (SKILL.md, `name`/`description` frontmatter) our own
+ * scanner reads for every other provider. Injecting our own index here too
+ * would just load the same skills twice.
+ * @returns {string}
+ */
+function claudeCodeNativeSkillsDir() {
+  return path.join(os.homedir(), '.claude', 'skills');
+}
+
 // Provider-scoped config (skills, …) lives under the same home-dir data
 // folder as everything else, one subfolder per provider — analogous to
 // Copilot's own ~/.copilot/skills: ~/.agent-desktop/<provider>/skills/<name>/SKILL.md
 /**
- * Absolute path to a provider's skills directory, under ~/.agent-desktop.
+ * Absolute path to a provider's skills directory. Claude Code is special-cased
+ * to its own native ~/.claude/skills (see claudeCodeNativeSkillsDir) instead of
+ * an app-managed folder — everyone else gets ~/.agent-desktop/<provider>/skills.
  * @param {string} provider - Provider id, e.g. 'claude-code', 'anthropic'.
  * @returns {string}
  */
 function providerSkillsDir(provider) {
+  if (provider === 'claude-code') return claudeCodeNativeSkillsDir();
   return path.join(DATA_DIR, provider, 'skills');
 }
 
@@ -99,4 +115,22 @@ function migrateLegacyData(opts = {}, fsImpl = fs) {
   return moved;
 }
 
-module.exports = { DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge, providerSkillsDir, providerAgentsDir, providerInstructionsDir };
+/**
+ * One-shot, idempotent migration of any skills the user already placed in the
+ * old app-managed Claude Code skills folder (~/.agent-desktop/claude-code/skills)
+ * into Claude Code's own native ~/.claude/skills, so nothing already set up
+ * silently stops working once we stop injecting our own index for Claude Code.
+ * Merge-only (copyMerge never overwrites), so it's safe to call on every startup.
+ * @param {typeof fs} [fsImpl=fs]
+ * @returns {boolean} Whether anything was copied.
+ */
+function migrateClaudeCodeSkills(fsImpl = fs) {
+  const legacyClaudeCodeSkillsDir = path.join(DATA_DIR, 'claude-code', 'skills');
+  return copyMerge(legacyClaudeCodeSkillsDir, claudeCodeNativeSkillsDir(), fsImpl);
+}
+
+module.exports = {
+  DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge,
+  providerSkillsDir, providerAgentsDir, providerInstructionsDir,
+  claudeCodeNativeSkillsDir, migrateClaudeCodeSkills,
+};

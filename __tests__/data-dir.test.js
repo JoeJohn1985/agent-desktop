@@ -3,7 +3,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, DATA_DIR } = require('../src/data-dir');
+const {
+  migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, DATA_DIR,
+  claudeCodeNativeSkillsDir, migrateClaudeCodeSkills,
+} = require('../src/data-dir');
 
 function mkTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agentdesk-mig-'));
@@ -71,11 +74,51 @@ describe('data-dir: migrateLegacyData', () => {
 
 describe('data-dir: providerSkillsDir', () => {
   it('liegt unter ~/.agent-desktop/<provider>/skills', () => {
-    expect(providerSkillsDir('claude-code')).toBe(path.join(DATA_DIR, 'claude-code', 'skills'));
+    expect(providerSkillsDir('anthropic')).toBe(path.join(DATA_DIR, 'anthropic', 'skills'));
   });
 
   it('trennt Provider in eigene Unterordner', () => {
     expect(providerSkillsDir('anthropic')).not.toBe(providerSkillsDir('openai'));
+  });
+
+  it('claude-code ist ein Sonderfall: Claudes eigener nativer ~/.claude/skills-Ordner, kein app-eigener', () => {
+    expect(providerSkillsDir('claude-code')).toBe(claudeCodeNativeSkillsDir());
+    expect(providerSkillsDir('claude-code')).not.toBe(path.join(DATA_DIR, 'claude-code', 'skills'));
+  });
+});
+
+describe('data-dir: claudeCodeNativeSkillsDir', () => {
+  it('liegt unter ~/.claude/skills', () => {
+    expect(claudeCodeNativeSkillsDir()).toBe(path.join(os.homedir(), '.claude', 'skills'));
+  });
+});
+
+describe('data-dir: migrateClaudeCodeSkills', () => {
+  let root;
+  beforeEach(() => { root = mkTmp(); });
+  afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+  it('kopiert bestehende Skills aus dem alten app-eigenen Ordner in den nativen Claude-Code-Ordner', () => {
+    const fakeDataDir = path.join(root, '.agent-desktop');
+    const fakeHome = path.join(root, 'home');
+    const legacyDir = path.join(fakeDataDir, 'claude-code', 'skills', 'my-skill');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, 'SKILL.md'), '---\nname: my-skill\n---\nInhalt');
+
+    // migrateClaudeCodeSkills() itself always targets the real DATA_DIR/homedir
+    // (matching providerSkillsDir/claudeCodeNativeSkillsDir) — exercise the
+    // underlying copyMerge behavior directly against fake dirs instead, since
+    // the function's real paths aren't injectable.
+    const { copyMerge } = require('../src/data-dir');
+    const targetDir = path.join(fakeHome, '.claude', 'skills');
+    const moved = copyMerge(path.join(fakeDataDir, 'claude-code', 'skills'), targetDir, fs);
+
+    expect(moved).toBe(true);
+    expect(fs.existsSync(path.join(targetDir, 'my-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  it('ist ein No-Op, wenn der alte Ordner nicht existiert (real paths, keine Vorbereitung)', () => {
+    expect(() => migrateClaudeCodeSkills(fs)).not.toThrow();
   });
 });
 

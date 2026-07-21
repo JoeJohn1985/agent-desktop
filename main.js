@@ -22,7 +22,7 @@ const { getModelProvider, createApiBackend } = require('./src/providers');
 const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
-const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir } = require('./src/data-dir');
+const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills } = require('./src/data-dir');
 
 app.name = 'agent-desktop';
 
@@ -35,6 +35,10 @@ if (process.env.NODE_ENV !== 'test') {
       userDataDir: app.getPath('userData'),
       legacyUserDataDir: path.join(app.getPath('appData'), 'copilot-desktop'),
     });
+    // One-shot: carry over any skills the user already placed in the old
+    // app-managed Claude Code skills folder into Claude's own native
+    // ~/.claude/skills (see providerSkillsDir('claude-code') in data-dir.js).
+    migrateClaudeCodeSkills();
   } catch (_) { /* best effort — never block startup */ }
 }
 
@@ -111,7 +115,11 @@ let IMAGES_DIR = folderConfig.imagesDir || path.join(COPILOT_CWD, 'images');
  * Providers that get their own ~/.agent-desktop/<provider>/{skills,agents}
  * folders with the lazy skills/agents index. Copilot keeps its native
  * ~/.copilot/{skills,agents} (the CLI reads them itself); Gemini is
- * intentionally kept context-light.
+ * intentionally kept context-light. Claude Code is a hybrid: its *agents*
+ * folder is app-managed like the others (~/.agent-desktop/claude-code/agents),
+ * but providerSkillsDir('claude-code') resolves to Claude's own native
+ * ~/.claude/skills instead — see data-dir.js — since Claude Code discovers
+ * skills there itself and an app-side index would just duplicate them.
  * @type {string[]}
  */
 const LAZY_CONTEXT_PROVIDERS = ['claude-code', 'anthropic', 'openai', 'glm', 'ollama'];
@@ -337,11 +345,16 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
     }
   }
 
-  // Claude Code has no native skills/agents folder of its own here (unlike
-  // Copilot, whose CLI reads ~/.copilot/{skills,agents} itself) — inject lazy
-  // agents+skills indexes once, invisibly, as part of the very first prompt
-  // of a brand-new session. They then stay part of that session's own
-  // history for the rest of the chat.
+  // Claude Code has no native agents folder of its own here (unlike Copilot,
+  // whose CLI reads ~/.copilot/agents itself) — inject a lazy agents index
+  // once, invisibly, as part of the very first prompt of a brand-new session.
+  // It then stays part of that session's own history for the rest of the chat.
+  // Skills are NOT injected here: Claude Code discovers ~/.claude/skills on
+  // its own (confirmed empirically — same SKILL.md format we use everywhere
+  // else, see providerSkillsDir('claude-code') in data-dir.js), so an app-side
+  // index would just load the same skills a second time. Project-level
+  // `.github/skills` is still injected below, since that's our own convention,
+  // not one Claude discovers by itself.
   let promptContext;
   if (provider === 'claude-code' && isNewlyCreatedSession) {
     const { buildSkillsIndex, buildAgentsIndex } = require('./src/providers/system-context');
@@ -350,7 +363,6 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       path.join(cwd, '.github', 'agents'),
     ], yaml.parse);
     const skills = _scanSkillsIndex([
-      providerSkillsDir('claude-code'),
       path.join(cwd, '.github', 'skills'),
     ], yaml.parse);
     promptContext = [buildAgentsIndex(agents), buildSkillsIndex(skills)].filter(Boolean).join('\n\n---\n\n') || undefined;
@@ -1042,9 +1054,11 @@ ipcMain.handle('skills:list', async () => {
 });
 
 /**
- * @ipc skills:listProvider — Scans ~/.agent-desktop/<provider>/skills/ for a
- * non-Copilot provider (Claude Code, Anthropic, OpenAI, GLM, Ollama).
- * Copilot keeps its native ~/.copilot/skills and is not handled here.
+ * @ipc skills:listProvider — Scans a provider's skills folder for a non-Copilot
+ * provider (Claude Code, Anthropic, OpenAI, GLM, Ollama). Copilot keeps its
+ * native ~/.copilot/skills and is not handled here. Claude Code is itself a
+ * special case within providerSkillsDir(): it resolves to Claude's own native
+ * ~/.claude/skills rather than an app-managed ~/.agent-desktop/... folder.
  * @param {string} provider
  * @returns {Promise<Array<Object>>} Skills with source 'provider'
  */

@@ -259,10 +259,12 @@ Drag files directly into the chat area — the file paths are sent as context to
 
 ### Skills
 
-- Skills are `SKILL.md` files. Copilot reads its own `~/.copilot/skills/`; every
-  other provider (Claude Code, Anthropic, OpenAI, GLM, Ollama) has its own
-  `~/.agent-desktop/<provider>/skills/` — created automatically on first
-  launch.
+- Skills are `SKILL.md` files. Copilot reads its own `~/.copilot/skills/`;
+  Claude Code reads its own native `~/.claude/skills/` (Claude Code discovers
+  these itself — we don't inject an index for it, that would just load the
+  same skills twice). Anthropic, OpenAI, GLM and Ollama each have their own
+  app-managed `~/.agent-desktop/<provider>/skills/` — created automatically on
+  first launch.
 - Exposed to the model as a lazy index (name + description + file path), not
   inlined eagerly. The model reads a specific `SKILL.md` itself, via its file
   tool, only once it judges it relevant to the current task.
