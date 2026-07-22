@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.4.2] - 2026-07-22
+
+### Fixed
+- **Marketplace-/Plugin-Skills wurden von Copilot im laufenden Gespräch
+  nicht mehr erkannt.** Ursache empirisch verifiziert (per direktem
+  ACP-Probe-Vergleich gegen `copilot -p`): `copilot --acp` — der Modus, in
+  dem diese App Copilot immer betreibt — gibt Skills aus installierten
+  Marketplace-Plugins (`~/.copilot/installed-plugins/…/skills/`) nie an das
+  Modell weiter, sondern nur Builtin- und User-Skills. Der normale
+  interaktive/`-p`-Modus der CLI hat diese Lücke nicht.
+  Workaround (Vorschlag des Users): `syncMarketplaceSkills()`
+  (`src/plugin-skill-mirror.js`) spiegelt installierte Plugin-Skills bei
+  jedem `skills:list` in Copilots eigenen `~/.copilot/skills/`-Ordner —
+  genau den Ordner, den `--acp` bereits korrekt liest. Ein Manifest merkt
+  sich, welche Ordnernamen die App selbst angelegt hat, damit spätere
+  Syncs veraltete Spiegel (deinstalliertes Plugin) wieder entfernen und
+  aktuelle (Plugin-Update) auffrischen können, ohne je einen gleichnamigen,
+  selbst angelegten User-Skill zu überschreiben oder zu löschen. Zusätzlich
+  lädt die Marketplace-UI nach Install/Uninstall/Update jetzt automatisch
+  die Skill-Liste neu, damit neue Plugin-Skills ohne App-Neustart sofort
+  wirken.
+
 ## [1.4.1] - 2026-07-21
 
 ### Removed

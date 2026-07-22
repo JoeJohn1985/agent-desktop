@@ -426,7 +426,7 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 | `folders:read/save/browse/browse-file` | Folder configuration (Copilot's own native paths + CWD/images) |
 | `folders:openPath` | Opens an arbitrary absolute path in the OS file explorer (creates it first if missing) — used by the per-provider settings tabs' Skills/Agents/Instructions folder links |
 | `folders:providerPaths` | Absolute skills/agents/instructions folder paths for a given provider, for read-only display in that provider's settings tab |
-| `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`) |
+| `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`). `list` first calls `syncMarketplaceSkills()` (`src/plugin-skill-mirror.js`), which mirrors installed marketplace/plugin skills (`~/.copilot/installed-plugins/…/skills/`) into `~/.copilot/skills/` — `copilot --acp` (the mode this app always runs Copilot in) never exposes plugin skills to the model on its own, only builtin + user ones, unlike the CLI's interactive/-p modes. The mirror is tracked in a manifest so re-syncs can refresh/remove entries without ever touching a same-named skill the user created themselves. |
 | `agents:list/listProject/listProvider` | Agents (persona presets — same Copilot-native-vs-per-provider split as skills) |
 | `mcp:listProject` | MCP servers from `mcp.json` |
 | `files:processDropped` | Drag&drop processing |

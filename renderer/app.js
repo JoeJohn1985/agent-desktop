@@ -4418,6 +4418,7 @@ window.installPlugin = async function(target) {
     showNotification('Installation fehlgeschlagen: ' + e.message, 'error');
   }
   await loadPlugins();
+  await reloadSkills();
 };
 
 window.uninstallPlugin = async function(name) {
@@ -4437,6 +4438,7 @@ window.uninstallPlugin = async function(name) {
     showNotification('Deinstallation fehlgeschlagen: ' + e.message, 'error');
   }
   await loadPlugins();
+  await reloadSkills();
 };
 
 window.updatePlugin = async function(name) {
@@ -4456,6 +4458,7 @@ window.updatePlugin = async function(name) {
     showNotification('Update fehlgeschlagen: ' + e.message, 'error');
   }
   await loadPlugins();
+  await reloadSkills();
 };
 
 /**

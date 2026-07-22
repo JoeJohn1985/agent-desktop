@@ -23,6 +23,7 @@ const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills } = require('./src/data-dir');
+const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 
 app.name = 'agent-desktop';
 
@@ -2025,10 +2026,12 @@ function scanSkillDirectory(dir, source, iconFn) {
 }
 
 /**
- * Scans and returns all skills from both the builtin Copilot CLI package
- * and the user's ~/.copilot/skills/ directory.
+ * Scans and returns all skills from the builtin Copilot CLI package and the
+ * user's ~/.copilot/skills/ directory — the latter also receives a fresh
+ * mirror of any installed marketplace/plugin skills first (see
+ * syncMarketplaceSkills), so they're included too.
  *
- * @returns {Array<Object>} Combined list of builtin and user skills
+ * @returns {Array<Object>} Combined list of builtin and user (incl. mirrored plugin) skills
  */
 function scanSkills() {
   const skills = [];
@@ -2056,27 +2059,21 @@ function scanSkills() {
     }
   }
 
-  // 2) User skills from ~/.copilot/skills/
+  // 2) User skills from ~/.copilot/skills/ — also the mirror target for
+  // marketplace plugin skills (see below), so they show up as 'user' here.
   const userSkillsDir = folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
-  skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
 
-  // 3) Plugin skills from ~/.copilot/installed-plugins/
-  const installedPluginsBase = path.join(os.homedir(), '.copilot', 'installed-plugins');
-  if (fs.existsSync(installedPluginsBase)) {
-    const marketplaceDirs = fs.readdirSync(installedPluginsBase, { withFileTypes: true })
-      .filter(d => d.isDirectory());
-    for (const marketplaceDir of marketplaceDirs) {
-      const marketplacePath = path.join(installedPluginsBase, marketplaceDir.name);
-      const pluginDirs = fs.readdirSync(marketplacePath, { withFileTypes: true })
-        .filter(d => d.isDirectory());
-      for (const pluginDir of pluginDirs) {
-        const pluginSkillsDir = path.join(marketplacePath, pluginDir.name, 'skills');
-        if (fs.existsSync(pluginSkillsDir)) {
-          skills.push(...scanSkillDirectory(pluginSkillsDir, 'plugin', userSkillIcon));
-        }
-      }
-    }
-  }
+  // Mirror marketplace/plugin skills (~/.copilot/installed-plugins/…/skills/)
+  // into userSkillsDir before scanning it. Necessary because `copilot --acp`
+  // — the mode this app always runs Copilot in — never exposes plugin skills
+  // to the model on its own, only builtin + user ones (confirmed empirically;
+  // the CLI's own interactive/-p modes don't have this gap). Mirroring is
+  // idempotent and only ever touches directories it created itself.
+  try {
+    syncMarketplaceSkills({ userSkillsDir });
+  } catch (_) { /* best effort — never block the skill list on a mirror failure */ }
+
+  skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
 
   return skills;
 }
