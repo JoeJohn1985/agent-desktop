@@ -129,8 +129,31 @@ function migrateClaudeCodeSkills(fsImpl = fs) {
   return copyMerge(legacyClaudeCodeSkillsDir, claudeCodeNativeSkillsDir(), fsImpl);
 }
 
+/**
+ * Absolute path to the persisted direct-API session history store
+ * (one JSON file per session — see `providers/session-store.js`).
+ * @returns {string}
+ */
+function apiSessionsDir() {
+  return path.join(DATA_DIR, 'api-sessions');
+}
+
+/**
+ * One-shot, idempotent migration of direct-API session history saved before
+ * the app-identity rename — session-store.js used to hardcode the old
+ * ~/.copilot-desktop/api-sessions path instead of ~/.agent-desktop/api-sessions
+ * (a leftover the rest of the rename missed). Merge-only, safe on every startup.
+ * @param {typeof fs} [fsImpl=fs]
+ * @returns {boolean} Whether anything was copied.
+ */
+function migrateApiSessions(fsImpl = fs) {
+  const legacyApiSessionsDir = path.join(LEGACY_DATA_DIR, 'api-sessions');
+  return copyMerge(legacyApiSessionsDir, apiSessionsDir(), fsImpl);
+}
+
 module.exports = {
   DATA_DIR, LEGACY_DATA_DIR, APP_DIR, migrateLegacyData, copyMerge,
   providerSkillsDir, providerAgentsDir, providerInstructionsDir,
   claudeCodeNativeSkillsDir, migrateClaudeCodeSkills,
+  apiSessionsDir, migrateApiSessions,
 };

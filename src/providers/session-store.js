@@ -2,17 +2,19 @@
 
 // Persists direct-API conversation history per session so a tab can resume
 // with full context after a restart. One JSON file per session, stored
-// alongside the app's other config under ~/.copilot-desktop/api-sessions/.
+// alongside the app's other config under ~/.agent-desktop/api-sessions/
+// (see apiSessionsDir/migrateApiSessions in ../data-dir.js for the one-shot
+// migration from the pre-rename ~/.copilot-desktop/api-sessions/ location).
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const { apiSessionsDir } = require('../data-dir');
 
 let _dir = null;
 
 function dir() {
   if (_dir) return _dir;
-  _dir = path.join(os.homedir(), '.copilot-desktop', 'api-sessions');
+  _dir = apiSessionsDir();
   try { fs.mkdirSync(_dir, { recursive: true }); } catch (_) { /* ignore */ }
   return _dir;
 }

@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const {
   migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, DATA_DIR,
-  claudeCodeNativeSkillsDir, migrateClaudeCodeSkills,
+  claudeCodeNativeSkillsDir, migrateClaudeCodeSkills, apiSessionsDir, migrateApiSessions,
 } = require('../src/data-dir');
 
 function mkTmp() {
@@ -119,6 +119,38 @@ describe('data-dir: migrateClaudeCodeSkills', () => {
 
   it('ist ein No-Op, wenn der alte Ordner nicht existiert (real paths, keine Vorbereitung)', () => {
     expect(() => migrateClaudeCodeSkills(fs)).not.toThrow();
+  });
+});
+
+describe('data-dir: apiSessionsDir', () => {
+  it('liegt unter ~/.agent-desktop/api-sessions', () => {
+    expect(apiSessionsDir()).toBe(path.join(DATA_DIR, 'api-sessions'));
+  });
+});
+
+describe('data-dir: migrateApiSessions', () => {
+  it('kopiert bestehende Session-Historien aus dem alten ~/.copilot-desktop/api-sessions in den neuen Ordner', () => {
+    const fakeHome = mkTmp();
+    const legacyDataDir = path.join(fakeHome, '.copilot-desktop');
+    const dataDir = path.join(fakeHome, '.agent-desktop');
+    const legacyDir = path.join(legacyDataDir, 'api-sessions');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, 'api-abc123.json'), '{"messages":[]}');
+
+    // migrateApiSessions() itself always targets the real DATA_DIR/homedir —
+    // exercise the underlying copyMerge behavior directly against fake dirs,
+    // same pattern as migrateClaudeCodeSkills above.
+    const { copyMerge } = require('../src/data-dir');
+    const targetDir = path.join(dataDir, 'api-sessions');
+    const moved = copyMerge(legacyDir, targetDir, fs);
+
+    expect(moved).toBe(true);
+    expect(fs.existsSync(path.join(targetDir, 'api-abc123.json'))).toBe(true);
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('ist ein No-Op, wenn der alte Ordner nicht existiert (real paths, keine Vorbereitung)', () => {
+    expect(() => migrateApiSessions(fs)).not.toThrow();
   });
 });
 

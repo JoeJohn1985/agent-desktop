@@ -22,7 +22,7 @@ const { getModelProvider, createApiBackend } = require('./src/providers');
 const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
-const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills } = require('./src/data-dir');
+const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills, migrateApiSessions } = require('./src/data-dir');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 
 app.name = 'agent-desktop';
@@ -40,6 +40,10 @@ if (process.env.NODE_ENV !== 'test') {
     // app-managed Claude Code skills folder into Claude's own native
     // ~/.claude/skills (see providerSkillsDir('claude-code') in data-dir.js).
     migrateClaudeCodeSkills();
+    // One-shot: carry over direct-API session history saved under the old
+    // ~/.copilot-desktop/api-sessions path (a rename leftover) into the
+    // current ~/.agent-desktop/api-sessions (see session-store.js).
+    migrateApiSessions();
   } catch (_) { /* best effort — never block startup */ }
 }
 

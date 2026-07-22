@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.1] - 2026-07-22
+
+### Fixed
+- **`src/providers/session-store.js` still hardcoded the pre-rename
+  `~/.copilot-desktop/api-sessions/` path** instead of `~/.agent-desktop/`
+  — a leftover the "copilot-desktop → agent-desktop" identity rename missed
+  (`docs/ARCHITECTURE.md` already documented the *intended* new-name path,
+  making this a docs/code mismatch, not just a stale comment). Added
+  `apiSessionsDir()`/`migrateApiSessions()` in `src/data-dir.js` (mirroring
+  the existing `migrateClaudeCodeSkills()` pattern) and switched
+  `session-store.js` to the new path; the migration runs once at startup,
+  merge-only (never overwrites), so any direct-API session history saved
+  under the old path keeps working.
+
 ## [1.5.0] - 2026-07-22
 
 ### Added
