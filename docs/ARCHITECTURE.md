@@ -570,6 +570,7 @@ Three themes via CSS custom properties (`:root`, `[data-theme="dark"]`, `[data-t
 | R-5 | **`--deny-tool` restart visible to the user** | Short interruption when changing session tools | Improvable via a loading indicator; acceptable trade-off |
 | R-6 | **No CI pipeline** | Tests must run locally | TODO: GitHub Actions workflow |
 | R-7 | **Direct-API providers not runtime-tested** | Alpha/Beta labelled; possible runtime bugs | Manual E2E with real keys pending |
+| R-8 | **No cost attribution for Copilot sub-agent calls** | `/usage` only reports one aggregate total for the whole session — ACP exposes no per-sub-agent model or token count, so delegated work (e.g. via `task-router`) is silently priced as if it ran on the main session's model | Would need GitHub to expose real AI-Credit accounting (and ideally a per-call breakdown) via ACP; no client-side fix possible today |
 
 ---
 
