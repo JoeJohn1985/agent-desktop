@@ -102,6 +102,7 @@ class ApiAgentClient {
         tokens: this._tokens,
         lastContextTokens: this._lastContextTokens,
         messages: this._serializeHistory(),
+        ...this._persistedExtras(),
       });
     } catch (e) {
       console.warn('[api-agent] persist failed:', e?.message);
@@ -236,6 +237,13 @@ class ApiAgentClient {
   _serializeHistory() { return []; }
   /** Restore the provider-native message history from a serialised array. */
   _restoreHistory(_arr) { /* override per provider */ }
+  /**
+   * Extra provider-specific fields to persist alongside the message history
+   * (e.g. Gemini's search/files mode, which lives on `options` per-tab and
+   * would otherwise silently reset when a session is resumed in a fresh tab).
+   * Override per provider; merged into the saved session-store payload.
+   */
+  _persistedExtras() { return {}; }
 
   // ── Internal helpers ───────────────────────────────────────────
 

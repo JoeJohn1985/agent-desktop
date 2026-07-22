@@ -393,7 +393,7 @@ User disables a tool in the session-tools popup
 | `providers:status` | OS encryption available + which providers have a stored key |
 | `providers:setKey/deleteKey` | Store/remove an encrypted API key (never returns the key) |
 | `providers:listModels` | Dynamic model discovery per provider |
-| `providers:loadSessionHistory` | Persisted direct-API conversation history |
+| `providers:loadSessionHistory` | Persisted direct-API conversation history, plus provider-specific extras needed to resume correctly (e.g. Gemini's search/files mode, via `ApiAgentClient#_persistedExtras()`) |
 
 Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instructions.md`, direct-API providers only — see `INSTRUCTIONS_PROVIDERS`) have **no dedicated IPC channel**: `resolveInstructions()` in `main.js` reads every file present in the folder server-side, on each `sendApiPrompt` call, with no renderer round-trip and no active/inactive selection to synchronize.
 

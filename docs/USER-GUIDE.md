@@ -404,7 +404,7 @@ Here you store API keys for the direct LLM providers (e.g. Anthropic). The keys 
 
 - One masked key field per provider with **Save**/**Delete** and status (set/empty).
 - Once a key is set, the provider can be selected in the session bar (🔌) — and gets its own settings tab, see below.
-- Direct-API tabs run fully agentic (own tool loop) with exact token cost accounting, prompt caching, automatic context compaction, and session resume.
+- Direct-API tabs run fully agentic (own tool loop) with exact token cost accounting, prompt caching, and automatic context compaction. Every direct-API provider persists its conversation history under the hood, but session resume (rename → sidebar list → reopen) is currently only exposed for **Gemini**, alongside Copilot and Claude Code.
 
 #### Per-provider tabs
 
@@ -415,7 +415,7 @@ A dedicated tab per provider that's actually usable right now: **Copilot** is al
 | **Copilot** | Default model, its native Sessions/Skills/Agents folders (editable, browse + save), its own `copilot-instructions.md` editor, "allow all paths", additional directories, manual-approval default |
 | **Claude Code** | Default model, its native `~/.claude/skills/` (read-only, opens in the file explorer — Claude discovers this on its own) and its app-managed Agents folder |
 | **Anthropic / OpenAI / GLM / Ollama** | Default model, plus its Skills/Agents/Instructions folders (auto-created under `~/.agent-desktop/<provider>/`, read-only, opens in the file explorer) |
-| **Gemini** | Default model only — kept context-light, no Skills/Agents/Instructions |
+| **Gemini** | Default model, session resume (rename a tab to save it, reopen from the sidebar) — kept context-light otherwise, no Skills/Agents/Instructions |
 
 #### Features tab
 

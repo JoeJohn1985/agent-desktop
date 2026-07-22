@@ -341,6 +341,11 @@ describe('Session-Persistenz (ApiAgentClient)', () => {
     expect(result.evt.sessionId).toMatch(/^api-/);
     expect(b.sessionId).toBe(result.evt.sessionId);
   });
+
+  it('_persistedExtras liefert standardmäßig ein leeres Objekt (Basisklasse)', () => {
+    const b = createApiBackend('anthropic', 1, () => {}, { model: 'claude-opus-4-8', apiKey: 'x' });
+    expect(b._persistedExtras()).toEqual({});
+  });
 });
 
 describe('Gemini-Provider', () => {
@@ -373,6 +378,11 @@ describe('Gemini-Provider', () => {
   it('hat USD-Preise für Gemini-Modelle', () => {
     expect(MODEL_PRICING['gemini-2.5-pro']).toEqual({ input: 1.25, cache: 0.31, output: 10 });
     expect(MODEL_PRICING['gemini-2.5-flash'].output).toBe(2.5);
+  });
+
+  it('_persistedExtras liefert den aktuellen Suche/Datei-Modus für die Session-Persistenz', () => {
+    const b = createApiBackend('gemini', 1, () => {}, { model: 'gemini-2.5-pro', apiKey: 'x', geminiMode: 'files' });
+    expect(b._persistedExtras()).toEqual({ geminiMode: 'files' });
   });
 
   it('resolveGeminiMode normalisiert auf gültige Modi', () => {

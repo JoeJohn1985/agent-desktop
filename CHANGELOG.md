@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.0] - 2026-07-22
+
+### Added
+- **Gemini session save/resume**, matching Copilot and Claude Code. The
+  underlying persistence (`ApiAgentClient`'s `newSession`/`loadSession`/
+  `#persist()` round-tripping full conversation history through
+  `session-store.js`, plus `renderApiHistory()`'s Gemini-shape branch) already
+  existed for every direct-API provider but was hidden behind
+  `PROVIDER_CAPABILITIES.<provider>.sessions = false`; flipped it on for
+  `gemini` specifically (`renderer/app.js`). This unlocks the tab-rename (✎) →
+  sidebar "Sessions" list → reopen flow already used by the other providers.
+  Also fixed a rough edge surfaced while wiring this up: Gemini's per-tab
+  search/files tool-mode toggle lived only on the in-memory tab object, so
+  resuming a session in a fresh tab would silently reset to "Recherche"-mode
+  even mid-conversation. Added `ApiAgentClient#_persistedExtras()` (overridden
+  by `GeminiProvider` to return `{ geminiMode }`), merged into the
+  session-store payload on every persist and round-tripped back through
+  `providers:loadSessionHistory` (now returns `{ messages, geminiMode }`
+  instead of a bare array) so the resumed tab's mode toggle matches what was
+  active when the session was last used.
+
 ## [1.4.2] - 2026-07-22
 
 ### Fixed

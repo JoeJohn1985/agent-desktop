@@ -631,13 +631,21 @@ ipcMain.handle('providers:listModels', async (_event, provider, baseURL) => {
   }
 });
 
-/** @ipc providers:loadSessionHistory — Persisted direct-API conversation history for a session. */
+/**
+ * @ipc providers:loadSessionHistory — Persisted direct-API conversation
+ * history for a session, plus any provider-specific extras (e.g. Gemini's
+ * search/files mode) that need to be re-applied to the resuming tab.
+ * @returns {Promise<{messages: Array, geminiMode?: string}>}
+ */
 ipcMain.handle('providers:loadSessionHistory', (_event, sessionId) => {
   try {
     const data = require('./src/providers/session-store').load(sessionId);
-    return (data && Array.isArray(data.messages)) ? data.messages : [];
+    return {
+      messages: (data && Array.isArray(data.messages)) ? data.messages : [],
+      geminiMode: data && data.geminiMode,
+    };
   } catch (_) {
-    return [];
+    return { messages: [] };
   }
 });
 

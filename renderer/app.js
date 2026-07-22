@@ -217,7 +217,7 @@ async function restoreOpenTabs() {
         loadTodos(tab.cwd);
         renderSessionTools();
         // Display session context for restored tabs
-        if (t.sessionId) displaySessionContext(tab, t.sessionId);
+        if (t.sessionId) displaySessionContext(tab, t.sessionId, tabId);
       }
     }
     return true;
@@ -2271,7 +2271,7 @@ const PROVIDER_CAPABILITIES = {
   'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: false, sessions: true,  marketplace: false },
   anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
   openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
-  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: false, marketplace: false },
+  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: true,  marketplace: false },
   glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
   ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
 };
@@ -3387,7 +3387,7 @@ async function resumeSession(sessionId) {
   renderSessions(filterSessions());
 
   // Load and display session context (checkpoints, plan) as history overview
-  await displaySessionContext(tab, sessionId);
+  await displaySessionContext(tab, sessionId, tabId);
 }
 
 /**
@@ -3412,9 +3412,11 @@ async function resumeSessionById(sessionId) {
  * tab's stream output. Called when resuming or restoring a session.
  * @param {Object} tab - Tab object from the tabs map.
  * @param {string} sessionId
+ * @param {number} [tabId] - Tab id, only needed to refresh provider-specific
+ *   UI (e.g. Gemini's search/files mode toggle) after restoring extras.
  * @returns {Promise<void>}
  */
-async function displaySessionContext(tab, sessionId) {
+async function displaySessionContext(tab, sessionId, tabId) {
   if (!sessionId) return;
 
   const title = getSessionName(sessionId) || sessionId.substring(0, 8);
@@ -3443,8 +3445,14 @@ async function displaySessionContext(tab, sessionId) {
     } else if (provider === 'claude-code') {
       renderSimpleHistory(await copilot.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore);
     } else {
-      const history = await window.copilot.providers.loadSessionHistory(sessionId);
-      renderApiHistory(history, insertBefore);
+      const { messages, geminiMode } = await window.copilot.providers.loadSessionHistory(sessionId);
+      renderApiHistory(messages, insertBefore);
+      // Restore Gemini's search/files mode so a resumed session doesn't
+      // silently fall back to the default (fresh tabs start with no mode set).
+      if (provider === 'gemini' && geminiMode) {
+        tab.geminiMode = geminiMode;
+        updateGeminiModeBtn(tabId ?? activeTabId);
+      }
     }
   } catch (e) { console.warn('[sessions] Nachrichten nicht verfügbar:', e.message); }
 

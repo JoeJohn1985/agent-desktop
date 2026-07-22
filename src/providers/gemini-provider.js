@@ -206,6 +206,9 @@ class GeminiProvider extends ApiAgentClient {
   _contextWindow() { return CONTEXT_WINDOWS[this.options.model] || 1_000_000; }
   _serializeHistory() { return this.#contents; }
   _restoreHistory(arr) { this.#contents = Array.isArray(arr) ? arr : []; }
+  // Persist the active search/files mode so resuming a session (in a fresh
+  // tab, which starts with the default mode) doesn't silently switch tools.
+  _persistedExtras() { return { geminiMode: this.options.geminiMode }; }
 }
 
 module.exports = { GeminiProvider, toGeminiTools, toGeminiSchema, buildSystemPrompt, collectSources, resolveGeminiMode, GEMINI_MODES, DEFAULT_GEMINI_MODE };

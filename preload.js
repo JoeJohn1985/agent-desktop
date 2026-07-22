@@ -255,7 +255,7 @@ contextBridge.exposeInMainWorld('copilot', {
     setKey: (provider, key) => ipcRenderer.invoke('providers:setKey', provider, key),
     /** @ipc providers:deleteKey @param {string} provider @returns {Promise<{success:boolean}>} */
     deleteKey: (provider) => ipcRenderer.invoke('providers:deleteKey', provider),
-    /** @ipc providers:loadSessionHistory @param {string} sessionId @returns {Promise<Array>} Persisted API conversation */
+    /** @ipc providers:loadSessionHistory @param {string} sessionId @returns {Promise<{messages: Array, geminiMode?: string}>} Persisted API conversation + provider-specific extras */
     loadSessionHistory: (sessionId) => ipcRenderer.invoke('providers:loadSessionHistory', sessionId),
     /** @ipc providers:listModels @param {string} provider @param {string} [baseURL] @returns {Promise<{ok:boolean,models:Array,reason?:string}>} */
     listModels: (provider, baseURL) => ipcRenderer.invoke('providers:listModels', provider, baseURL),
