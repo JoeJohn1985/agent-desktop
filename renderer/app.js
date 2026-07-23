@@ -5340,14 +5340,26 @@ function initSettings() {
  * @param {string} content - Current file content to pre-fill.
  * @param {string} filePath - Absolute path shown in the header.
  */
-function openInstructionsEditor(content, filePath) {
+/**
+ * Opens a modal textarea editor for a native, single global instructions
+ * file (Copilot's copilot-instructions.md or Claude Code's CLAUDE.md).
+ * @param {string} content
+ * @param {string} filePath
+ * @param {Object} [opts]
+ * @param {string} [opts.title='📝 Copilot Instructions']
+ * @param {(content: string) => Promise<{success: boolean, error?: string}>} [opts.writeFn] - Defaults to copilot.instructions.write.
+ */
+function openInstructionsEditor(content, filePath, opts = {}) {
+  const title = opts.title || '📝 Copilot Instructions';
+  const writeFn = opts.writeFn || ((c) => copilot.instructions.write(c));
+
   // Create modal overlay
   const overlay = document.createElement('div');
   overlay.className = 'instructions-editor-overlay';
   overlay.innerHTML = `
     <div class="instructions-editor">
       <div class="instructions-editor__header">
-        <span class="instructions-editor__title">📝 Copilot Instructions</span>
+        <span class="instructions-editor__title">${escapeHtml(title)}</span>
         <span class="instructions-editor__path">${escapeHtml(filePath)}</span>
         <button class="instructions-editor__close" data-tooltip="Schließen">✕</button>
       </div>
@@ -5371,7 +5383,7 @@ function openInstructionsEditor(content, filePath) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
   saveBtn.addEventListener('click', async () => {
-    const result = await copilot.instructions.write(textarea.value);
+    const result = await writeFn(textarea.value);
     if (result.success) {
       showNotification('Instructions gespeichert', 'success');
       close();
@@ -5593,6 +5605,15 @@ function buildProviderConfigPanelHtml(providerId) {
 
   if (providerId === 'claude-code') {
     parts.push(`
+      <div class="settings__separator"></div>
+      <div class="settings__group">
+        <label class="settings__label">📝 Instructions</label>
+        <div class="settings__hint">Claude Codes eigene, native globale Instructions-Datei — analog zu Copilots copilot-instructions.md.</div>
+        <div class="settings__folder-row">
+          <input type="text" class="settings__folder-input" value="~/.claude/CLAUDE.md" readonly />
+          <button class="action-btn" id="btnEditInstructionsClaudeCode" data-tooltip="Instructions bearbeiten">✏️</button>
+        </div>
+      </div>
       <div class="settings__hint" style="margin-top:8px;">
         Claude Code entdeckt Skills selbst nativ unter <code>~/.claude/skills/</code> — eine dort abgelegte Datei wird automatisch erkannt, ohne dass hier etwas konfiguriert werden muss.
       </div>
@@ -5615,6 +5636,20 @@ async function wireProviderConfigPanel(providerId, panel) {
   if (providerSupports(providerId, 'denylist')) {
     renderDeniedTools(providerId);
     initTagInput(`btnAddDeniedTool-${providerId}`, `settDeniedToolInput-${providerId}`, (val) => addDeniedTool(providerId, val));
+  }
+
+  if (providerId === 'claude-code') {
+    panel.querySelector('#btnEditInstructionsClaudeCode')?.addEventListener('click', async () => {
+      const result = await copilot.instructions.readClaudeCode();
+      if (!result.success) {
+        showNotification(`Fehler: ${result.error}`, 'error');
+        return;
+      }
+      openInstructionsEditor(result.content, result.path, {
+        title: '📝 Claude Code Instructions',
+        writeFn: (content) => copilot.instructions.writeClaudeCode(content),
+      });
+    });
   }
 
   const folderInputs = panel.querySelectorAll('[data-provider-folder-input]');

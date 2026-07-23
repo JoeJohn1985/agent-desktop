@@ -305,8 +305,10 @@ Drag files directly into the chat area — the file paths are sent as context to
   Skills/Agents, there's no "the model decides whether to read it" step,
   since instructions are meant to apply unconditionally. Dropping a file into
   the folder activates it; removing it deactivates it.
-- Additive to the existing global `copilot-instructions.md`/`AGENTS.md` base
-  layer. Settings → Features shows which providers support it.
+- **Not** additive to Copilot's global `copilot-instructions.md` — each
+  direct-API provider uses only its own instructions folder, kept separate so
+  it's clear which instructions apply to which provider. Settings → Features
+  shows which providers support it.
 
 ### MCP servers (sidebar)
 
@@ -414,7 +416,7 @@ A dedicated tab per provider that's actually usable right now: **Copilot** is al
 | Tab | Contains |
 |---|---|
 | **Copilot** | Default model, its native Sessions/Skills/Agents folders (browse, auto-saves), its own `copilot-instructions.md` editor, "allow all paths", additional directories, manual-approval default, its own **Verbotene Shell-Tools** deny list |
-| **Claude Code** | Default model, its native `~/.claude/skills/` (read-only, opens in the file explorer — Claude discovers this on its own) and its app-managed Agents folder |
+| **Claude Code** | Default model, its native `~/.claude/skills/` (read-only, opens in the file explorer — Claude discovers this on its own), its app-managed Agents folder, and its own `~/.claude/CLAUDE.md` editor (same idea as Copilot's) |
 | **Anthropic / OpenAI / GLM / Ollama** | Default model, its Skills/Agents/Instructions folders (auto-created under `~/.agent-desktop/<provider>/`, read-only, opens in the file explorer), and its own **Verbotene Shell-Tools** deny list |
 | **Gemini** | Default model, session resume (rename a tab to save it, reopen from the sidebar) — kept context-light otherwise, no Skills/Agents/Instructions/deny list (no shell tool) |
 

@@ -423,6 +423,7 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 |---|---|
 | `preferences:read/write` | Preferences I/O |
 | `instructions:read/write` | `copilot-instructions.md` I/O (Copilot's single native instructions file — an editor convenience, the Copilot CLI reads this itself) |
+| `instructions:readClaudeCode/writeClaudeCode` | `~/.claude/CLAUDE.md` I/O — same idea as `instructions:read/write` but for Claude Code's own native global instructions file (fixed path, unlike Copilot's configurable one) |
 | `folders:read/save/reset/browse/browse-file` | Folder configuration (Copilot's own native paths + CWD/images). `save` merges the given keys into the existing config (each Settings field auto-saves individually on change); `reset` is the one action that wipes back to hardcoded defaults |
 | `folders:openPath` | Opens an arbitrary absolute path in the OS file explorer (creates it first if missing) — used by the per-provider settings tabs' Skills/Agents/Instructions folder links |
 | `folders:providerPaths` | Absolute skills/agents/instructions folder paths for a given provider, for read-only display in that provider's settings tab |

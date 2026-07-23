@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.6.1] - 2026-07-23
+
+### Added
+- **Claude Code Instructions editor**, matching Copilot's. Claude Code has its
+  own native global instructions file (`~/.claude/CLAUDE.md`, analogous to
+  Copilot's `copilot-instructions.md`) but previously had no in-app editor for
+  it — added `instructions:readClaudeCode`/`writeClaudeCode` IPC handlers and
+  a "📝 Instructions" editor in the Claude Code settings tab, reusing the same
+  editor modal as Copilot's (`openInstructionsEditor` now takes an optional
+  title/write-function so both share the one component). Unlike Copilot's,
+  the path is fixed (not user-configurable), matching how Claude Code's own
+  `~/.claude/skills/` folder is already presented as read-only in that tab.
+  Also fixed a stale doc claim that direct-API providers' instructions folder
+  is "additive" to Copilot's global instructions file — it isn't, since the
+  1.4.0 provider-scoped instructions rework (`docs/USER-GUIDE.md`).
+
 ## [1.6.0] - 2026-07-23
 
 ### Changed

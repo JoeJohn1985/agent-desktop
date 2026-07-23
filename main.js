@@ -1568,6 +1568,35 @@ ipcMain.handle('instructions:write', async (_event, content) => {
   }
 });
 
+/**
+ * @ipc instructions:readClaudeCode — Reads Claude Code's own native global
+ * instructions file (~/.claude/CLAUDE.md, analogous to Copilot's
+ * copilot-instructions.md — a fixed, non-configurable path, unlike Copilot's).
+ * @returns {Promise<{success: boolean, content: string, path: string}>}
+ */
+ipcMain.handle('instructions:readClaudeCode', async () => {
+  const filePath = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+  try {
+    if (!fs.existsSync(filePath)) return { success: true, content: '', path: filePath };
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, content, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message, path: filePath };
+  }
+});
+
+/** @ipc instructions:writeClaudeCode — Writes Claude Code's own native global CLAUDE.md. @returns {Promise<{success: boolean, path: string}>} */
+ipcMain.handle('instructions:writeClaudeCode', async (_event, content) => {
+  const filePath = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ── Onboarding ─────────────────────────────────────────────────
 /** @ipc onboarding:isFirstRun — Checks whether onboarding has been completed. @returns {Promise<boolean>} */
 ipcMain.handle('onboarding:isFirstRun', async () => {

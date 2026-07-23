@@ -311,6 +311,10 @@ contextBridge.exposeInMainWorld('copilot', {
     read: () => ipcRenderer.invoke('instructions:read'),
     /** @ipc instructions:write @param {string} content - Markdown content @returns {Promise<{success: boolean, path: string}>} */
     write: (content) => ipcRenderer.invoke('instructions:write', content),
+    /** @ipc instructions:readClaudeCode — Reads Claude Code's own global ~/.claude/CLAUDE.md. @returns {Promise<{success: boolean, content: string, path: string}>} */
+    readClaudeCode: () => ipcRenderer.invoke('instructions:readClaudeCode'),
+    /** @ipc instructions:writeClaudeCode @param {string} content - Markdown content @returns {Promise<{success: boolean, path: string}>} */
+    writeClaudeCode: (content) => ipcRenderer.invoke('instructions:writeClaudeCode', content),
   },
 
   // ── Skills ────────────────────────────────────────────────
