@@ -340,8 +340,31 @@ function saveSessionModel(sessionId, modelId) {
   setPref('sessionModels', models);
 }
 
-function getDeniedTools() {
-  return getSettings().deniedTools || [];
+// Providers that get their own, fully independent "Verbotene Shell-Tools"
+// list — see the denylist flag in PROVIDER_CAPABILITIES for why Gemini/Claude
+// Code are excluded.
+const DENYLIST_PROVIDERS = ['copilot', 'anthropic', 'openai', 'glm', 'ollama'];
+
+/**
+ * One-shot migration from the old flat, single global `deniedTools` list to
+ * the new per-provider `deniedToolsByProvider` map: every provider that had
+ * the shared list applied to it (all of DENYLIST_PROVIDERS) starts out with
+ * a copy of whatever was configured, then they're fully independent from
+ * then on. No-op once `deniedToolsByProvider` exists (regardless of content,
+ * including `{}` — that's a legitimate "nothing denied anywhere" state).
+ */
+function migrateDeniedToolsToPerProvider() {
+  const settings = getSettings();
+  if (settings.deniedToolsByProvider !== undefined) return;
+  const legacy = settings.deniedTools || [];
+  const map = {};
+  for (const p of DENYLIST_PROVIDERS) map[p] = [...legacy];
+  saveSetting('deniedToolsByProvider', map);
+}
+
+function getDeniedTools(provider) {
+  const map = getSettings().deniedToolsByProvider || {};
+  return map[provider] || [];
 }
 
 function getExtraDirs() {
@@ -368,27 +391,34 @@ function getEffectiveExtraDirs() {
 }
 
 /**
- * Add a tool to the global denied-tools list (wraps in shell() if needed).
+ * Add a tool to one provider's own denied-tools list (wraps in shell() if needed).
+ * @param {string} provider
  * @param {string} toolName - Tool or shell command name to deny.
  */
-function addDeniedTool(toolName) {
+function addDeniedTool(provider, toolName) {
   const wrapped = toolName.startsWith('shell(') ? toolName : `shell(${toolName})`;
-  const tools = getDeniedTools();
+  const map = { ...(getSettings().deniedToolsByProvider || {}) };
+  const tools = [...(map[provider] || [])];
   if (!tools.includes(wrapped)) {
     tools.push(wrapped);
-    saveSetting('deniedTools', tools);
+    map[provider] = tools;
+    saveSetting('deniedToolsByProvider', map);
   }
-  renderDeniedTools();
+  renderDeniedTools(provider);
 }
 
-function removeDeniedTool(idx) {
-  const tools = getDeniedTools();
+function removeDeniedTool(provider, idx) {
+  const map = { ...(getSettings().deniedToolsByProvider || {}) };
+  const tools = [...(map[provider] || [])];
   tools.splice(idx, 1);
-  saveSetting('deniedTools', tools);
-  renderDeniedTools();
+  map[provider] = tools;
+  saveSetting('deniedToolsByProvider', map);
+  renderDeniedTools(provider);
 }
 
-function renderDeniedTools() { renderTagList('settDeniedToolsList', getDeniedTools(), 'removeDeniedTool'); }
+function renderDeniedTools(provider) {
+  renderTagList(`settDeniedToolsList-${provider}`, getDeniedTools(provider), 'removeDeniedTool', [provider]);
+}
 
 function addExtraDir(dir) {
   const dirs = getExtraDirs();
@@ -473,12 +503,17 @@ function stripShellWrapper(name) {
  * @param {string} containerId - DOM id of the container element.
  * @param {string[]} items - Tag label strings.
  * @param {string} removeFnName - Global function name called on remove click.
+ * @param {Array<string>} [extraArgs] - Extra string args passed before the
+ *   index (e.g. a provider id), for remove-functions scoped to more than
+ *   just a list position.
  */
-function renderTagList(containerId, items, removeFnName) {
+function renderTagList(containerId, items, removeFnName, extraArgs = []) {
   const container = document.getElementById(containerId);
   if (!container) return;
+  const argsPrefix = extraArgs.map(a => `'${escapeAttrJs(a)}'`).join(', ');
+  const callArgs = argsPrefix ? `${argsPrefix}, ` : '';
   container.innerHTML = items.map((item, i) =>
-    `<span class="settings__tool-tag">${escapeHtml(stripShellWrapper(item))} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${i})">&times;</span></span>`
+    `<span class="settings__tool-tag">${escapeHtml(stripShellWrapper(item))} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${callArgs}${i})">&times;</span></span>`
   ).join('');
 }
 
@@ -1182,7 +1217,7 @@ function sendMessage() {
   // Send to Copilot via JSON API
   const settings = getSettings();
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
-  const mergedDenied = [...new Set([...getDeniedTools(), ...sessionDenied])];
+  const mergedDenied = [...new Set([...getDeniedTools(getTabProvider(tab)), ...sessionDenied])];
 
   const sendTabId = activeTabId;
   // Freeze the model this prompt actually runs on. The token delta measured after
@@ -2275,15 +2310,19 @@ function isSubscriptionProvider(provider) {
 // copilot-instructions.md/CLAUDE.md discovery. Instructions has no dedicated
 // sidebar section — it's purely informational here (Settings → Features);
 // every file dropped into the provider's instructions folder is always
-// active, no in-app toggle.)
+// active, no in-app toggle. denylist marks which providers get a
+// per-provider "Verbotene Shell-Tools" list in their own settings tab — only
+// providers with an own shell tool we enforce this against: Gemini has no
+// shell tool at all (file tools only), Claude Code has its own approval
+// mechanism and is unaffected by our deny lists.)
 const PROVIDER_CAPABILITIES = {
-  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: true,  sessions: true,  marketplace: true },
-  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: false, sessions: true,  marketplace: false },
-  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
-  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
-  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: true,  marketplace: false },
-  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
-  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false },
+  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: true,  sessions: true,  marketplace: true,  denylist: true },
+  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: false, sessions: true,  marketplace: false, denylist: false },
+  anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
+  openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
+  gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: true,  marketplace: false, denylist: false },
+  glm:           { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
+  ollama:        { models: true, modes: false, tools: true, context: true, costs: false, skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
 };
 
 // Feature metadata for the settings comparison matrix (label + icon + hint).
@@ -2299,6 +2338,7 @@ const PROVIDER_FEATURE_META = [
   { key: 'mcp',          icon: '🔌', label: 'MCP',            hint: 'Model-Context-Protocol-Server.' },
   { key: 'sessions',     icon: '💾', label: 'Sessions speichern', hint: 'Gesprächsverlauf persistent speichern/fortsetzen.' },
   { key: 'marketplace',  icon: '🛒', label: 'Marketplace',    hint: 'Erweiterungen/Extensions aus dem Marketplace.' },
+  { key: 'denylist',     icon: '🚫', label: 'Tool-Verbote',   hint: 'Eigene Liste blockierter Shell-Befehle pro Provider.' },
 ];
 
 // Providers shown as columns in the feature matrix (order matters).
@@ -5173,10 +5213,13 @@ function initSettings() {
     saveSetting('defaultProvider', settDefaultProvider.value);
   });
 
-  renderDeniedTools();
   renderExtraDirs();
-  initTagInput('btnAddDeniedTool', 'settDeniedToolInput', addDeniedTool);
   initTagInput('btnAddDir', 'settDirInput', addExtraDir);
+
+  // Copilot tab's own "Verbotene Shell-Tools" (static HTML, unlike the
+  // other DENYLIST_PROVIDERS which get theirs via buildProviderConfigPanelHtml).
+  renderDeniedTools('copilot');
+  initTagInput('btnAddDeniedTool-copilot', 'settDeniedToolInput-copilot', (val) => addDeniedTool('copilot', val));
 
   // Folder settings
   async function loadFolderSettings() {
@@ -5190,24 +5233,43 @@ function initSettings() {
     document.getElementById('settFolderInstructions').value = folders.instructionsFile || '';
   }
 
+  // Every folder-path field auto-saves the moment it's picked (no separate
+  // "Save" button/step) — folders:save merges just this one key into the
+  // existing config, so browsing e.g. the Skills folder on the Copilot tab
+  // never touches what's saved for CWD/Bilder on the App tab, or vice versa.
+  // All of these still require an app restart to actually take effect
+  // (main-process globals are only read once at startup), hence the toast.
+  async function autoSaveFolderField(key, value) {
+    const result = await copilot.folders.save({ [key]: value });
+    if (result.success) {
+      showNotification('Gespeichert — Neustart erforderlich, damit es wirkt', 'success');
+    } else {
+      showNotification(`Fehler: ${result.error}`, 'error');
+    }
+  }
+
   const folderFields = [
-    { btn: 'btnBrowseCwd', input: 'settFolderCwd' },
-    { btn: 'btnBrowseSessions', input: 'settFolderSessions' },
-    { btn: 'btnBrowseSkills', input: 'settFolderSkills' },
-    { btn: 'btnBrowseAgents', input: 'settFolderAgents' },
-    { btn: 'btnBrowseImages', input: 'settFolderImages' },
+    { btn: 'btnBrowseCwd', input: 'settFolderCwd', key: 'cwd' },
+    { btn: 'btnBrowseSessions', input: 'settFolderSessions', key: 'sessionsDir' },
+    { btn: 'btnBrowseSkills', input: 'settFolderSkills', key: 'skillsDir' },
+    { btn: 'btnBrowseAgents', input: 'settFolderAgents', key: 'agentsDir' },
+    { btn: 'btnBrowseImages', input: 'settFolderImages', key: 'imagesDir' },
   ];
-  folderFields.forEach(({ btn, input }) => {
+  folderFields.forEach(({ btn, input, key }) => {
     document.getElementById(btn).addEventListener('click', async () => {
       const folder = await copilot.folders.browse();
-      if (folder) document.getElementById(input).value = folder;
+      if (!folder) return;
+      document.getElementById(input).value = folder;
+      await autoSaveFolderField(key, folder);
     });
   });
 
-  // Instructions file browse (file dialog, not folder)
+  // Instructions file browse (file dialog, not folder) — auto-saves too.
   document.getElementById('btnBrowseInstructions').addEventListener('click', async () => {
     const file = await copilot.folders.browseFile([{ name: 'Markdown', extensions: ['md'] }]);
-    if (file) document.getElementById('settFolderInstructions').value = file;
+    if (!file) return;
+    document.getElementById('settFolderInstructions').value = file;
+    await autoSaveFolderField('instructionsFile', file);
   });
 
   // Instructions editor
@@ -5220,41 +5282,10 @@ function initSettings() {
     openInstructionsEditor(result.content, result.path);
   });
 
-  // App tab: just CWD + Bilder (providerunabhängig).
-  document.getElementById('btnFoldersSave').addEventListener('click', async () => {
-    const config = {
-      cwd: document.getElementById('settFolderCwd').value || undefined,
-      imagesDir: document.getElementById('settFolderImages').value || undefined,
-    };
-    Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
-    const result = await copilot.folders.save(config);
-    if (result.success) {
-      showNotification('Gespeichert — bitte App neu starten', 'success');
-    } else {
-      showNotification(`Fehler: ${result.error}`, 'error');
-    }
-  });
-
-  // Copilot tab: its own native Sessions/Skills/Agents/Instructions paths.
-  document.getElementById('btnFoldersSaveCopilot')?.addEventListener('click', async () => {
-    const config = {
-      sessionsDir: document.getElementById('settFolderSessions').value || undefined,
-      skillsDir: document.getElementById('settFolderSkills').value || undefined,
-      agentsDir: document.getElementById('settFolderAgents').value || undefined,
-      instructionsFile: document.getElementById('settFolderInstructions').value || undefined,
-    };
-    Object.keys(config).forEach(k => config[k] === undefined && delete config[k]);
-    const result = await copilot.folders.save(config);
-    if (result.success) {
-      showNotification('Gespeichert — bitte App neu starten', 'success');
-    } else {
-      showNotification(`Fehler: ${result.error}`, 'error');
-    }
-  });
-
-  // Resets ALL folder config (App + Copilot tab fields) back to defaults.
+  // Resets ALL folder config (App + Copilot tab fields) back to defaults —
+  // the one action that intentionally does NOT merge, so it gets its own IPC.
   document.getElementById('btnFoldersReset').addEventListener('click', async () => {
-    const result = await copilot.folders.save({});
+    const result = await copilot.folders.reset();
     if (result.success) {
       await loadFolderSettings();
       showNotification('Auf Standard zurückgesetzt — bitte App neu starten', 'success');
@@ -5545,6 +5576,21 @@ function buildProviderConfigPanelHtml(providerId) {
     }
   }
 
+  if (providerSupports(providerId, 'denylist')) {
+    parts.push(`
+      <div class="settings__separator"></div>
+      <div class="settings__group">
+        <label class="settings__label">🚫 Verbotene Shell-Tools</label>
+        <div class="settings__hint">Nur für ${escapeHtml(label)} — jeder Provider hat seine eigene, unabhängige Liste (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
+        <div class="settings__tool-list" id="settDeniedToolsList-${escapeAttr(providerId)}"></div>
+        <div class="settings__tool-add">
+          <input type="text" class="settings__tool-input" id="settDeniedToolInput-${escapeAttr(providerId)}" placeholder="z.B. git push" />
+          <button class="action-btn" id="btnAddDeniedTool-${escapeAttr(providerId)}" data-tooltip="Tool blockieren">+</button>
+        </div>
+      </div>
+    `);
+  }
+
   if (providerId === 'claude-code') {
     parts.push(`
       <div class="settings__hint" style="margin-top:8px;">
@@ -5565,6 +5611,11 @@ function buildProviderConfigPanelHtml(providerId) {
  */
 async function wireProviderConfigPanel(providerId, panel) {
   renderProviderModelSelect(providerId, panel.querySelector(`[data-provider-model-select="${providerId}"]`));
+
+  if (providerSupports(providerId, 'denylist')) {
+    renderDeniedTools(providerId);
+    initTagInput(`btnAddDeniedTool-${providerId}`, `settDeniedToolInput-${providerId}`, (val) => addDeniedTool(providerId, val));
+  }
 
   const folderInputs = panel.querySelectorAll('[data-provider-folder-input]');
   if (!folderInputs.length) return;
@@ -7155,6 +7206,7 @@ async function finishOnboarding() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadPreferences();
+  migrateDeniedToolsToPerProvider();
   initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
   refreshAllProviderModels(); // discover direct-API provider models in the background
   applyTheme(getCurrentTheme());

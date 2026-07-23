@@ -423,7 +423,7 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 |---|---|
 | `preferences:read/write` | Preferences I/O |
 | `instructions:read/write` | `copilot-instructions.md` I/O (Copilot's single native instructions file — an editor convenience, the Copilot CLI reads this itself) |
-| `folders:read/save/browse/browse-file` | Folder configuration (Copilot's own native paths + CWD/images) |
+| `folders:read/save/reset/browse/browse-file` | Folder configuration (Copilot's own native paths + CWD/images). `save` merges the given keys into the existing config (each Settings field auto-saves individually on change); `reset` is the one action that wipes back to hardcoded defaults |
 | `folders:openPath` | Opens an arbitrary absolute path in the OS file explorer (creates it first if missing) — used by the per-provider settings tabs' Skills/Agents/Instructions folder links |
 | `folders:providerPaths` | Absolute skills/agents/instructions folder paths for a given provider, for read-only display in that provider's settings tab |
 | `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`). `list` first calls `syncMarketplaceSkills()` (`src/plugin-skill-mirror.js`), which mirrors installed marketplace/plugin skills (`~/.copilot/installed-plugins/…/skills/`) into `~/.copilot/skills/` — `copilot --acp` (the mode this app always runs Copilot in) never exposes plugin skills to the model on its own, only builtin + user ones, unlike the CLI's interactive/-p modes. The mirror is tracked in a manifest so re-syncs can refresh/remove entries without ever touching a same-named skill the user created themselves. |
@@ -491,9 +491,9 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 
 ### 8.2 Tool permissions
 
-- **Global deny list** (`settings.deniedTools`): applies to all sessions
+- **Per-provider deny list** (`settings.deniedToolsByProvider[provider]`): fully independent per provider — configured in each provider's own settings tab. Only providers with our own enforced shell tool get one (see `DENYLIST_PROVIDERS`/the `denylist` flag in `PROVIDER_CAPABILITIES`): Copilot, Anthropic, OpenAI, GLM, Ollama. Gemini has no shell tool at all; Claude Code has its own approval mechanism and isn't affected. One-shot migration (`migrateDeniedToolsToPerProvider`) seeds every one of those providers with a copy of the old flat `settings.deniedTools` list the first time the app runs post-upgrade.
 - **Session deny list** (`tab.sessionDeniedTools`): per session; changes trigger a process restart
-- All lists are merged into `--deny-tool=<name>` flags at spawn
+- Both lists (for that tab's provider) are merged into `--deny-tool=<name>` flags at spawn
 
 ### 8.3 Cost tracking
 

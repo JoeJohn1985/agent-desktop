@@ -1446,15 +1446,37 @@ ipcMain.handle('folders:read', () => {
 });
 
 /**
- * @ipc folders:save — Persists new folder paths and updates runtime globals.
+ * @ipc folders:save — Merges new folder paths into the existing config and
+ * updates runtime globals. Merges rather than replaces so saving one field
+ * (e.g. from an individual folder-browse action) never discards whichever
+ * other fields were saved separately (App tab vs. Copilot tab vs. per-tab
+ * "change CWD" — each only ever sends the one/few keys it owns).
  * @returns {Promise<{success: boolean, requiresRestart?: boolean, error?: string}>}
  */
 ipcMain.handle('folders:save', async (_event, newConfig) => {
   try {
-    writeFolderConfig(newConfig);
-    if (newConfig.cwd) COPILOT_CWD = newConfig.cwd;
-    if (newConfig.sessionsDir) SESSIONS_DIR = newConfig.sessionsDir;
-    if (newConfig.imagesDir) IMAGES_DIR = newConfig.imagesDir;
+    const merged = { ...readFolderConfig(), ...newConfig };
+    writeFolderConfig(merged);
+    if (merged.cwd) COPILOT_CWD = merged.cwd;
+    if (merged.sessionsDir) SESSIONS_DIR = merged.sessionsDir;
+    if (merged.imagesDir) IMAGES_DIR = merged.imagesDir;
+    return { success: true, requiresRestart: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/**
+ * @ipc folders:reset — Wipes all folder config back to hardcoded defaults
+ * (unlike folders:save, this intentionally does NOT merge).
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+ipcMain.handle('folders:reset', async () => {
+  try {
+    writeFolderConfig({});
+    COPILOT_CWD = process.cwd();
+    SESSIONS_DIR = path.join(os.homedir(), '.copilot', 'session-state');
+    IMAGES_DIR = path.join(COPILOT_CWD, 'images');
     return { success: true, requiresRestart: true };
   } catch (e) {
     return { success: false, error: e.message };

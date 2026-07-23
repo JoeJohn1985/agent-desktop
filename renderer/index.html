@@ -370,23 +370,10 @@
           </div>
           <div class="settings__group">
             <label class="settings__label">🖼️ Bilder</label>
-            <div class="settings__hint">Ordner für die Bildergalerie (providerunabhängig).</div>
+            <div class="settings__hint">Ordner für die Bildergalerie (providerunabhängig). Änderung erfordert einen Neustart der App.</div>
             <div class="settings__folder-row">
               <input type="text" class="settings__folder-input" id="settFolderImages" placeholder="z.B. C:\Users\Name\Copilot\images" readonly />
               <button class="action-btn" id="btnBrowseImages" data-tooltip="Ordner auswählen">📁</button>
-            </div>
-          </div>
-          <div class="settings__group">
-            <button class="action-btn action-btn--primary" id="btnFoldersSave" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
-          </div>
-          <div class="settings__separator"></div>
-          <div class="settings__group">
-            <label class="settings__label">Verbotene Shell-Tools (global)</label>
-            <div class="settings__hint">Gilt für Copilot und die Direkt-API-Provider (Anthropic/OpenAI/GLM/Ollama). Claude Code hat einen eigenen Freigabe-Mechanismus und ist hiervon nicht betroffen (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
-            <div class="settings__tool-list" id="settDeniedToolsList"></div>
-            <div class="settings__tool-add">
-              <input type="text" class="settings__tool-input" id="settDeniedToolInput" placeholder="z.B. git push" />
-              <button class="action-btn" id="btnAddDeniedTool" data-tooltip="Tool blockieren">+</button>
             </div>
           </div>
           <div class="settings__separator"></div>
@@ -465,8 +452,7 @@
             </div>
           </div>
           <div class="settings__group">
-            <button class="action-btn action-btn--primary" id="btnFoldersSaveCopilot" style="width:100%;">💾 Speichern (Neustart erforderlich)</button>
-            <button class="action-btn" id="btnFoldersReset" style="width:100%;margin-top:6px;">🔄 Auf Standard zurücksetzen</button>
+            <button class="action-btn" id="btnFoldersReset" style="width:100%;">🔄 Auf Standard zurücksetzen</button>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
@@ -506,6 +492,16 @@
             <div class="settings__tool-add">
               <input type="text" class="settings__tool-input" id="settDirInput" placeholder="z.B. C:\Projekte\MeinProjekt" />
               <button class="action-btn" id="btnAddDir" data-tooltip="Ordner hinzufügen">+</button>
+            </div>
+          </div>
+          <div class="settings__separator"></div>
+          <div class="settings__group">
+            <label class="settings__label">🚫 Verbotene Shell-Tools</label>
+            <div class="settings__hint">Nur für Copilot — jeder Provider hat seine eigene, unabhängige Liste (z.B. <code>git push</code>, <code>rm -rf</code>).</div>
+            <div class="settings__tool-list" id="settDeniedToolsList-copilot"></div>
+            <div class="settings__tool-add">
+              <input type="text" class="settings__tool-input" id="settDeniedToolInput-copilot" placeholder="z.B. git push" />
+              <button class="action-btn" id="btnAddDeniedTool-copilot" data-tooltip="Tool blockieren">+</button>
             </div>
           </div>
         </div>

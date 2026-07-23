@@ -272,12 +272,18 @@ contextBridge.exposeInMainWorld('copilot', {
     /** @ipc folders:read @returns {Promise<Object>} All configured folder paths */
     read: () => ipcRenderer.invoke('folders:read'),
     /**
-     * Saves a new folder configuration. May require app restart.
+     * Merges new folder paths into the existing config. May require app restart.
      * @ipc folders:save
-     * @param {Object} config - New folder paths
+     * @param {Object} config - Folder paths to merge in
      * @returns {Promise<{success: boolean, requiresRestart?: boolean, error?: string}>}
      */
     save: (config) => ipcRenderer.invoke('folders:save', config),
+    /**
+     * Wipes all folder config back to hardcoded defaults (does NOT merge).
+     * @ipc folders:reset
+     * @returns {Promise<{success: boolean, requiresRestart?: boolean, error?: string}>}
+     */
+    reset: () => ipcRenderer.invoke('folders:reset'),
     /** @ipc folders:browse — Opens a native directory picker. @returns {Promise<string|null>} */
     browse: () => ipcRenderer.invoke('folders:browse'),
     /**

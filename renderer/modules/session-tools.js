@@ -4,14 +4,14 @@
 
 /**
  * Restarts the ACP process for the active tab with the current merged
- * denied-tools list (global + session). Required because ACP
+ * denied-tools list (this tab's provider + session). Required because ACP
  * only accepts --deny-tool flags at process spawn time.
  */
 function restartWithUpdatedDeniedTools() {
   const tab = tabs.get(activeTabId);
   if (!tab || !tab.sessionId || tab.isProcessing) return;
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
-  const merged = [...new Set([...getDeniedTools(), ...sessionDenied])];
+  const merged = [...new Set([...getDeniedTools(getTabProvider(tab)), ...sessionDenied])];
   window.copilot.chat.restartWithDeniedTools(activeTabId, merged).then(result => {
     if (!result.success) console.warn('[session-tools] restart failed:', result.error);
   }).catch(err => {

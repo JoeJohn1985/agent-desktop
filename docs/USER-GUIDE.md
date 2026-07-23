@@ -393,10 +393,11 @@ Everything that applies across every provider, not to one specific backend.
 | **Chat font size** | 12–24 px (slider) |
 | **Notification sound** | On / Off |
 | **Default provider** | Provider new tabs and "+" start with |
-| **CWD** | Working directory every provider uses by default |
-| **Images folder** | Gallery folder (provider-independent) |
-| **Denied shell tools (global)** | Blocked for Copilot and the direct-API providers — Claude Code has its own approval flow and isn't affected |
+| **CWD** | Working directory every provider uses by default (requires an app restart) |
+| **Images folder** | Gallery folder, provider-independent (requires an app restart) |
 | **Developer mode** | Enables the test runner (🧪) and developer console (🖥️) in the sidebar |
+
+Every setting here auto-saves the moment you change it — no separate "Save" button. CWD/Images folder still need a full app restart to actually take effect (shown via a toast), since those are read once at startup.
 
 #### Provider tab
 
@@ -412,10 +413,12 @@ A dedicated tab per provider that's actually usable right now: **Copilot** is al
 
 | Tab | Contains |
 |---|---|
-| **Copilot** | Default model, its native Sessions/Skills/Agents folders (editable, browse + save), its own `copilot-instructions.md` editor, "allow all paths", additional directories, manual-approval default |
+| **Copilot** | Default model, its native Sessions/Skills/Agents folders (browse, auto-saves), its own `copilot-instructions.md` editor, "allow all paths", additional directories, manual-approval default, its own **Verbotene Shell-Tools** deny list |
 | **Claude Code** | Default model, its native `~/.claude/skills/` (read-only, opens in the file explorer — Claude discovers this on its own) and its app-managed Agents folder |
-| **Anthropic / OpenAI / GLM / Ollama** | Default model, plus its Skills/Agents/Instructions folders (auto-created under `~/.agent-desktop/<provider>/`, read-only, opens in the file explorer) |
-| **Gemini** | Default model, session resume (rename a tab to save it, reopen from the sidebar) — kept context-light otherwise, no Skills/Agents/Instructions |
+| **Anthropic / OpenAI / GLM / Ollama** | Default model, its Skills/Agents/Instructions folders (auto-created under `~/.agent-desktop/<provider>/`, read-only, opens in the file explorer), and its own **Verbotene Shell-Tools** deny list |
+| **Gemini** | Default model, session resume (rename a tab to save it, reopen from the sidebar) — kept context-light otherwise, no Skills/Agents/Instructions/deny list (no shell tool) |
+
+Each provider's shell-tool deny list is fully independent — blocking `git push` for Anthropic doesn't affect Copilot or any other provider. Claude Code has its own approval mechanism instead and isn't part of this at all.
 
 #### Features tab
 

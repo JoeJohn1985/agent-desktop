@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.6.0] - 2026-07-23
+
+### Changed
+- **Settings auto-save**: removed the big "💾 Speichern (Neustart erforderlich)"
+  buttons on the App and Copilot tabs. CWD/Bilder/Sessions/Skills/Agents/
+  Instructions-file now save individually the moment they're picked (each
+  `folders:save` call merges just that one key), showing a toast instead of
+  requiring an explicit click. Fixed a latent bug this surfaced along the
+  way: `folders:save` used to **replace** the whole folder config with
+  whatever the caller sent instead of merging — saving on the App tab
+  silently wiped out whatever the Copilot tab had saved, and vice versa.
+  "🔄 Auf Standard zurücksetzen" now goes through a dedicated `folders:reset`
+  IPC handler (the one action that intentionally does NOT merge).
+- **Tool-Verbote (Shell-Tool deny lists) are now fully independent per
+  provider** instead of one shared global list. Each of Copilot/Anthropic/
+  OpenAI/GLM/Ollama gets its own list in its own settings tab (Gemini has no
+  shell tool; Claude Code has its own approval mechanism — neither gets one,
+  same as before). A one-shot migration seeds every one of those providers
+  with a copy of the old global list the first time the app runs post-upgrade.
+  New `denylist` flag in `PROVIDER_CAPABILITIES`, surfaced in the Features
+  comparison matrix.
+
 ## [1.5.2] - 2026-07-23
 
 ### Fixed
