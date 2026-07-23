@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.2] - 2026-07-23
+
+### Fixed
+- **Settings tab bar overflowed the dialog** — the last tab ("Tastenkürzel")
+  was cut off, and several labels ("Claude Code", "Google Gemini", "Ollama
+  (lokal)") wrapped to two lines, because the dialog kept its original fixed
+  620px width from before the settings restructuring added several new,
+  longer-named tabs (one per connected provider). Widened the dialog
+  (`renderer/styles.css`, `.overlay__dialog--settings`) to 720px, switched the
+  tab bar to `flex-wrap` so any future growth in provider count degrades to a
+  second row instead of ever cutting text off again, and shortened the
+  dynamically-generated provider tab labels specifically (`Google Gemini` →
+  `Gemini`, `Ollama (lokal)` → `Ollama`, etc. — a new `SETTINGS_TAB_LABELS`
+  map in `renderer/app.js`, scoped to the tab bar only; the model
+  dropdown/provider list keep their full descriptive `PROVIDER_LABELS`).
+
 ## [1.5.1] - 2026-07-22
 
 ### Fixed

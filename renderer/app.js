@@ -1958,6 +1958,16 @@ const PROVIDER_LABELS = {
   glm: 'GLM (Zhipu)',
 };
 
+// Shorter labels for the settings dialog's tab bar specifically — up to one
+// per connected provider, so keeping these tight matters more there than in
+// the model dropdown/provider list (which use the full PROVIDER_LABELS).
+const SETTINGS_TAB_LABELS = {
+  anthropic: 'Anthropic',
+  gemini: 'Gemini',
+  ollama: 'Ollama',
+  glm: 'GLM',
+};
+
 const PROVIDER_ICON = '🔌';
 
 // Providers offered in the provider selector. `active: false` ones are shown
@@ -5484,13 +5494,13 @@ async function getConnectedProviderConfigs() {
   const configs = [];
   let cc = { installed: false };
   try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
-  if (cc.installed) configs.push({ id: 'claude-code', label: PROVIDER_LABELS['claude-code'] || 'Claude Code' });
+  if (cc.installed) configs.push({ id: 'claude-code', label: SETTINGS_TAB_LABELS['claude-code'] || PROVIDER_LABELS['claude-code'] || 'Claude Code' });
 
   await refreshProviderStatus();
   for (const p of PROVIDER_SETTINGS) {
     if (p.cli) continue; // Copilot/Claude Code handled separately (native, not key-based)
     const connected = p.keyless || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
-    if (connected) configs.push({ id: p.id, label: PROVIDER_LABELS[p.id] || p.id });
+    if (connected) configs.push({ id: p.id, label: SETTINGS_TAB_LABELS[p.id] || PROVIDER_LABELS[p.id] || p.id });
   }
   return configs;
 }
