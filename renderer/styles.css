@@ -959,6 +959,44 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ── App Loading Splash ──────────────────────────────────── */
+.app-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg-base);
+  transition: opacity 0.25s ease;
+}
+.app-loading--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.app-loading__icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+}
+.app-loading__spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: app-loading-spin 0.7s linear infinite;
+}
+.app-loading__text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+@keyframes app-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Overlay ──────────────────────────────────────────── */
 .overlay {
   display: none;

@@ -11,6 +11,15 @@
 </head>
 <body>
 
+  <!-- App Loading Splash — covers the whole window until the sidebar's
+       initial data (skills/agents/sessions/…) has finished loading, so the
+       sections don't visibly pop in one by one. Removed by hideAppLoadingSplash(). -->
+  <div class="app-loading" id="appLoading">
+    <img class="app-loading__icon" src="../assets/icon.png" alt="" />
+    <div class="app-loading__spinner"></div>
+    <div class="app-loading__text">Agent Desktop wird geladen…</div>
+  </div>
+
   <!-- Custom Title Bar -->
   <header class="titlebar" id="titlebar">
     <div class="titlebar__left">

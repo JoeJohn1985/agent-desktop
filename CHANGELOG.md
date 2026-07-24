@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.7] - 2026-07-24
+
+### Added
+- **App loading splash screen.** Startup used to visibly stagger — Skills,
+  Agents, MCP, Sessions, and Images each popped into the sidebar one by one
+  as their individual IPC round trips resolved (`initDataLoad()` awaits them
+  sequentially). A full-window splash (icon + spinner, matching the current
+  theme) now covers the app from first paint and only fades out once the
+  entire startup sequence — including tab restore/creation and all `initXxx()`
+  wiring — has finished, so everything appears at once instead of piecemeal.
+  Wrapped in `try/finally` so the splash always gets dismissed even if a
+  startup step throws.
+
 ## [1.6.6] - 2026-07-24
 
 ### Changed

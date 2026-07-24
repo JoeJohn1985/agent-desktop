@@ -7250,51 +7250,67 @@ async function finishOnboarding() {
   overlay.style.display = 'none';
 }
 
+/**
+ * Fades out and removes the app-loading splash shown from first paint until
+ * startup finishes. Called from a `finally` so it always runs, even if some
+ * startup step throws — otherwise the app could get stuck behind the splash.
+ */
+function hideAppLoadingSplash() {
+  const el = document.getElementById('appLoading');
+  if (!el) return;
+  el.classList.add('app-loading--hidden');
+  setTimeout(() => el.remove(), 300); // match the CSS opacity transition
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadPreferences();
-  migrateDeniedToolsToPerProvider();
-  initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
-  refreshAllProviderModels(); // discover direct-API provider models in the background
-  applyTheme(getCurrentTheme());
-  initCopilotIPC();
-  initResize();
+  try {
+    await loadPreferences();
+    migrateDeniedToolsToPerProvider();
+    initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
+    refreshAllProviderModels(); // discover direct-API provider models in the background
+    applyTheme(getCurrentTheme());
+    initCopilotIPC();
+    initResize();
 
-  await initStatusbar();
-  await initDataLoad();
+    await initStatusbar();
+    await initDataLoad();
 
-  const restored = await restoreOpenTabs();
-  if (!restored) {
-    await createTab('🤖 Chat');
-  } else {
-    // Re-run after restore so project skills load with the now-set tab.cwd.
-    // (createTab triggers switchTab before tab.cwd is assigned, so the first
-    // loadProjectSkillsAndAgents call runs with null cwd and clears results.)
-    const restoredActiveTab = tabs.get(activeTabId);
-    if (restoredActiveTab?.cwd) {
-      loadProjectSkillsAndAgents(restoredActiveTab.cwd);
+    const restored = await restoreOpenTabs();
+    if (!restored) {
+      await createTab('🤖 Chat');
+    } else {
+      // Re-run after restore so project skills load with the now-set tab.cwd.
+      // (createTab triggers switchTab before tab.cwd is assigned, so the first
+      // loadProjectSkillsAndAgents call runs with null cwd and clears results.)
+      const restoredActiveTab = tabs.get(activeTabId);
+      if (restoredActiveTab?.cwd) {
+        loadProjectSkillsAndAgents(restoredActiveTab.cwd);
+      }
     }
-  }
 
-  initChatInput();
-  initWindowControls();
-  initSlashButtons();
-  initSessionTools();
-  initSettings();
-  initSidebar();
-  initPluginButtons();
-  initTestRunner();
-  initDevConsole();
-  initChatSearch();
-  initKeyboardShortcuts();
-  initDragDrop();
-  initTooltips();
-  initTabModelSelector();
-  initTabModeSelector();
-  initGeminiModeToggle();
-  initContextInfo();
-  initOnboarding();
-  refreshProviderStatus();
-  initUpdateChecker();
-  initDynamicPricing();
-  initSubscriptionUsageTicker();
+    initChatInput();
+    initWindowControls();
+    initSlashButtons();
+    initSessionTools();
+    initSettings();
+    initSidebar();
+    initPluginButtons();
+    initTestRunner();
+    initDevConsole();
+    initChatSearch();
+    initKeyboardShortcuts();
+    initDragDrop();
+    initTooltips();
+    initTabModelSelector();
+    initTabModeSelector();
+    initGeminiModeToggle();
+    initContextInfo();
+    initOnboarding();
+    refreshProviderStatus();
+    initUpdateChecker();
+    initDynamicPricing();
+    initSubscriptionUsageTicker();
+  } finally {
+    hideAppLoadingSplash();
+  }
 });
