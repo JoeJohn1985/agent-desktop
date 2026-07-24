@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.2] - 2026-07-23
+
+### Fixed
+- **Settings dialog too narrow** after the new per-provider tabs/panels
+  (denylists, Claude Code instructions editor, …) added more content —
+  the fixed 720px width from the previous tab-overflow fix was already
+  cramped again. Made the dialog scale with the app window instead of
+  staying fixed: `width: 80vw` (`min-width: 720px`, `max-width: 1100px`
+  so it neither shrinks below the tab bar's needs on a small window nor
+  grows absurdly wide on a huge one).
+
 ## [1.6.1] - 2026-07-23
 
 ### Added
