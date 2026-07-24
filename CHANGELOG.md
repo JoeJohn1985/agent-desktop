@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1] - 2026-07-25
+
+### Removed
+- **Reverted the global `:focus-visible` ring** added in 1.7.0's polish pass
+  — on reflection it made keyboard/programmatic focus (e.g. the chat input
+  auto-focusing on tab switch) stand out more than wanted. Back to relying
+  on each element's own existing `:focus` styling (or lack thereof).
+
 ## [1.7.0] - 2026-07-24
 
 ### Added

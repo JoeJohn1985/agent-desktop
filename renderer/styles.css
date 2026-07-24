@@ -123,16 +123,6 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* ── Keyboard Focus ───────────────────────────────────── */
-/* :focus-visible only (not plain :focus) so mouse clicks stay ring-free —
-   a box-shadow ring rather than outline so it can't be beaten by the many
-   `outline: none` rules scattered on individual `:focus` selectors
-   throughout this file (box-shadow is untouched by any of them). */
-:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
-}
-
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--bg-base);
