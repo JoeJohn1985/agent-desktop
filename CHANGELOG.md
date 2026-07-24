@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.6.5] - 2026-07-24
+
+### Fixed
+- **"Nach Updates suchen" reported "up to date" even when `origin/main` had
+  newer commits to pull.** Root cause: it compared the local `package.json`
+  version against the newest *release tag* on the remote — but this repo's
+  version has been bumped on nearly every commit without a matching tag ever
+  being created (only `v1.0.0`/`v1.1.0` exist while `package.json` was
+  already at 1.6.4), so "no newer tag" kept reporting no update regardless of
+  how many commits actually landed on `main`. Rewrote `checkForUpdate`
+  (`src/updater.js`) to fetch and compare `HEAD` against `origin/main`
+  directly (`git merge-base --is-ancestor`) — the same fast-forward condition
+  `applyUpdate`'s `pull --ff-only` actually needs, so it can't go stale the
+  same way tags did. `latestVersion` is still shown for display, now read
+  straight from the remote's `package.json` instead of a tag.
+  Also fixed a second, previously untested bug this surfaced: applying an
+  update whose commits touch `package.json`/`package-lock.json` triggers an
+  `npm install` — on Windows that shells out to `npm.cmd`, a batch file Node
+  refuses to spawn without `shell: true` (throws `EINVAL`), so every real
+  update with changed dependencies would have failed at the apply step.
+  Replaced the release-tag pure-function tests with real-git-repo tests
+  (`__tests__/updater.test.js`) covering both the "newer commits, no tag"
+  scenario and a full apply/pull round trip.
+
 ## [1.6.4] - 2026-07-23
 
 ### Changed

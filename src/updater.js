@@ -3,13 +3,16 @@
 // Git-based self-update for the source-checkout distribution model.
 //
 // The app is run from a Git checkout (not a packaged installer), so "updating"
-// means pulling the latest code from `main`. We detect whether a newer version
-// exists by reading the newest release *tag* from the remote — via plain `git`
-// using each user's own credentials, so no token has to be embedded in the app
-// (works for the private repo today and a public one later, unchanged).
+// means pulling the latest code from `main`. Whether a newer version exists is
+// detected via plain git ahead/behind detection against `origin/main` — using
+// each user's own credentials, so no token has to be embedded in the app.
 //
-// This module keeps the parsing/compare logic pure (and unit-tested); the git
-// invocations are thin async wrappers around child_process.
+// This used to compare against the newest release *tag* instead, but that
+// silently went stale: package.json's version gets bumped on every commit
+// without a matching tag ever being created, so "no newer tag" kept reporting
+// "up to date" even when origin/main had plenty of newer commits to pull.
+// Comparing HEAD against origin/main directly can't go stale the same way —
+// it's exactly the same condition `applyUpdate`'s `pull --ff-only` needs.
 
 const { execFile } = require('child_process');
 const path = require('path');
@@ -18,86 +21,6 @@ const fs = require('fs');
 const UPDATE_BRANCH = 'main';
 const GIT_TIMEOUT_MS = 30_000;
 const NPM_TIMEOUT_MS = 300_000;
-
-// ── Pure helpers (no I/O — unit-tested) ──────────────────────
-
-/**
- * Parse a version string ("v1.2.3", "1.2.3-beta.1") into comparable parts.
- * @param {string} v
- * @returns {{major:number,minor:number,patch:number,pre:string|null}|null}
- */
-function parseSemver(v) {
-  if (typeof v !== 'string') return null;
-  const m = v.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
-  if (!m) return null;
-  return { major: +m[1], minor: +m[2], patch: +m[3], pre: m[4] || null };
-}
-
-/**
- * Compare two semver strings. Returns -1 if a<b, 0 if equal, 1 if a>b.
- * A release (no prerelease) ranks higher than a prerelease of the same x.y.z.
- * Unparseable inputs sort as lowest.
- */
-function compareSemver(a, b) {
-  const pa = parseSemver(a);
-  const pb = parseSemver(b);
-  if (!pa && !pb) return 0;
-  if (!pa) return -1;
-  if (!pb) return 1;
-  for (const k of ['major', 'minor', 'patch']) {
-    if (pa[k] !== pb[k]) return pa[k] < pb[k] ? -1 : 1;
-  }
-  // Same x.y.z: a release outranks a prerelease.
-  if (pa.pre && !pb.pre) return -1;
-  if (!pa.pre && pb.pre) return 1;
-  if (pa.pre && pb.pre) {
-    if (pa.pre === pb.pre) return 0;
-    return pa.pre < pb.pre ? -1 : 1;
-  }
-  return 0;
-}
-
-/**
- * Extract tag names from `git ls-remote --tags` output. Drops the peeled
- * "^{}" duplicates that annotated tags produce.
- * @param {string} output
- * @returns {string[]}
- */
-function parseTagsFromLsRemote(output) {
-  if (!output) return [];
-  const tags = [];
-  for (const line of output.split('\n')) {
-    const m = line.match(/refs\/tags\/(.+?)(\^\{\})?$/);
-    if (m) tags.push(m[1]);
-  }
-  return [...new Set(tags)];
-}
-
-/**
- * Pick the highest stable (non-prerelease) semver tag. Returns null if none.
- * @param {string[]} tags
- * @returns {string|null}
- */
-function pickLatestStableTag(tags) {
-  let best = null;
-  for (const t of tags || []) {
-    const p = parseSemver(t);
-    if (!p || p.pre) continue; // only well-formed, non-prerelease tags
-    if (best === null || compareSemver(t, best) > 0) best = t;
-  }
-  return best;
-}
-
-/**
- * Whether `latestTag` represents a newer version than `currentVersion`.
- * @param {string} currentVersion
- * @param {string|null} latestTag
- * @returns {boolean}
- */
-function isUpdateAvailable(currentVersion, latestTag) {
-  if (!latestTag) return false;
-  return compareSemver(latestTag, currentVersion) > 0;
-}
 
 // ── git/npm execution (main process) ─────────────────────────
 
@@ -132,7 +55,10 @@ function readLocalVersion(repoDir) {
 }
 
 /**
- * Check the remote for a newer release tag.
+ * Check whether `origin/main` has commits not yet in the local checkout.
+ * `latestVersion` is read from the remote's package.json purely for display —
+ * it plays no part in the updateAvailable decision, which is pure git ancestry
+ * (does HEAD..origin/main have anything, and is HEAD still fast-forwardable).
  * @param {string} repoDir
  * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>}
  */
@@ -141,17 +67,33 @@ async function checkForUpdate(repoDir) {
   if (!(await isGitRepo(repoDir))) {
     return { ok: false, currentVersion, latestVersion: null, updateAvailable: false, reason: 'not-a-git-checkout' };
   }
-  const ls = await git(repoDir, ['ls-remote', '--tags', 'origin']);
-  if (!ls.ok) {
-    return { ok: false, currentVersion, latestVersion: null, updateAvailable: false, reason: 'git-failed', error: (ls.stderr || ls.error?.message || '').trim() };
+
+  const fetch = await git(repoDir, ['fetch', '--quiet', 'origin', UPDATE_BRANCH]);
+  if (!fetch.ok) {
+    return { ok: false, currentVersion, latestVersion: null, updateAvailable: false, reason: 'git-failed', error: (fetch.stderr || fetch.error?.message || '').trim() };
   }
-  const latestVersion = pickLatestStableTag(parseTagsFromLsRemote(ls.stdout));
-  return {
-    ok: true,
-    currentVersion,
-    latestVersion,
-    updateAvailable: isUpdateAvailable(currentVersion, latestVersion),
-  };
+
+  const localHead = await git(repoDir, ['rev-parse', 'HEAD']);
+  const remoteHead = await git(repoDir, ['rev-parse', `origin/${UPDATE_BRANCH}`]);
+  if (!localHead.ok || !remoteHead.ok) {
+    return { ok: false, currentVersion, latestVersion: null, updateAvailable: false, reason: 'git-failed', error: (localHead.stderr || remoteHead.stderr || '').trim() };
+  }
+
+  let latestVersion = currentVersion;
+  const show = await git(repoDir, ['show', `origin/${UPDATE_BRANCH}:package.json`]);
+  if (show.ok) {
+    try { latestVersion = JSON.parse(show.stdout).version || currentVersion; } catch { /* keep currentVersion */ }
+  }
+
+  if (localHead.stdout.trim() === remoteHead.stdout.trim()) {
+    return { ok: true, currentVersion, latestVersion, updateAvailable: false };
+  }
+
+  // Exit code 0 = HEAD is an ancestor of origin/main → purely behind, a
+  // fast-forward pull will work. Anything else (diverged, or local ahead)
+  // reports no update — `applyUpdate`'s --ff-only pull couldn't apply it anyway.
+  const ancestor = await git(repoDir, ['merge-base', '--is-ancestor', 'HEAD', `origin/${UPDATE_BRANCH}`]);
+  return { ok: true, currentVersion, latestVersion, updateAvailable: ancestor.ok };
 }
 
 /**
@@ -182,8 +124,14 @@ async function applyUpdate(repoDir) {
     const diff = await git(repoDir, ['diff', '--name-only', headBefore, headAfter]);
     const changed = diff.stdout.split('\n').map(s => s.trim());
     if (changed.includes('package.json') || changed.includes('package-lock.json')) {
-      const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      const install = await run(npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS });
+      // npm ships as npm.cmd on Windows — a batch file, which Node's spawn/
+      // execFile refuses to run directly (throws EINVAL) without shell: true,
+      // regardless of the shell option's docs suggesting otherwise. Same
+      // reasoning as npx's shell:true in acp-client.js. Fixed args below, no
+      // untrusted input, so shell:true here carries no injection risk.
+      const isWindows = process.platform === 'win32';
+      const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+      const install = await run(npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: isWindows });
       if (!install.ok) {
         return { ok: false, reason: 'npm-install-failed', error: (install.stderr || install.error?.message || '').trim() };
       }
@@ -195,13 +143,6 @@ async function applyUpdate(repoDir) {
 }
 
 module.exports = {
-  // pure
-  parseSemver,
-  compareSemver,
-  parseTagsFromLsRemote,
-  pickLatestStableTag,
-  isUpdateAvailable,
-  // git/io
   isGitRepo,
   isWorkingTreeClean,
   readLocalVersion,

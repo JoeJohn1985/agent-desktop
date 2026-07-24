@@ -1,83 +1,121 @@
 'use strict';
 
-// Pure-logic tests for the git-based self-updater: semver parsing/compare,
-// ls-remote tag parsing, latest-stable selection, update detection.
+// Real-git-repo tests for the self-updater's ahead/behind detection and the
+// apply (pull) flow. This replaced a release-tag comparison that silently
+// went stale — package.json's version was bumped on every commit without a
+// matching tag ever being created, so "no newer tag" kept reporting "up to
+// date" even with plenty of newer commits sitting on origin/main. These
+// tests exercise real `origin`/local checkouts (temp dirs) precisely to
+// cover that "newer commits, no tag" scenario, which a mocked-fs test
+// wouldn't meaningfully exercise.
 
-const {
-  parseSemver,
-  compareSemver,
-  parseTagsFromLsRemote,
-  pickLatestStableTag,
-  isUpdateAvailable,
-} = require('../src/updater');
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { checkForUpdate, applyUpdate } = require('../src/updater');
 
-describe('updater: parseSemver', () => {
-  it('parst mit und ohne v-Präfix', () => {
-    expect(parseSemver('v1.2.3')).toEqual({ major: 1, minor: 2, patch: 3, pre: null });
-    expect(parseSemver('1.2.3')).toEqual({ major: 1, minor: 2, patch: 3, pre: null });
+function sh(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf-8' });
+}
+
+function mkTmp() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agentdesk-updater-'));
+}
+
+function commitVersion(dir, version, message) {
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version }));
+  sh(dir, ['add', '.']);
+  sh(dir, ['commit', '--quiet', '-m', message]);
+}
+
+function initRepoWithVersion(dir, version) {
+  fs.mkdirSync(dir, { recursive: true });
+  sh(dir, ['init', '--quiet', '-b', 'main']);
+  sh(dir, ['config', 'user.email', 'test@test.local']);
+  sh(dir, ['config', 'user.name', 'Test']);
+  commitVersion(dir, version, 'init');
+}
+
+describe('updater: checkForUpdate (echte Git-Repos)', () => {
+  let root, originDir, localDir;
+
+  beforeEach(() => {
+    root = mkTmp();
+    originDir = path.join(root, 'origin');
+    localDir = path.join(root, 'local');
+    initRepoWithVersion(originDir, '1.0.0');
+    sh(root, ['clone', '--quiet', originDir, localDir]);
   });
-  it('erkennt Prerelease', () => {
-    expect(parseSemver('v0.33.0-beta.1')).toEqual({ major: 0, minor: 33, patch: 0, pre: 'beta.1' });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
   });
-  it('liefert null bei Unsinn', () => {
-    expect(parseSemver('foo')).toBeNull();
-    expect(parseSemver('1.2')).toBeNull();
-    expect(parseSemver(null)).toBeNull();
+
+  it('meldet kein Update, wenn lokal und origin/main gleichauf sind', async () => {
+    const result = await checkForUpdate(localDir);
+    expect(result.ok).toBe(true);
+    expect(result.updateAvailable).toBe(false);
+    expect(result.currentVersion).toBe('1.0.0');
+    expect(result.latestVersion).toBe('1.0.0');
+  });
+
+  it('meldet ein Update bei neuen Commits auf origin/main — auch ganz ohne Tag', () => {
+    commitVersion(originDir, '1.1.0', 'bump');
+    return checkForUpdate(localDir).then((result) => {
+      expect(result.ok).toBe(true);
+      expect(result.updateAvailable).toBe(true);
+      expect(result.currentVersion).toBe('1.0.0');
+      expect(result.latestVersion).toBe('1.1.0');
+    });
+  });
+
+  it('meldet kein Update, wenn der lokale Checkout einen eigenen, noch nicht gepushten Commit hat', async () => {
+    fs.writeFileSync(path.join(localDir, 'extra.txt'), 'x');
+    sh(localDir, ['add', '.']);
+    sh(localDir, ['commit', '--quiet', '-m', 'lokale Änderung']);
+
+    const result = await checkForUpdate(localDir);
+    expect(result.ok).toBe(true);
+    expect(result.updateAvailable).toBe(false);
+  });
+
+  it('ist kein Git-Checkout außerhalb eines Repos', async () => {
+    const outside = mkTmp();
+    const result = await checkForUpdate(outside);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('not-a-git-checkout');
+    fs.rmSync(outside, { recursive: true, force: true });
   });
 });
 
-describe('updater: compareSemver', () => {
-  it('vergleicht numerisch', () => {
-    expect(compareSemver('1.0.0', '1.0.1')).toBe(-1);
-    expect(compareSemver('1.2.0', '1.1.9')).toBe(1);
-    expect(compareSemver('2.0.0', '2.0.0')).toBe(0);
-  });
-  it('Release rangiert höher als Prerelease derselben Version', () => {
-    expect(compareSemver('1.0.0', '1.0.0-beta')).toBe(1);
-    expect(compareSemver('1.0.0-beta', '1.0.0')).toBe(-1);
-  });
-  it('unparsebare Eingaben sind am niedrigsten', () => {
-    expect(compareSemver('foo', '1.0.0')).toBe(-1);
-    expect(compareSemver('1.0.0', 'foo')).toBe(1);
-  });
-});
+describe('updater: applyUpdate (echte Git-Repos)', () => {
+  let root, originDir, localDir;
 
-describe('updater: parseTagsFromLsRemote', () => {
-  it('extrahiert Tags und entfernt ^{}-Duplikate', () => {
-    const out = [
-      'abc123\trefs/tags/v0.31.0',
-      'def456\trefs/tags/v0.32.0',
-      'def456\trefs/tags/v0.32.0^{}',
-    ].join('\n');
-    expect(parseTagsFromLsRemote(out)).toEqual(['v0.31.0', 'v0.32.0']);
+  beforeEach(() => {
+    root = mkTmp();
+    originDir = path.join(root, 'origin');
+    localDir = path.join(root, 'local');
+    initRepoWithVersion(originDir, '1.0.0');
+    sh(root, ['clone', '--quiet', originDir, localDir]);
   });
-  it('leer bei leerer Eingabe', () => {
-    expect(parseTagsFromLsRemote('')).toEqual([]);
-  });
-});
 
-describe('updater: pickLatestStableTag', () => {
-  it('wählt den höchsten stabilen Tag', () => {
-    expect(pickLatestStableTag(['v0.31.0', 'v0.32.0', 'v0.9.0'])).toBe('v0.32.0');
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
   });
-  it('ignoriert Prereleases und Unsinn', () => {
-    expect(pickLatestStableTag(['v0.32.0', 'v0.33.0-beta.1', 'nightly'])).toBe('v0.32.0');
-  });
-  it('null wenn kein stabiler Tag', () => {
-    expect(pickLatestStableTag(['v1.0.0-rc.1', 'foo'])).toBeNull();
-    expect(pickLatestStableTag([])).toBeNull();
-  });
-});
 
-describe('updater: isUpdateAvailable', () => {
-  it('true wenn Tag neuer als lokale Version', () => {
-    expect(isUpdateAvailable('0.32.0', 'v0.33.0')).toBe(true);
+  it('pullt neue Commits fast-forward und liefert die neue Version', async () => {
+    commitVersion(originDir, '1.1.0', 'bump');
+
+    const result = await applyUpdate(localDir);
+    expect(result.ok).toBe(true);
+    expect(result.newVersion).toBe('1.1.0');
   });
-  it('false wenn gleich oder älter', () => {
-    expect(isUpdateAvailable('0.32.0', 'v0.32.0')).toBe(false);
-    expect(isUpdateAvailable('0.32.0', 'v0.31.0')).toBe(false);
-  });
-  it('false ohne Tag', () => {
-    expect(isUpdateAvailable('0.32.0', null)).toBe(false);
+
+  it('bricht bei unsauberem Arbeitsverzeichnis ab', async () => {
+    fs.writeFileSync(path.join(localDir, 'dirty.txt'), 'x');
+    const result = await applyUpdate(localDir);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('dirty-working-tree');
   });
 });
