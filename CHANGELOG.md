@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.6.3] - 2026-07-23
+
+### Changed
+- **Features matrix now shows Copilot and Claude Code as supporting
+  Instructions.** Previously both showed unchecked even though Copilot always
+  had an editable `copilot-instructions.md` and Claude Code just got its own
+  `CLAUDE.md` editor — the flag had specifically tracked the direct-API
+  providers' multi-file toggle system, not native single-file editors, which
+  read as "doesn't have instructions" at a glance. Flipped both to `true` and
+  reworded the matrix hint to cover both mechanisms.
+  Fixed a bug this surfaced: `buildProviderConfigPanelHtml` used the same
+  `instructions` flag to decide whether to render the direct-API providers'
+  multi-file `instructionsDir` folder row — Claude Code would now have
+  incorrectly gotten that row too (it only has the single native file, added
+  as its own dedicated block). Excluded `claude-code` from that specific
+  check.
+
 ## [1.6.2] - 2026-07-23
 
 ### Fixed

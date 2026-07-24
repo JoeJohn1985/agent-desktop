@@ -2304,20 +2304,22 @@ function isSubscriptionProvider(provider) {
 // (Claude Code and the direct-API providers use the app's own lazy-loaded
 // per-provider Skills/Agents (see LAZY_CONTEXT_PROVIDERS in main.js) — Gemini
 // is deliberately excluded to keep it context-light. MCP and Marketplace stay
-// Copilot-only; the Copilot CLI supports the full feature set. Instructions is
-// narrower still (see INSTRUCTIONS_PROVIDERS in main.js): only the direct-API
-// providers, since Copilot/Claude Code already have their own native
-// copilot-instructions.md/CLAUDE.md discovery. Instructions has no dedicated
-// sidebar section — it's purely informational here (Settings → Features);
-// every file dropped into the provider's instructions folder is always
-// active, no in-app toggle. denylist marks which providers get a
-// per-provider "Verbotene Shell-Tools" list in their own settings tab — only
-// providers with an own shell tool we enforce this against: Gemini has no
-// shell tool at all (file tools only), Claude Code has its own approval
-// mechanism and is unaffected by our deny lists.)
+// Copilot-only; the Copilot CLI supports the full feature set. Instructions
+// covers two different underlying mechanisms, both editable in-app: Copilot
+// and Claude Code each get a single native global file (copilot-instructions.md
+// / CLAUDE.md, an editor convenience in their own settings tab — the CLI
+// itself discovers these, we don't inject anything); the direct-API providers
+// instead get multiple toggle-free `*.instructions.md` files under their own
+// ~/.agent-desktop/<provider>/instructions/ (see INSTRUCTIONS_PROVIDERS in
+// main.js), always fully inlined, no sidebar section. Only Gemini has neither.
+// denylist marks which providers get a per-provider "Verbotene Shell-Tools"
+// list in their own settings tab — only providers with an own shell tool we
+// enforce this against: Gemini has no shell tool at all (file tools only),
+// Claude Code has its own approval mechanism and is unaffected by our deny
+// lists.)
 const PROVIDER_CAPABILITIES = {
-  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: true,  sessions: true,  marketplace: true,  denylist: true },
-  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: false, mcp: false, sessions: true,  marketplace: false, denylist: false },
+  copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: true,  sessions: true,  marketplace: true,  denylist: true },
+  'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: true,  marketplace: false, denylist: false },
   anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
   openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
   gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: true,  marketplace: false, denylist: false },
@@ -2334,7 +2336,7 @@ const PROVIDER_FEATURE_META = [
   { key: 'costs',        icon: '💰', label: 'Kosten',         hint: 'Kosten-/Token-Tracking verfügbar.' },
   { key: 'skills',       icon: '🧩', label: 'Skills',         hint: 'SKILL.md-basierte KI-Skills.' },
   { key: 'agents',       icon: '🤖', label: 'Agents',         hint: 'Wiederverwendbare Agent-Definitionen.' },
-  { key: 'instructions', icon: '📋', label: 'Instructions',  hint: 'Mehrere, togglebare Instructions-Sets (voll eingebettet).' },
+  { key: 'instructions', icon: '📋', label: 'Instructions',  hint: 'Bearbeitbare Instructions-Datei(en) für das Modell (nativ bei Copilot/Claude Code, mehrere togglebare Sets bei Direkt-API-Providern).' },
   { key: 'mcp',          icon: '🔌', label: 'MCP',            hint: 'Model-Context-Protocol-Server.' },
   { key: 'sessions',     icon: '💾', label: 'Sessions speichern', hint: 'Gesprächsverlauf persistent speichern/fortsetzen.' },
   { key: 'marketplace',  icon: '🛒', label: 'Marketplace',    hint: 'Erweiterungen/Extensions aus dem Marketplace.' },
@@ -5570,7 +5572,12 @@ function buildProviderConfigPanelHtml(providerId) {
   const folderRows = [];
   if (providerSupports(providerId, 'skills')) folderRows.push({ key: 'skillsDir', icon: '🧩', title: 'Skills' });
   if (providerSupports(providerId, 'agents')) folderRows.push({ key: 'agentsDir', icon: '🤖', title: 'Agents' });
-  if (providerSupports(providerId, 'instructions')) folderRows.push({ key: 'instructionsDir', icon: '📝', title: 'Instructions' });
+  // Claude Code's `instructions: true` means its own single native CLAUDE.md
+  // editor (added separately below) — NOT the direct-API providers' multi-file
+  // instructionsDir folder, so it's excluded here despite the shared flag.
+  if (providerSupports(providerId, 'instructions') && providerId !== 'claude-code') {
+    folderRows.push({ key: 'instructionsDir', icon: '📝', title: 'Instructions' });
+  }
 
   if (folderRows.length) {
     parts.push('<div class="settings__separator"></div>');
