@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.6] - 2026-07-24
+
+### Changed
+- **Ollama's settings tab now only appears once a base URL is saved**,
+  instead of always. Ollama is keyless, so `getConnectedProviderConfigs()`
+  used to treat it as unconditionally "connected" — the tab showed up
+  regardless of whether Ollama was even installed. A saved base URL (Provider
+  tab, defaults to `http://localhost:11434/v1`) is now the equivalent signal
+  a stored API key is for the other direct-API providers.
+
 ## [1.6.5] - 2026-07-24
 
 ### Fixed

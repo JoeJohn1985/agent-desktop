@@ -5532,7 +5532,9 @@ const PROVIDER_SETTINGS = [
  * Providers that get their own dynamically-generated settings tab. Copilot is
  * static HTML (always present, handled separately) — this covers everything
  * else: Claude Code appears once its CLI is installed, the direct-API
- * providers once a key is stored (Ollama is keyless, so it's always shown).
+ * providers once a key is stored. Ollama is keyless, so a saved base URL is
+ * its equivalent "connected" signal instead — otherwise it'd always show up
+ * regardless of whether Ollama is even installed.
  * @returns {Promise<Array<{id: string, label: string}>>}
  */
 async function getConnectedProviderConfigs() {
@@ -5544,7 +5546,9 @@ async function getConnectedProviderConfigs() {
   await refreshProviderStatus();
   for (const p of PROVIDER_SETTINGS) {
     if (p.cli) continue; // Copilot/Claude Code handled separately (native, not key-based)
-    const connected = p.keyless || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+    const connected = p.keyless
+      ? (p.baseUrl ? Boolean(getProviderBaseUrl(p.id)) : true)
+      : Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
     if (connected) configs.push({ id: p.id, label: SETTINGS_TAB_LABELS[p.id] || PROVIDER_LABELS[p.id] || p.id });
   }
   return configs;

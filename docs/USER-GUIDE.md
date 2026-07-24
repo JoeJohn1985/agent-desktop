@@ -411,7 +411,7 @@ Here you store API keys for the direct LLM providers (e.g. Anthropic). The keys 
 
 #### Per-provider tabs
 
-A dedicated tab per provider that's actually usable right now: **Copilot** is always present (static, its native CLI configuration); **Claude Code** appears once its CLI is installed; the direct-API providers appear once a key is stored (Ollama needs none, so it's always shown). Each tab only shows what applies to that provider:
+A dedicated tab per provider that's actually usable right now: **Copilot** is always present (static, its native CLI configuration); **Claude Code** appears once its CLI is installed; the direct-API providers appear once a key is stored. Ollama needs no key, so its equivalent signal is a saved base URL on the Provider tab (defaults to `http://localhost:11434/v1`) — the tab appears once you've saved one. Each tab only shows what applies to that provider:
 
 | Tab | Contains |
 |---|---|
