@@ -9,7 +9,8 @@ let todosCwd = null;
 
 /**
  * Lädt die Todos eines Projekts (cwd) vom Backend und rendert sie.
- * Versteckt die Todo-Sektion wenn kein Arbeitsverzeichnis aktiv ist.
+ * Die Todo-Sektion bleibt immer sichtbar, auch ohne aktives
+ * Arbeitsverzeichnis oder ganz ohne Todos (dann leerer Zustand).
  *
  * Todos sind projekt- statt session-gebunden: sie liegen unter
  * <cwd>/todo/todos.md und überleben damit das Löschen einer Session.
@@ -22,10 +23,8 @@ async function loadTodos(cwd) {
   if (!cwd) {
     currentTodos = [];
     renderTodos();
-    document.getElementById('todosSection').style.display = 'none';
     return;
   }
-  document.getElementById('todosSection').style.display = '';
   try {
     currentTodos = await copilot.todos.list(cwd) || [];
   } catch (e) {

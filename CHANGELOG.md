@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.4] - 2026-07-23
+
+### Changed
+- **Sidebar Todos section always visible**, even with no active
+  working directory or zero todos (shows its existing empty state
+  instead of disappearing entirely). Previously it was hidden whenever
+  `loadTodos()` ran with no cwd.
+
 ## [1.6.3] - 2026-07-23
 
 ### Changed
