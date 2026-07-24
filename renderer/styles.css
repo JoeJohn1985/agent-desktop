@@ -1,8 +1,18 @@
 /* ── Toast Notifications ──────────────────────────────── */
-.toast {
+/* Fixed-position stack; toasts are its normal-flow children so several in
+   quick succession queue up (newest nearest the anchor) instead of all
+   rendering on top of each other at the same spot. */
+.toast-stack {
   position: fixed;
   bottom: 60px;
   right: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
   padding: 10px 18px;
   border-radius: 8px;
   font-size: 13px;
@@ -10,7 +20,6 @@
   color: #fff;
   background: #45475a;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  z-index: 10000;
   opacity: 0;
   transform: translateY(10px);
   transition: opacity 0.3s, transform 0.3s;
@@ -113,6 +122,17 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ── Keyboard Focus ───────────────────────────────────── */
+/* :focus-visible only (not plain :focus) so mouse clicks stay ring-free —
+   a box-shadow ring rather than outline so it can't be beaten by the many
+   `outline: none` rules scattered on individual `:focus` selectors
+   throughout this file (box-shadow is untouched by any of them). */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+}
+
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--bg-base);
@@ -445,6 +465,43 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   max-height: 40vh;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  opacity: 1;
+}
+.sidebar__content--collapsed {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.sidebar__search--collapsed { display: none; }
+
+/* ── Shared Empty-State (Todos/Sessions/Images/session-tools/skill-manager) */
+.sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.sidebar__empty-icon {
+  font-size: 20px;
+  opacity: 0.6;
+}
+
+/* ── Generic Button-Busy Spinner ──────────────────────── */
+.btn-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: app-loading-spin 0.6s linear infinite;
+  vertical-align: middle;
 }
 
 .sidebar__list { padding: 0 8px 8px 8px; }
@@ -2956,12 +3013,7 @@ mark.chat-search-highlight--active {
   gap: 4px;
   padding: 4px 8px;
 }
-.image-gallery__empty {
-  grid-column: 1 / -1;
-  padding: 8px 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
+.image-gallery__empty { grid-column: 1 / -1; }
 .image-gallery__thumb {
   position: relative;
   aspect-ratio: 1;

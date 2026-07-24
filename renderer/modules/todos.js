@@ -46,7 +46,7 @@ function renderTodos() {
     totalCount > 0 ? `${openCount}/${totalCount}` : '0';
 
   if (currentTodos.length === 0) {
-    container.innerHTML = '<p style="padding:8px 10px;color:var(--text-muted);font-size:12px;">Keine Todos vorhanden</p>';
+    container.innerHTML = emptyStateHtml('✅', 'Keine Todos vorhanden');
     return;
   }
 

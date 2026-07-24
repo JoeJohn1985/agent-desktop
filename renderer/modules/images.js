@@ -18,7 +18,7 @@ async function loadImages() {
 function renderImages() {
   const container = document.getElementById('imageGallery');
   if (currentImages.length === 0) {
-    container.innerHTML = '<div class="image-gallery__empty">Keine Bilder/Videos vorhanden</div>';
+    container.innerHTML = `<div class="image-gallery__empty">${emptyStateHtml('🖼️', 'Keine Bilder/Videos vorhanden')}</div>`;
     return;
   }
 

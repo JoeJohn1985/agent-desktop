@@ -69,7 +69,7 @@ function renderSessionTools() {
   if (!list || !tab) return;
   const tools = tab.sessionDeniedTools || [];
   if (tools.length === 0) {
-    list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">Keine Session-Tools konfiguriert</div>';
+    list.innerHTML = emptyStateHtml('🔧', 'Keine Session-Tools konfiguriert');
     return;
   }
   list.innerHTML = tools.map((t, i) => `

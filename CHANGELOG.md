@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.7.0] - 2026-07-24
+
+### Added
+- **Visual polish pass** across the renderer:
+  - **Keyboard focus rings**: a global `:focus-visible` rule (box-shadow, so
+    it can't be beaten by the ~15 scattered `outline: none` rules on
+    individual `:focus` selectors) gives every interactive element visible
+    keyboard-focus feedback — previously only 13 `:focus` rules existed
+    against 111 `:hover` ones.
+  - **Sidebar section collapse/expand now animates** (`max-height`/`opacity`
+    transition) instead of an instant `display` toggle.
+  - **Toast notifications now stack** in a dedicated fixed container
+    (`#toastStack`, flex column) instead of rendering on top of each other at
+    the same fixed position when several fire in quick succession.
+  - **Unified empty-state markup** (`emptyStateHtml()`: icon + text, shared
+    `.sidebar__empty` styling) for Todos, Sessions, Images, and the
+    session-tools popup, replacing each spot's own hand-rolled inline-styled
+    placeholder.
+  - **Generic button-busy spinner** (`withButtonBusy()`) applied to the
+    provider API key Save/Delete buttons, so slow IPC calls show visible
+    feedback instead of looking unresponsive.
+  - Deliberately did *not* add a skeleton-loading state for manual list
+    reloads: the splash screen (1.6.7) already covers the first load, and
+    reloads already keep the previous list visible (with the reload button's
+    existing spin) rather than flashing empty — a skeleton would have
+    addressed a gap that no longer exists.
+  - Deliberately did *not* attempt a tab-switch content crossfade: the
+    stream-output panes toggle via `display: none`/`block`, which can't be
+    smoothly transitioned without restructuring every open tab's pane to
+    stay mounted (absolute-positioned) simultaneously — too much risk
+    (scroll position, per-tab state) for a cosmetic gain.
+
 ## [1.6.7] - 2026-07-24
 
 ### Added

@@ -541,6 +541,43 @@ function initTagInput(btnId, inputId, addFn) {
   });
 }
 
+// ── Generic Button-Busy Helper ─────────────────────────────────
+/**
+ * Shows a spinner and disables a button for the duration of an async action,
+ * so slow IPC calls (key save/delete, …) give visible feedback instead of
+ * looking unresponsive. Always restores the button's original content
+ * afterward, even on error — a no-op if the handler already replaced the
+ * button's markup (e.g. via a full re-render) by then.
+ * @param {HTMLButtonElement} btn
+ * @param {() => Promise<void>} asyncFn
+ */
+async function withButtonBusy(btn, asyncFn) {
+  if (!btn) return asyncFn();
+  const originalHtml = btn.innerHTML;
+  const originalDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-spinner"></span>';
+  try {
+    await asyncFn();
+  } finally {
+    btn.innerHTML = originalHtml;
+    btn.disabled = originalDisabled;
+  }
+}
+
+// ── Shared Empty-State Markup ─────────────────────────────────
+/**
+ * Consistent icon+text markup for an empty sidebar list (Todos, Sessions,
+ * Images, session-tools popup, skill manager, …), instead of each spot
+ * hand-rolling its own inline-styled placeholder text.
+ * @param {string} icon - Single emoji/icon character.
+ * @param {string} text - Message shown below the icon.
+ * @returns {string}
+ */
+function emptyStateHtml(icon, text) {
+  return `<div class="sidebar__empty"><span class="sidebar__empty-icon">${icon}</span><span>${escapeHtml(text)}</span></div>`;
+}
+
 // ── Toast Notifications ─────────────────────────────────────
 /**
  * Display a toast notification that auto-dismisses after a timeout.
@@ -551,7 +588,7 @@ function showNotification(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast toast--${type}`;
   toast.textContent = message;
-  document.body.appendChild(toast);
+  (document.getElementById('toastStack') || document.body).appendChild(toast);
   // Trigger animation
   requestAnimationFrame(() => toast.classList.add('toast--visible'));
   setTimeout(() => {
@@ -3260,7 +3297,7 @@ function renderSessions(list) {
           </div>
         </div>`;
     } else {
-      container.innerHTML = '<p style="padding:10px;color:var(--text-muted);font-size:12px;">Keine Sessions gefunden</p>';
+      container.innerHTML = emptyStateHtml('💾', 'Keine Sessions gefunden');
     }
     return;
   }
@@ -4785,12 +4822,12 @@ window.toggleSection = function(name) {
   const chevron = document.getElementById(name + 'Chevron');
   const search = document.querySelector(`#${name}Content`)?.parentElement?.querySelector('.sidebar__search');
   if (el) {
-    const isHidden = el.style.display === 'none';
-    el.style.display = isHidden ? '' : 'none';
-    if (search) search.style.display = isHidden ? '' : 'none';
-    if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !isHidden);
+    const wasCollapsed = el.classList.contains('sidebar__content--collapsed');
+    el.classList.toggle('sidebar__content--collapsed', !wasCollapsed);
+    if (search) search.classList.toggle('sidebar__search--collapsed', !wasCollapsed);
+    if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !wasCollapsed);
     const collapsed = getPref('sidebarSectionsCollapsed', {});
-    collapsed[name] = !isHidden;
+    collapsed[name] = !wasCollapsed;
     setPref('sidebarSectionsCollapsed', collapsed);
   }
 };
@@ -5424,8 +5461,8 @@ function initSidebar() {
     const chevron = document.getElementById(name + 'Chevron');
     const search = el?.parentElement?.querySelector('.sidebar__search');
     if (el) {
-      el.style.display = 'none';
-      if (search) search.style.display = 'none';
+      el.classList.add('sidebar__content--collapsed');
+      if (search) search.classList.add('sidebar__search--collapsed');
       if (chevron) chevron.classList.add('sidebar__chevron--collapsed');
     }
   }
@@ -5755,7 +5792,7 @@ async function renderProvidersSettings() {
 
     if (!p.keyless) {
       const input = row.querySelector('.providers-row__input');
-      row.querySelector('.providers-row__save').addEventListener('click', async () => {
+      row.querySelector('.providers-row__save').addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
         const key = input.value.trim();
         if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
         const res = await window.copilot.providers.setKey(p.id, key);
@@ -5767,12 +5804,12 @@ async function renderProvidersSettings() {
         } else {
           showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
         }
-      });
-      row.querySelector('.providers-row__delete').addEventListener('click', async () => {
+      }));
+      row.querySelector('.providers-row__delete').addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
         await window.copilot.providers.deleteKey(p.id);
         showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
         renderProvidersSettings();
-      });
+      }));
     }
 
     if (p.baseUrl) {
