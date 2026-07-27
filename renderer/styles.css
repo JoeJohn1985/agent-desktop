@@ -248,9 +248,7 @@ body {
   position: relative;
 }
 .sidebar--collapsed .sidebar__header,
-.sidebar--collapsed .sidebar__search,
 .sidebar--collapsed .sidebar__content,
-.sidebar--collapsed .sidebar__badge,
 .sidebar--collapsed #btnSettings,
 .sidebar--collapsed #btnTests,
 .sidebar--collapsed #btnDevConsole {
@@ -296,11 +294,9 @@ body {
   z-index: 100;
   box-shadow: 4px 0 20px rgba(0,0,0,0.25);
 }
-.sidebar--collapsed:hover .sidebar__header,
-.sidebar--collapsed:hover .sidebar__badge {
+.sidebar--collapsed:hover .sidebar__header {
   display: flex;
 }
-.sidebar--collapsed:hover .sidebar__search,
 .sidebar--collapsed:hover .sidebar__content {
   display: block;
 }
@@ -368,42 +364,24 @@ body {
 }
 .sidebar__header:hover { background: var(--bg-hover); color: var(--text-secondary); }
 
-.sidebar__reload-btn {
+/* Sole ⋮ trigger for a section header's secondary actions (see
+   openSectionMenu) — always visible, unlike the per-session-card ⋮ which is
+   hover-only (there are many cards, so decluttering matters more there). */
+.sidebar__menu-btn {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border-radius: 4px;
-  transition: color 0.15s, background 0.15s, transform 0.3s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  pointer-events: none;
+  transition: color 0.15s, background 0.15s;
   margin-left: auto;
 }
-
-.sidebar__header:hover .sidebar__reload-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.sidebar__reload-btn:hover {
+.sidebar__menu-btn:hover {
   color: var(--text-primary);
   background: var(--bg-active);
-}
-
-.sidebar__reload-btn--spinning {
-  animation: sidebar-spin 0.6s linear infinite;
-  opacity: 1 !important;
-  pointer-events: none !important;
-}
-
-@keyframes sidebar-spin {
-  to { transform: rotate(360deg); }
 }
 
 .sidebar__header-left {
@@ -417,38 +395,6 @@ body {
 .sidebar__chevron--collapsed {
   transform: rotate(-90deg);
 }
-
-.sidebar__badge {
-  background: var(--user-msg-bg);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 10px;
-  min-width: 18px;
-  text-align: center;
-}
-
-.sidebar__search {
-  padding: 0 10px 10px 10px;
-}
-.sidebar__search input {
-  width: 100%;
-  padding: 6px 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
-}
-.sidebar__search input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-subtle);
-}
-.sidebar__search input::placeholder { color: var(--text-muted); }
 
 .sidebar__content {
   overflow-y: auto;
@@ -464,7 +410,6 @@ body {
   overflow: hidden;
   pointer-events: none;
 }
-.sidebar__search--collapsed { display: none; }
 
 /* ── Shared Empty-State (Todos/Sessions/Images/session-tools/skill-manager) */
 .sidebar__empty {
@@ -534,38 +479,34 @@ body {
   flex: 1;
   min-width: 0;
 }
-.session-card__delete {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-  flex-shrink: 0;
-}
-.session-card:hover .session-card__delete { opacity: 0.6; }
-.session-card__delete:hover { opacity: 1 !important; background: var(--bg-hover); }
-
-.session-card__cwd-btn {
+/* ⋮ trigger for a session card's rename/folder/delete menu (openSessionCardMenu)
+   — hover-revealed like the old delete button it replaces, since there are
+   many cards and showing every one's actions permanently would be noisy. */
+.session-card__menu-btn {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-.session-card__cwd-btn:hover { background: var(--bg-active); }
-.session-card__cwd-btn--empty {
+  font-size: 15px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
   opacity: 0;
-  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
 }
-.session-card:hover .session-card__cwd-btn--empty {
-  opacity: 0.5;
-  pointer-events: auto;
+.session-card:hover .session-card__menu-btn { opacity: 0.7; }
+.session-card__menu-btn:hover { opacity: 1 !important; background: var(--bg-hover); color: var(--text-primary); }
+
+.session-card__rename-input {
+  width: 100%;
+  padding: 1px 4px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
 }
 
 /* ── Skill Cards ──────────────────────────────────────── */
@@ -2018,6 +1959,50 @@ mark.chat-search-highlight--active {
   animation: model-dropdown-in 0.12s ease-out;
 }
 
+/* Sidebar section-header ⋮ menu (openSectionMenu) and session-card ⋮ menu
+   (openSessionCardMenu) — same fixed-anchored pattern as .provider-add-dropdown,
+   so a menu opened from a card deep in a scrollable list is never clipped. */
+.section-menu {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  padding: 4px 0;
+  z-index: 2000;
+  animation: model-dropdown-in 0.12s ease-out;
+}
+.section-menu__item {
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+.section-menu__item:hover { background: var(--bg-hover); }
+.section-menu__item--danger { color: #f38ba8; }
+.section-menu__item--danger:hover { background: rgba(243, 139, 168, 0.12); }
+.section-menu__search { padding: 4px 8px; }
+.section-menu__search input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.section-menu__search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.section-menu__search input::placeholder { color: var(--text-muted); }
+
 .session-actions__btn--active {
   background: var(--accent, #2ea043);
   border-color: var(--accent, #2ea043);
@@ -2829,43 +2814,6 @@ mark.chat-search-highlight--active {
 }
 
 /* ── Todo Section ────────────────────────────────────── */
-.todo-add {
-  display: flex;
-  gap: 6px;
-  padding: 6px 10px;
-}
-.todo-add input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-}
-.todo-add input:focus { border-color: var(--accent); }
-.todo-add button {
-  padding: 3px 8px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--user-msg-bg);
-  color: #fff;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.todo-add__btn--sync {
-  background: var(--bg-overlay);
-  color: var(--text-secondary, #a6adc8);
-  font-size: 11px;
-}
-.todo-add__btn--sync:hover {
-  background: var(--bg-hover, #45475a);
-  color: var(--text-primary, #cdd6f4);
-}
 .todo-item {
   display: flex;
   align-items: center;
@@ -4830,28 +4778,4 @@ mark.chat-search-highlight--active {
   background: var(--bg-active);
   color: var(--accent);
   font-weight: 600;
-}
-
-/* Gear button in sidebar header */
-.sidebar__gear-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 1;
-  pointer-events: auto;
-  margin-left: 2px;
-}
-
-.sidebar__gear-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-active);
 }

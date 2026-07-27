@@ -161,12 +161,12 @@ describe('IPC-Konsistenz (preload ipcRenderer.send → main ipcMain.on)', () => 
 // ── HTML id-Referenzen ───────────────────────────────────────
 
 describe('HTML-Element-IDs die im JS referenziert werden', () => {
-  // Critical IDs that app.js relies on
+  // Critical IDs that app.js relies on. Note: #sessionSearch is intentionally
+  // absent here — it's created dynamically inside the Sessions section's ⋮
+  // menu (see openSectionMenu in renderer/app.js), not present in static HTML.
   const criticalIds = [
     'chatInput',
     'sessionList',
-    'sessionCount',
-    'sessionSearch',
     'sidebar',
     'resizeHandle',
     'btnCollapseSidebar',

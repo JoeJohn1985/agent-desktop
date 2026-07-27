@@ -11,7 +11,6 @@ async function loadImages() {
     console.warn('[images] Laden fehlgeschlagen:', e.message);
     currentImages = [];
   }
-  document.getElementById('imageCount').textContent = currentImages.length;
   renderImages();
 }
 

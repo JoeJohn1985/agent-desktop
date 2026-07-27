@@ -3271,7 +3271,6 @@ async function loadSessions() {
   sessions = Object.entries(all)
     .map(([id, entry]) => ({ id, name: entry.name, lastUsed: entry.lastUsed || '', cwd: entry.cwd || null }))
     .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
-  document.getElementById('sessionCount').textContent = sessions.length;
   renderSessions(filterSessions());
 }
 
@@ -3282,7 +3281,8 @@ async function loadSessions() {
  */
 function renderSessions(list) {
   const container = document.getElementById('sessionList');
-  const query = document.getElementById('sessionSearch').value.trim();
+  // #sessionSearch only exists while the Sessions ⋮ menu is open.
+  const query = (document.getElementById('sessionSearch')?.value || '').trim();
 
   if (list.length === 0) {
     // If query looks like a session ID, offer to resume it directly
@@ -3310,8 +3310,6 @@ function renderSessions(list) {
   let html = list.map(s => {
     const isLive = openSessionIds.has(s.id);
     const title = s.name;
-    const cwdTooltip = s.cwd ? escapeAttr(s.cwd) : 'Arbeitsverzeichnis festlegen';
-    const cwdBtnClass = s.cwd ? 'session-card__cwd-btn' : 'session-card__cwd-btn session-card__cwd-btn--empty';
     // Show the source provider's brand icon on each session card.
     const provider = getSessionProvider(s.id) || 'copilot';
     const provIcon = `<span class="session-card__provider" data-tooltip="${escapeAttr(PROVIDER_SHORT[provider] || provider)}">${providerIconHtml(provider)}</span>`;
@@ -3320,10 +3318,9 @@ function renderSessions(list) {
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
           <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
-            <div class="session-card__title">${provIcon}${escapeHtml(title)}</div>
+            <div class="session-card__title">${provIcon}<span class="session-card__title-text">${escapeHtml(title)}</span></div>
           </div>
-          <button class="session-card__delete" onclick="event.stopPropagation();confirmDeleteSession('${escapeAttr(s.id)}','${escapeAttr(title)}')" data-tooltip="Session löschen">🗑️</button>
-          <button class="${cwdBtnClass}" onclick="event.stopPropagation(); pickSessionCwd('${escapeAttr(s.id)}')" data-tooltip="${cwdTooltip}" aria-label="Arbeitsverzeichnis ändern">📁</button>
+          <button class="session-card__menu-btn" onclick="event.stopPropagation(); openSessionCardMenu('${escapeAttr(s.id)}', this)" data-tooltip="Optionen" aria-label="Session-Optionen">⋮</button>
         </div>
       </div>
     `;
@@ -3343,6 +3340,109 @@ function renderSessions(list) {
   }
 
   container.innerHTML = html;
+}
+
+/**
+ * Opens the per-card ⋮ menu for a saved session (rename / change folder /
+ * delete) — fixed-positioned so it's never clipped by the scrollable
+ * session list, closes on outside click. Only one menu (of any kind) is
+ * ever open at a time; opening this one implicitly closes any other via the
+ * shared document-click listener each dropdown registers.
+ * @param {string} sessionId
+ * @param {HTMLElement} btn - The ⋮ button that was clicked.
+ */
+function openSessionCardMenu(sessionId, btn) {
+  const already = document.querySelector('.section-menu[data-session-id]');
+  if (already) {
+    const wasSameCard = already.dataset.sessionId === sessionId;
+    already.remove();
+    if (already._closeHandler) document.removeEventListener('click', already._closeHandler, true);
+    if (wasSameCard) return; // clicking the same card's ⋮ again just closes it
+  }
+
+  const s = sessions.find(x => x.id === sessionId);
+  if (!s) return;
+  const card = btn.closest('.session-card');
+
+  const menu = document.createElement('div');
+  menu.className = 'section-menu';
+  menu.dataset.sessionId = sessionId;
+  const cwdLabel = s.cwd ? '📁 Ordner ändern' : '📁 Ordner festlegen';
+  menu.innerHTML = `
+    <div class="section-menu__item" data-action="rename">✏️ Umbenennen</div>
+    <div class="section-menu__item" data-action="cwd">${cwdLabel}</div>
+    <div class="section-menu__item section-menu__item--danger" data-action="delete">🗑️ Session löschen</div>
+  `;
+
+  const rect = btn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  document.body.appendChild(menu);
+
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', closeHandler, true);
+  };
+  const closeHandler = (ev) => { if (!menu.contains(ev.target) && ev.target !== btn) close(); };
+  menu._closeHandler = closeHandler;
+  setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+
+  menu.querySelector('[data-action="rename"]').addEventListener('click', () => {
+    close();
+    if (card) startSessionRename(sessionId, card);
+  });
+  menu.querySelector('[data-action="cwd"]').addEventListener('click', () => {
+    close();
+    pickSessionCwd(sessionId);
+  });
+  menu.querySelector('[data-action="delete"]').addEventListener('click', () => {
+    close();
+    confirmDeleteSession(sessionId, s.name);
+  });
+}
+
+/**
+ * Inline-renames a saved session, swapping its title for a text input in
+ * place — same pattern as startTabRename() but for a sidebar session card
+ * rather than an open tab.
+ * @param {string} sessionId
+ * @param {HTMLElement} card - The `.session-card` element to edit in place.
+ */
+function startSessionRename(sessionId, card) {
+  const titleTextEl = card.querySelector('.session-card__title-text');
+  if (!titleTextEl) return;
+  const currentName = getSessionName(sessionId) || titleTextEl.textContent;
+
+  const input = document.createElement('input');
+  input.className = 'session-card__rename-input';
+  input.type = 'text';
+  input.value = currentName;
+
+  titleTextEl.style.display = 'none';
+  titleTextEl.insertAdjacentElement('afterend', input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+  const commit = () => {
+    if (committed) return;
+    committed = true;
+    const newName = input.value.trim();
+    input.remove();
+    titleTextEl.style.display = '';
+    if (newName && newName !== currentName) {
+      setSessionName(sessionId, newName);
+      loadSessions();
+    }
+  };
+
+  input.addEventListener('mousedown', (e) => e.stopPropagation());
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+  });
 }
 
 /**
@@ -3685,21 +3785,18 @@ function cancelDeleteSession() {
  */
 function renderSkills() {
   const container = document.getElementById('skillList');
-  const countEl = document.getElementById('skillsCount');
   const section = container.closest('.sidebar__section');
   const visibleSkills = skills.filter(s => {
     if (!s.dirName) return true;
     return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName) && !disabledSkills.has(s.dirName);
   });
-  
+
   if (visibleSkills.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
-  
+
   if (section) section.style.display = 'block';
-  if (countEl) countEl.textContent = visibleSkills.length > 0 ? visibleSkills.length : '';
   container.innerHTML = visibleSkills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
@@ -3778,7 +3875,6 @@ async function refreshMcpStatus() {
 function renderMcpServers() {
   const container = document.getElementById('mcpList');
   if (!container) return;
-  const countEl = document.getElementById('mcpCount');
   const section = container.closest('.sidebar__section');
 
   // MCP servers are only wired to the Copilot CLI. Direct-API providers
@@ -3788,18 +3884,15 @@ function renderMcpServers() {
   const activeTab = tabs.get(activeTabId);
   if (activeTab && getTabProvider(activeTab) !== 'copilot') {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
 
   if (mcpServers.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
-  
+
   if (section) section.style.display = 'block';
-  if (countEl) countEl.textContent = `${mcpServers.filter(s => s.status === 'connected').length}/${mcpServers.length}`;
   container.innerHTML = mcpServers.map(s => {
     const isConnected = s.status === 'connected';
     const isConfigured = s.status === 'configured';
@@ -3993,29 +4086,23 @@ async function loadGlobalSkillsForProvider(provider) {
  * @returns {Promise<void>}
  */
 async function reloadSkills() {
-  const btn = document.querySelector('[aria-label="Skills neu laden"]');
-  if (btn) btn.classList.add('sidebar__reload-btn--spinning');
-  try {
-    const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
-    _lastGlobalSkillsProvider = provider;
-    skills = provider === 'copilot'
-      ? (await copilot.skills.list() || [])
-      : (await copilot.skills.listProvider(provider) || []);
-    const savedActiveSkills = getSettings().activeSkills || [];
-    activeSkills = new Set(savedActiveSkills);
-    const savedDisabledSkills = await copilot.skills.getDisabled() || [];
-    disabledSkills = new Set(savedDisabledSkills);
-    const savedHidden = await copilot.skills.getHidden() || [];
-    hiddenSkillsGlobal = new Set(savedHidden);
-    // Session-hidden aus preferences laden
-    const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
-    const allSessions = getNamedSessions();
-    hiddenSkillsSession = new Set(allSessions[sessionId]?.hiddenSkills || []);
-    renderSkills();
-    renderSkillManager();
-  } finally {
-    if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
-  }
+  const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
+  _lastGlobalSkillsProvider = provider;
+  skills = provider === 'copilot'
+    ? (await copilot.skills.list() || [])
+    : (await copilot.skills.listProvider(provider) || []);
+  const savedActiveSkills = getSettings().activeSkills || [];
+  activeSkills = new Set(savedActiveSkills);
+  const savedDisabledSkills = await copilot.skills.getDisabled() || [];
+  disabledSkills = new Set(savedDisabledSkills);
+  const savedHidden = await copilot.skills.getHidden() || [];
+  hiddenSkillsGlobal = new Set(savedHidden);
+  // Session-hidden aus preferences laden
+  const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
+  const allSessions = getNamedSessions();
+  hiddenSkillsSession = new Set(allSessions[sessionId]?.hiddenSkills || []);
+  renderSkills();
+  renderSkillManager();
 }
 
 // ── Agents ───────────────────────────────────────────────────
@@ -4088,17 +4175,14 @@ async function loadProjectSkillsAndAgents(cwd) {
  */
 function renderAgents() {
   const container = document.getElementById('agentList');
-  const countEl = document.getElementById('agentsCount');
   const section = container.closest('.sidebar__section');
-  
+
   if (agents.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
-  
+
   if (section) section.style.display = 'block';
-  if (countEl) countEl.textContent = agents.length > 0 ? agents.length : '';
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
     const isProject = a.source === 'project';
@@ -4139,8 +4223,6 @@ function toggleAgent(agentId) {
  * @returns {Promise<void>}
  */
 async function reloadAgents() {
-  const btn = document.querySelector('[aria-label="Agents neu laden"]');
-  if (btn) btn.classList.add('sidebar__reload-btn--spinning');
   try {
     const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
     _lastGlobalAgentsProvider = provider;
@@ -4152,8 +4234,6 @@ async function reloadAgents() {
     renderAgents();
   } catch (e) {
     console.warn('[agents] Reload fehlgeschlagen:', e.message);
-  } finally {
-    if (btn) btn.classList.remove('sidebar__reload-btn--spinning');
   }
 }
 
@@ -4797,7 +4877,9 @@ function initResize() {
  * @returns {Array<{id: string, name: string, lastUsed: string}>}
  */
 function filterSessions() {
-  const query = document.getElementById('sessionSearch').value.trim();
+  // #sessionSearch only exists while the Sessions section's ⋮ menu is open
+  // (see openSectionMenu) — no query means "show everything" otherwise.
+  const query = (document.getElementById('sessionSearch')?.value || '').trim();
   const lower = query.toLowerCase();
   if (!lower) return sessions;
   return sessions.filter(s =>
@@ -4820,17 +4902,135 @@ function isSessionIdLike(str) {
 window.toggleSection = function(name) {
   const el = document.getElementById(name + 'Content');
   const chevron = document.getElementById(name + 'Chevron');
-  const search = document.querySelector(`#${name}Content`)?.parentElement?.querySelector('.sidebar__search');
   if (el) {
     const wasCollapsed = el.classList.contains('sidebar__content--collapsed');
     el.classList.toggle('sidebar__content--collapsed', !wasCollapsed);
-    if (search) search.classList.toggle('sidebar__search--collapsed', !wasCollapsed);
     if (chevron) chevron.classList.toggle('sidebar__chevron--collapsed', !wasCollapsed);
     const collapsed = getPref('sidebarSectionsCollapsed', {});
     collapsed[name] = !wasCollapsed;
     setPref('sidebarSectionsCollapsed', collapsed);
   }
 };
+
+// ── Sidebar Section ⋮ Menus ──────────────────────────────────
+/**
+ * Per-section config for the header's ⋮ dropdown: `buildHtml()` returns the
+ * menu's inner markup, `wire(menu, close)` attaches listeners to it once
+ * inserted, and `onClose()` (optional) runs any cleanup right before the
+ * menu is removed (e.g. the Sessions search resets the visible list).
+ * Sections not listed here have no ⋮ button in index.html at all.
+ */
+const SECTION_MENUS = {
+  sessions: {
+    buildHtml: () => `
+      <div class="section-menu__search">
+        <input type="text" id="sessionSearch" placeholder="Sessions durchsuchen…" autocomplete="off" />
+      </div>
+    `,
+    wire(menu) {
+      const input = menu.querySelector('#sessionSearch');
+      input.addEventListener('input', () => renderSessions(filterSessions()));
+      setTimeout(() => input.focus(), 50);
+    },
+    onClose() {
+      // Search is "find & open", not a persistent filter — always show the
+      // full list again once the menu (and its search box) is gone.
+      renderSessions(sessions);
+    },
+  },
+  skills: {
+    buildHtml: () => `
+      <div class="section-menu__item" data-action="reload">↻ Skills neu laden</div>
+      <div class="section-menu__item" data-action="manage">⚙️ Skills verwalten</div>
+    `,
+    wire(menu, close) {
+      menu.querySelector('[data-action="reload"]').addEventListener('click', async (e) => {
+        e.currentTarget.innerHTML = '<span class="btn-spinner"></span> Wird geladen…';
+        await reloadSkills();
+        close();
+      });
+      menu.querySelector('[data-action="manage"]').addEventListener('click', () => {
+        close();
+        openSkillManager();
+      });
+    },
+  },
+  agents: {
+    buildHtml: () => `
+      <div class="section-menu__item" data-action="reload">↻ Agents neu laden</div>
+    `,
+    wire(menu, close) {
+      menu.querySelector('[data-action="reload"]').addEventListener('click', async (e) => {
+        e.currentTarget.innerHTML = '<span class="btn-spinner"></span> Wird geladen…';
+        await reloadAgents();
+        close();
+      });
+    },
+  },
+  todos: {
+    buildHtml: () => `
+      <div class="section-menu__search">
+        <input type="text" id="todoInput" placeholder="Neues Todo… (Enter zum Hinzufügen)" autocomplete="off" />
+      </div>
+      <div class="section-menu__item" data-action="sync">🔄 Nächste 5 Todos an Chat senden</div>
+    `,
+    wire(menu, close) {
+      const input = menu.querySelector('#todoInput');
+      input.addEventListener('keydown', (e) => {
+        // addTodo() reads/clears #todoInput itself on success.
+        if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
+      });
+      setTimeout(() => input.focus(), 50);
+      menu.querySelector('[data-action="sync"]').addEventListener('click', async () => {
+        close();
+        await syncTodosToChat();
+      });
+    },
+  },
+};
+
+/**
+ * Opens a sidebar section header's ⋮ dropdown (Sessions search, Skills/
+ * Agents reload+manage, Todos add+sync — see SECTION_MENUS). Fixed-
+ * positioned so it's never clipped by the section's scrollable list;
+ * closes on outside click. Only one menu (section or session-card) is ever
+ * open at a time — opening a new one is itself a document click that closes
+ * whichever other menu's own outside-click listener is currently active.
+ * @param {string} name - Section name (key into SECTION_MENUS).
+ * @param {HTMLElement} btn - The ⋮ button that was clicked.
+ */
+function openSectionMenu(name, btn) {
+  const already = document.querySelector('.section-menu[data-for-section]');
+  if (already) {
+    const wasSameSection = already.dataset.forSection === name;
+    already._close?.();
+    if (wasSameSection) return; // clicking the same section's ⋮ again just closes it
+  }
+
+  const config = SECTION_MENUS[name];
+  if (!config) return;
+
+  const menu = document.createElement('div');
+  menu.className = 'section-menu';
+  menu.dataset.forSection = name;
+  menu.innerHTML = config.buildHtml();
+
+  const rect = btn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  document.body.appendChild(menu);
+
+  const close = () => {
+    config.onClose?.();
+    menu.remove();
+    document.removeEventListener('click', closeHandler, true);
+  };
+  menu._close = close;
+  const closeHandler = (ev) => { if (!menu.contains(ev.target) && ev.target !== btn) close(); };
+  setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+
+  config.wire(menu, close);
+}
 
 // ── Helpers ──────────────────────────────────────────────────
 function formatDate(iso) {
@@ -5123,44 +5323,44 @@ function initWindowControls() {
  * Initialize all session action buttons: todo sync, todo add,
  * and session delete confirmation handlers.
  */
+/**
+ * Marks the next 5 open todos as done and sends them as a chat prompt to
+ * the active tab. Used by the Todos section's ⋮ menu (see openSectionMenu).
+ * @returns {Promise<void>}
+ */
+async function syncTodosToChat() {
+  if (activeTabId == null) return;
+  const tab = tabs.get(activeTabId);
+  if (!tab || !tab.sessionId) {
+    showNotification('Keine aktive Session', 'warning');
+    return;
+  }
+  if (tab.isProcessing) {
+    showNotification('Chat ist noch beschäftigt', 'warning');
+    return;
+  }
+  const openTodos = currentTodos.filter(t => t.status === 'open').slice(0, 5);
+  if (openTodos.length === 0) {
+    showNotification('Keine offenen Todos', 'info');
+    return;
+  }
+  const todoList = openTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
+  const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
+  try {
+    for (const todo of openTodos) {
+      await copilot.todos.update(tab.cwd, todo.id, { status: 'done' });
+    }
+    await loadTodos(tab.cwd);
+  } catch (err) {
+    showNotification(`Fehler: ${err.message}`, 'error');
+    return;
+  }
+  document.getElementById('chatInput').value = prompt;
+  sendMessage();
+  showNotification(`${openTodos.length} Todos gesendet ✓`, 'success');
+}
+
 function initSlashButtons() {
-  document.getElementById('btnAddTodo').addEventListener('click', () => addTodo());
-  document.getElementById('todoInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
-  });
-
-  document.getElementById('btnSyncTodos').addEventListener('click', async () => {
-    if (activeTabId == null) return;
-    const tab = tabs.get(activeTabId);
-    if (!tab || !tab.sessionId) {
-      showNotification('Keine aktive Session', 'warning');
-      return;
-    }
-    if (tab.isProcessing) {
-      showNotification('Chat ist noch beschäftigt', 'warning');
-      return;
-    }
-    const openTodos = currentTodos.filter(t => t.status === 'open').slice(0, 5);
-    if (openTodos.length === 0) {
-      showNotification('Keine offenen Todos', 'info');
-      return;
-    }
-    const todoList = openTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
-    const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
-    try {
-      for (const todo of openTodos) {
-        await copilot.todos.update(tab.cwd, todo.id, { status: 'done' });
-      }
-      await loadTodos(tab.cwd);
-    } catch (err) {
-      showNotification(`Fehler: ${err.message}`, 'error');
-      return;
-    }
-    document.getElementById('chatInput').value = prompt;
-    sendMessage();
-    showNotification(`${openTodos.length} Todos gesendet ✓`, 'success');
-  });
-
   document.getElementById('btnDeleteConfirm').addEventListener('click', () => executeDeleteSession());
   document.getElementById('btnDeleteCancel').addEventListener('click', () => cancelDeleteSession());
   document.getElementById('deleteOverlay').addEventListener('click', (e) => {
@@ -5459,10 +5659,8 @@ function initSidebar() {
     if (!isCollapsed) continue;
     const el = document.getElementById(name + 'Content');
     const chevron = document.getElementById(name + 'Chevron');
-    const search = el?.parentElement?.querySelector('.sidebar__search');
     if (el) {
       el.classList.add('sidebar__content--collapsed');
-      if (search) search.classList.add('sidebar__search--collapsed');
       if (chevron) chevron.classList.add('sidebar__chevron--collapsed');
     }
   }

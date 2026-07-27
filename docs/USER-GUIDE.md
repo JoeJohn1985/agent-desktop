@@ -118,14 +118,13 @@ The app uses a custom, frameless titlebar:
 
 ### Sidebar
 
-The sidebar is on the left edge and can be collapsed/expanded via the **collapse button** (◀) in the footer. It contains four sections:
+The sidebar is on the left edge and can be collapsed/expanded via the **collapse button** (◀) in the footer. It contains six sections. Section header badges were removed in favor of a per-section **⋮ menu** (always visible in the header) that holds whichever secondary actions that section has — search, reload, manage, add, sync, etc. — so the header itself stays uncluttered.
 
 #### 📂 Sessions
 
-- **Search field** to filter by session name.
-- **Session cards** show name, date, and checkpoint count.
+- **Session cards** show the provider icon and name. Hover a card to reveal its **⋮ menu**: **✏️ Umbenennen** (rename in place), **📁 Ordner festlegen/ändern**, **🗑️ Session löschen**.
 - **Click** a card to open the session in a new tab.
-- **Right-click** or **hover** shows options to rename or delete.
+- The header's **⋮ menu** holds the **search field** — opens with the input already focused, filters the list live while typing, and resets back to the full list once the menu is closed (it's a "find & open" tool, not a persistent filter).
 
 > **Note:** only named sessions are shown in the sidebar. Unnamed sessions exist only as open tabs.
 
@@ -135,21 +134,25 @@ The sidebar is on the left edge and can be collapsed/expanded via the **collapse
 - The model decides on its own whether a skill is relevant and reads it via its file tool — nothing is force-fed into every prompt by default.
 - **Toggle switch** force-activates a skill for the next message as an explicit override, on top of the automatic selection.
 - **⊘ button** disables a skill globally in the Copilot CLI (`~/.copilot/settings.json`) — Copilot only.
+- The header's **⋮ menu** holds **↻ Skills neu laden** and **⚙️ Skills verwalten** (opens the Skill Manager).
 
 #### 🤖 Agents
 
 - List of all available agents (persona/approach presets) with icon, name, and description — same provider-follows-active-tab behavior as Skills.
 - Agents are a **persona switch**: if the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task — still the same conversation, not a separate delegated sub-agent run.
 - **Toggle switch** force-activates an agent for the next message, same override semantics as Skills.
+- The header's **⋮ menu** holds **↻ Agents neu laden**.
+
+#### 🔌 MCP-Server
+
+- Shows configured MCP servers and their live connection status (🟢 connected / ⚪ configured / 🔴 disconnected) — Copilot only; direct-API providers have no MCP connection by design.
 
 #### ✅ Todos
 
 > This section is only visible when a session is loaded.
 
-- **Input field** "New todo…" with a ➕ button or `Enter`.
-- **Todo list** with checkboxes and 🗑️ delete buttons.
-- **Drag & drop** to reorder.
-- 🔄 **Sync:** sends the first 5 open todos as a prompt.
+- **Todo list** with checkboxes and drag & drop to reorder.
+- The header's **⋮ menu** holds the **"New todo…" input** (press `Enter` to add — no separate button) and **🔄 Nächste 5 Todos an Chat senden** (sends the next 5 open todos as a prompt).
 
 #### 🖼️ Images
 
@@ -232,9 +235,9 @@ At the bottom, the statusbar shows contextual information about the active sessi
 |---|---|
 | **New session** | Click the ➕ tab → send a message → the session is created automatically |
 | **Resume session** | Click the session card in the sidebar |
-| **Rename session** | Double-click the tab title or right-click in the sidebar |
-| **Delete session** | Hover the session card → 🗑️ → confirmation dialog |
-| **Choose CWD** | Click 📂 in the statusbar → folder picker dialog |
+| **Rename session** | Double-click the tab title, or hover a session card → ⋮ → ✏️ Umbenennen |
+| **Delete session** | Hover the session card → ⋮ → 🗑️ Session löschen → confirmation dialog |
+| **Choose CWD** | Click 📂 in the statusbar, or hover a session card → ⋮ → 📁 Ordner festlegen/ändern |
 
 ### Chat
 

@@ -40,10 +40,6 @@ async function loadTodos(cwd) {
  */
 function renderTodos() {
   const container = document.getElementById('todoList');
-  const openCount = currentTodos.filter(t => t.status === 'open').length;
-  const totalCount = currentTodos.length;
-  document.getElementById('todoCount').textContent =
-    totalCount > 0 ? `${openCount}/${totalCount}` : '0';
 
   if (currentTodos.length === 0) {
     container.innerHTML = emptyStateHtml('✅', 'Keine Todos vorhanden');

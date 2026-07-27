@@ -50,10 +50,7 @@
       <div class="sidebar__section" id="sessionsSection" data-icon="📂">
         <div class="sidebar__header" onclick="toggleSection('sessions')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="sessionsChevron">▾</span> 📂 Sessions</span>
-          <span class="sidebar__badge" id="sessionCount" data-tooltip="Anzahl Sessions">0</span>
-        </div>
-        <div class="sidebar__search">
-          <input type="text" id="sessionSearch" placeholder="Suchen…" />
+          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('sessions', this)" data-tooltip="Suchen" aria-label="Sessions durchsuchen">⋮</button>
         </div>
         <div class="sidebar__content" id="sessionsContent">
           <div class="sidebar__list" id="sessionList"></div>
@@ -64,9 +61,7 @@
       <div class="sidebar__section" id="skillsSection" data-icon="🛠️">
         <div class="sidebar__header" onclick="toggleSection('skills')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
-          <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadSkills()" data-tooltip="Skills neu laden" aria-label="Skills neu laden">↻</button>
-          <button class="sidebar__gear-btn" onclick="event.stopPropagation(); openSkillManager()" data-tooltip="Skills verwalten" aria-label="Skills verwalten">⚙️</button>
-          <span class="sidebar__badge" id="skillsCount"></span>
+          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('skills', this)" data-tooltip="Optionen" aria-label="Skills-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="skillsContent">
           <div class="sidebar__list" id="skillList"></div>
@@ -77,8 +72,7 @@
       <div class="sidebar__section" id="agentsSection" data-icon="🤖">
         <div class="sidebar__header" onclick="toggleSection('agents')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
-          <button class="sidebar__reload-btn" onclick="event.stopPropagation(); reloadAgents()" data-tooltip="Agents neu laden" aria-label="Agents neu laden">↻</button>
-          <span class="sidebar__badge" id="agentsCount"></span>
+          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('agents', this)" data-tooltip="Optionen" aria-label="Agents-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="agentsContent">
           <div class="sidebar__list" id="agentList"></div>
@@ -89,7 +83,6 @@
       <div class="sidebar__section" id="mcpSection" data-icon="🔌">
         <div class="sidebar__header" onclick="toggleSection('mcp')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="mcpChevron">▾</span> 🔌 MCP-Server</span>
-          <span class="sidebar__badge" id="mcpCount" data-tooltip="Verbunden / Gesamt"></span>
         </div>
         <div class="sidebar__content" id="mcpContent">
           <div class="sidebar__list" id="mcpList"></div>
@@ -100,14 +93,9 @@
       <div class="sidebar__section" id="todosSection" data-icon="✅">
         <div class="sidebar__header" onclick="toggleSection('todos')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="todosChevron">▾</span> ✅ Todos</span>
-          <span class="sidebar__badge" id="todoCount" data-tooltip="Offene / Gesamt">0</span>
+          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('todos', this)" data-tooltip="Optionen" aria-label="Todos-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="todosContent">
-          <div class="todo-add">
-            <input type="text" id="todoInput" placeholder="Neues Todo…" />
-            <button class="todo-add__btn" id="btnAddTodo" data-tooltip="Hinzufügen">+</button>
-            <button class="todo-add__btn todo-add__btn--sync" id="btnSyncTodos" data-tooltip="Nächste 5 Todos an Chat senden">🔄</button>
-          </div>
           <div class="sidebar__list" id="todoList"></div>
         </div>
       </div>
@@ -116,7 +104,6 @@
       <div class="sidebar__section" id="imagesSection" data-icon="🖼️">
         <div class="sidebar__header" onclick="toggleSection('images')">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="imagesChevron">▾</span> 🖼️ Bilder</span>
-          <span class="sidebar__badge" id="imageCount" data-tooltip="Anzahl Bilder">0</span>
         </div>
         <div class="sidebar__content" id="imagesContent">
           <div class="image-gallery" id="imageGallery"></div>

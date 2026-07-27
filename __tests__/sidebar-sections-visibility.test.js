@@ -46,13 +46,10 @@ function createMockDocument() {
     getElementById(id) { return elements[id] || null; },
     _setup() {
       elements['skillList'] = new MockElement('div', 'skillList');
-      elements['skillsCount'] = new MockElement('span', 'skillsCount');
       elements['skillsSection'] = new MockElement('div', 'skillsSection');
       elements['agentList'] = new MockElement('div', 'agentList');
-      elements['agentsCount'] = new MockElement('span', 'agentsCount');
       elements['agentsSection'] = new MockElement('div', 'agentsSection');
       elements['mcpList'] = new MockElement('div', 'mcpList');
-      elements['mcpCount'] = new MockElement('span', 'mcpCount');
       elements['mcpSection'] = new MockElement('div', 'mcpSection');
     },
   };
@@ -81,10 +78,11 @@ function resetState() {
 }
 
 // ── Render Functions (copy from app.js) ───────────────────────
+// No count-badge handling here anymore — the sidebar section badges were
+// removed in favor of per-section ⋮ menus (see openSectionMenu in app.js).
 
 function renderSkills() {
   const container = mockDoc.getElementById('skillList');
-  const countEl = mockDoc.getElementById('skillsCount');
   const section = container.closest('.sidebar__section');
   const visibleSkills = skills.filter(s => {
     if (!s.dirName) return true;
@@ -93,12 +91,10 @@ function renderSkills() {
 
   if (visibleSkills.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
 
   if (section) section.style.display = 'block';
-  if (countEl) countEl.textContent = String(visibleSkills.length);
   container.innerHTML = visibleSkills.map(s => {
     const isActive = activeSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
@@ -118,17 +114,14 @@ function renderSkills() {
 
 function renderAgents() {
   const container = mockDoc.getElementById('agentList');
-  const countEl = mockDoc.getElementById('agentsCount');
   const section = container.closest('.sidebar__section');
 
   if (agents.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
 
   if (section) section.style.display = 'block';
-  if (countEl) countEl.textContent = String(agents.length);
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
     const isProject = a.source === 'project';
@@ -148,20 +141,14 @@ function renderAgents() {
 function renderMcpServers() {
   const container = mockDoc.getElementById('mcpList');
   if (!container) return;
-  const countEl = mockDoc.getElementById('mcpCount');
   const section = container.closest('.sidebar__section');
 
   if (mcpServers.length === 0) {
     if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '';
     return;
   }
 
   if (section) section.style.display = 'block';
-  if (countEl) {
-    const connected = mcpServers.filter(s => s.status === 'connected').length;
-    countEl.textContent = `${connected}/${mcpServers.length}`;
-  }
   container.innerHTML = mcpServers.map(s => {
     const isConnected = s.status === 'connected';
     const statusIcon = isConnected ? '🟢' : '🔴';
@@ -228,23 +215,6 @@ describe('Sidebar Sections Visibility', () => {
       renderSkills();
       expect(section.style.display).toBe('block');
     });
-
-    test('setzt skillsCount auf leer wenn section versteckt', () => {
-      skills = [];
-      const countEl = mockDoc.getElementById('skillsCount');
-      renderSkills();
-      expect(countEl.textContent).toBe('');
-    });
-
-    test('setzt skillsCount auf Anzahl wenn section sichtbar', () => {
-      skills = [
-        { id: 'skill1', name: 'Test Skill', dirName: 'test-skill', description: 'A test skill', icon: '🧪', source: 'user' },
-        { id: 'skill2', name: 'Test Skill 2', dirName: 'test-skill-2', description: 'Another skill', icon: '🧪', source: 'user' },
-      ];
-      const countEl = mockDoc.getElementById('skillsCount');
-      renderSkills();
-      expect(countEl.textContent).toBe('2');
-    });
   });
 
   describe('renderAgents — Section Visibility', () => {
@@ -264,23 +234,6 @@ describe('Sidebar Sections Visibility', () => {
       renderAgents();
       expect(section.style.display).toBe('block');
     });
-
-    test('setzt agentsCount auf leer wenn section versteckt', () => {
-      agents = [];
-      const countEl = mockDoc.getElementById('agentsCount');
-      renderAgents();
-      expect(countEl.textContent).toBe('');
-    });
-
-    test('setzt agentsCount auf Anzahl wenn section sichtbar', () => {
-      agents = [
-        { id: 'agent1', name: 'Test Agent 1', description: 'A test agent', icon: '🤖', source: 'user', fileSlug: 'test-agent-1' },
-        { id: 'agent2', name: 'Test Agent 2', description: 'Another agent', icon: '🤖', source: 'user', fileSlug: 'test-agent-2' },
-      ];
-      const countEl = mockDoc.getElementById('agentsCount');
-      renderAgents();
-      expect(countEl.textContent).toBe('2');
-    });
   });
 
   describe('renderMcpServers — Section Visibility', () => {
@@ -299,34 +252,6 @@ describe('Sidebar Sections Visibility', () => {
       section.style.display = 'none'; // Reset
       renderMcpServers();
       expect(section.style.display).toBe('block');
-    });
-
-    test('setzt mcpCount auf leer wenn section versteckt', () => {
-      mcpServers = [];
-      const countEl = mockDoc.getElementById('mcpCount');
-      renderMcpServers();
-      expect(countEl.textContent).toBe('');
-    });
-
-    test('zeigt verbundene/gesamt MCP in mcpCount wenn sichtbar', () => {
-      mcpServers = [
-        { id: 'mcp1', name: 'Test MCP 1', status: 'connected' },
-        { id: 'mcp2', name: 'Test MCP 2', status: 'disconnected' },
-        { id: 'mcp3', name: 'Test MCP 3', status: 'connected' },
-      ];
-      const countEl = mockDoc.getElementById('mcpCount');
-      renderMcpServers();
-      expect(countEl.textContent).toBe('2/3');
-    });
-
-    test('zeigt alle als verbunden wenn alle connected sind', () => {
-      mcpServers = [
-        { id: 'mcp1', name: 'Test MCP 1', status: 'connected' },
-        { id: 'mcp2', name: 'Test MCP 2', status: 'connected' },
-      ];
-      const countEl = mockDoc.getElementById('mcpCount');
-      renderMcpServers();
-      expect(countEl.textContent).toBe('2/2');
     });
   });
 

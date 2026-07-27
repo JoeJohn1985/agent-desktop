@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.8.0] - 2026-07-25
+
+### Changed
+- **Sidebar redesign**: decluttered session cards and section headers by
+  moving secondary actions behind ⋮ menus (design pass via `/grill-me`).
+  - **Session cards**: the always-two-icon 📁/🗑️ row is gone, replaced by a
+    single hover-revealed **⋮** button (`openSessionCardMenu`) with
+    **✏️ Umbenennen** (new — sessions could never be renamed before, only
+    tabs could), **📁 Ordner festlegen/ändern**, and **🗑️ Session löschen**.
+    Rename uses the same in-place-input pattern as tab rename
+    (`startSessionRename`).
+  - **Section header badges removed entirely** (Sessions/Skills/Agents/MCP/
+    Todos/Images count/status pills) — no replacement, per explicit
+    decision to keep it clean rather than move the info elsewhere.
+  - **Section header ⋮ menus** (`openSectionMenu`, always visible — unlike
+    the per-card ⋮, there's only one per section so hover-hiding it serves
+    less purpose): Skills gets ↻ Reload + ⚙️ Skill-Manager; Agents gets ↻
+    Reload; Todos gets its "New todo…" input (Enter-to-add, the old ➕
+    button is gone) + 🔄 "next 5 todos to chat"; Sessions gets the search
+    field. MCP/Images keep their header as just chevron + label (no ⋮ menu)
+    since neither has anything to put in one.
+  - **Sessions search moved into its section's ⋮ menu**: auto-focuses on
+    open, filters the list live while typing, and — since it's a "find &
+    open" tool rather than a persistent view filter — resets back to the
+    full list the moment the menu closes (whichever way: picking a result,
+    outside click, or Escape).
+  - All three menu types (section header, session card, and the pre-existing
+    "+" new-tab provider chooser) share the same fixed-positioned,
+    outside-click-closing dropdown pattern, so none of them are ever
+    clipped by the sidebar's scrollable lists.
+
 ## [1.7.1] - 2026-07-25
 
 ### Removed
