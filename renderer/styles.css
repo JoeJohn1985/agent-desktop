@@ -239,104 +239,6 @@ body {
   flex-direction: column;
 }
 
-/* ── Collapsed Sidebar ─────────────────────────────────── */
-.sidebar--collapsed {
-  width: 48px !important;
-  min-width: 48px !important;
-  max-width: 48px !important;
-  overflow: visible;
-  position: relative;
-}
-.sidebar--collapsed .sidebar__header,
-.sidebar--collapsed .sidebar__content,
-.sidebar--collapsed #btnSettings,
-.sidebar--collapsed #btnTests,
-.sidebar--collapsed #btnDevConsole {
-  display: none;
-}
-.sidebar--collapsed .sidebar__section {
-  border-bottom: none;
-  flex: 0 0 auto;
-  overflow: visible;
-}
-.sidebar--collapsed .sidebar__section::before {
-  content: attr(data-icon);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;
-  font-size: 18px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.sidebar--collapsed .sidebar__section:hover::before {
-  background: var(--bg-hover);
-}
-.sidebar--collapsed .sidebar__sections {
-  overflow-y: visible;
-  flex: 0 0 auto;
-}
-.sidebar--collapsed .sidebar__footer {
-  padding: 6px;
-  justify-content: flex-start;
-}
-
-/* Hover expand */
-.sidebar--collapsed:hover {
-  width: var(--sidebar-width) !important;
-  min-width: 220px !important;
-  max-width: 500px !important;
-  position: absolute;
-  top: var(--titlebar-height);
-  left: 0;
-  bottom: 0;
-  z-index: 100;
-  box-shadow: 4px 0 20px rgba(0,0,0,0.25);
-}
-.sidebar--collapsed:hover .sidebar__header {
-  display: flex;
-}
-.sidebar--collapsed:hover .sidebar__content {
-  display: block;
-}
-.sidebar--collapsed:hover #btnSettings,
-.sidebar--collapsed:hover #btnTests,
-.sidebar--collapsed:hover #btnDevConsole {
-  display: inline-flex;
-}
-.sidebar--collapsed:hover .sidebar__section::before {
-  display: none;
-}
-.sidebar--collapsed:hover .sidebar__section {
-  border-bottom: 1px solid var(--border-subtle);
-  overflow: hidden;
-}
-.sidebar--collapsed:hover .sidebar__sections {
-  flex: 1 1 0;
-  overflow-y: auto;
-  min-height: 0;
-}
-.sidebar--collapsed:hover .sidebar__footer {
-  padding: 6px;
-  justify-content: flex-start;
-}
-
-/* Collapse button */
-.sidebar__collapse-btn {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  padding: 0 !important;
-  font-size: 14px;
-  text-align: center;
-  line-height: 36px;
-  border-radius: var(--radius) !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
 
 .sidebar__section {
   border-bottom: 1px solid var(--border-subtle);
@@ -785,9 +687,6 @@ body {
 .resize-handle:hover,
 .resize-handle.dragging {
   background: var(--accent);
-}
-.sidebar--collapsed + .resize-handle {
-  display: none;
 }
 
 /* ── Terminal ─────────────────────────────────────────── */
@@ -2329,6 +2228,13 @@ mark.chat-search-highlight--active {
   margin-right: 6px;
   color: var(--text-secondary);
   vertical-align: middle;
+}
+/* Smaller/nudged provider icon in the sidebar only — the tab bar's own
+   .tab__provider-icon is untouched and stays at the base .provider-icon size. */
+.session-card__provider .provider-icon {
+  width: 13px;
+  height: 13px;
+  margin-top: -3px;
 }
 
 .chat-input {

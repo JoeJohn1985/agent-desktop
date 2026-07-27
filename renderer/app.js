@@ -5636,24 +5636,9 @@ function openInstructionsEditor(content, filePath, opts = {}) {
 }
 
 /**
- * Initialize the sidebar collapse button and restore persisted state.
+ * Restore each sidebar section's persisted collapse/expand state.
  */
 function initSidebar() {
-  const collapseBtn = document.getElementById('btnCollapseSidebar');
-  const sidebar = document.getElementById('sidebar');
-  if (getPref('sidebarCollapsed', false)) {
-    sidebar.classList.add('sidebar--collapsed');
-    collapseBtn.textContent = '▶';
-    collapseBtn.setAttribute('data-tooltip', 'Sidebar erweitern');
-  }
-  collapseBtn.addEventListener('click', () => {
-    const isCollapsed = sidebar.classList.toggle('sidebar--collapsed');
-    collapseBtn.textContent = isCollapsed ? '▶' : '◀';
-    collapseBtn.setAttribute('data-tooltip', isCollapsed ? 'Sidebar erweitern' : 'Sidebar minimieren');
-    setPref('sidebarCollapsed', isCollapsed);
-  });
-
-  // Restore section collapse states
   const sectionsCollapsed = getPref('sidebarSectionsCollapsed', {});
   for (const [name, isCollapsed] of Object.entries(sectionsCollapsed)) {
     if (!isCollapsed) continue;
@@ -6284,7 +6269,6 @@ const SHORTCUT_DEFS = [
   { id: 'focusInput',    label: 'Eingabe fokussieren',    category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'l' } },
   { id: 'search',        label: 'Suche',                  category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'f' } },
   { id: 'exportChat',    label: 'Chat exportieren',       category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'e' } },
-  { id: 'toggleSidebar', label: 'Sidebar ein/ausblenden', category: 'UI',   default: { ctrl: true,  shift: false, alt: false, key: 'b' } },
   { id: 'showShortcuts', label: 'Tastenkürzel anzeigen',  category: 'UI',   default: { ctrl: true,  shift: false, alt: false, key: '/' } },
 ];
 
@@ -6496,7 +6480,6 @@ function initKeyboardShortcuts() {
     if (sc('focusInput', e))    { e.preventDefault(); document.getElementById('chatInput')?.focus(); return; }
     if (sc('exportChat', e))    { e.preventDefault(); exportChat(); return; }
     if (sc('search', e))        { e.preventDefault(); if (window._openSearch) window._openSearch(); return; }
-    if (sc('toggleSidebar', e)) { e.preventDefault(); document.getElementById('btnCollapseSidebar').click(); return; }
 
     if (e.key === 'Escape') {
       // Close model dropdown first (highest priority)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.1] - 2026-07-25
+
+### Removed
+- **Sidebar collapse-to-icon-bar feature removed entirely** (◀ footer
+  button, `Ctrl+B` shortcut, `.sidebar--collapsed` hover-to-expand CSS
+  behavior, `sidebarCollapsed` pref). First step of a larger visual
+  cleanup pass (design discussion via `/grill-me`) — a mockup for the
+  rest (footer/send/rich-text button redesign) follows separately.
+
+### Changed
+- **Session-card provider icon shrunk** to 13×13px with a `-3px` top
+  nudge, scoped to `.session-card__provider .provider-icon` only — the
+  tab bar's own provider icon (`.tab__provider-icon`) is untouched.
+
 ## [1.8.0] - 2026-07-25
 
 ### Changed

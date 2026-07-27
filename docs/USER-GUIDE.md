@@ -103,7 +103,7 @@ The interface consists of four main areas: titlebar, sidebar, main area, and sta
 │            │                                                    │
 │  Images    ├────────────────────────────────────────────────────┤
 │            │  📤 [  Type a message…                        ] ➤  │  ← Chat input
-│  ⚙️ ◀      ├────────────────────────────────────────────────────┤
+│  ⚙️        ├────────────────────────────────────────────────────┤
 │            │  🔌 3  🛠 5  📂 ~/Projects                        │  ← Statusbar
 └────────────┴────────────────────────────────────────────────────┘
 ```
@@ -118,7 +118,7 @@ The app uses a custom, frameless titlebar:
 
 ### Sidebar
 
-The sidebar is on the left edge and can be collapsed/expanded via the **collapse button** (◀) in the footer. It contains six sections. Section header badges were removed in favor of a per-section **⋮ menu** (always visible in the header) that holds whichever secondary actions that section has — search, reload, manage, add, sync, etc. — so the header itself stays uncluttered.
+The sidebar is on the left edge. It contains six sections. Section header badges were removed in favor of a per-section **⋮ menu** (always visible in the header) that holds whichever secondary actions that section has — search, reload, manage, add, sync, etc. — so the header itself stays uncluttered.
 
 #### 📂 Sessions
 
@@ -162,7 +162,6 @@ The sidebar is on the left edge and can be collapsed/expanded via the **collapse
 
 #### Footer
 
-- **Collapse button** (◀) — collapse/expand the sidebar.
 - ⚙️ **Settings button** — opens the settings.
 
 ### Main area
@@ -466,7 +465,6 @@ Configurable shortcuts can be customized via **Settings → Shortcuts**.
 | `Ctrl+L` | Focus input | Chat |
 | `Ctrl+F` | Search chat | Chat |
 | `Ctrl+E` | Export chat | Chat |
-| `Ctrl+B` | Toggle sidebar | UI |
 | `Ctrl+/` | Shortcut help | UI |
 
 ### Hard-wired

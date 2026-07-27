@@ -169,7 +169,6 @@ describe('HTML-Element-IDs die im JS referenziert werden', () => {
     'sessionList',
     'sidebar',
     'resizeHandle',
-    'btnCollapseSidebar',
     'btnSettings',
     'settingsOverlay',
     'btnSettingsClose',

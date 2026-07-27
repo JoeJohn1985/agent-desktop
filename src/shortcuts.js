@@ -15,7 +15,6 @@ const SHORTCUT_DEFS = [
   { id: 'focusInput',    label: 'Eingabe fokussieren',    category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'l' } },
   { id: 'search',        label: 'Suche',                  category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'f' } },
   { id: 'exportChat',    label: 'Chat exportieren',       category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'e' } },
-  { id: 'toggleSidebar', label: 'Sidebar ein/ausblenden', category: 'UI',   default: { ctrl: true,  shift: false, alt: false, key: 'b' } },
   { id: 'showShortcuts', label: 'Tastenkürzel anzeigen',  category: 'UI',   default: { ctrl: true,  shift: false, alt: false, key: '/' } },
 ];
 
