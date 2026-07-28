@@ -200,7 +200,6 @@ Directly below the tab bar you control the active session:
 
 #### Chat input
 
-- **Export button** — export the chat as HTML or text.
 - **Textarea** with the placeholder "Type a message…"
 - **Rich-text toggle** (✏️) — switches to the rich-text editor.
 - **Send button** (or `Enter`).
@@ -243,7 +242,6 @@ At the bottom, the statusbar shows contextual information about the active sessi
 - Messages are rendered as **Markdown** with full syntax highlighting.
 - **"Thinking" blocks** — collapsible for more transparency.
 - **Tool calls** as collapsible cards.
-- **Export:** HTML or text file via the export button.
 - **Search:** `Ctrl+F` opens the chat search.
 
 ### Tutorial popups
@@ -464,7 +462,6 @@ Configurable shortcuts can be customized via **Settings → Shortcuts**.
 | `Ctrl+Shift+Tab` | Previous tab | Tabs |
 | `Ctrl+L` | Focus input | Chat |
 | `Ctrl+F` | Search chat | Chat |
-| `Ctrl+E` | Export chat | Chat |
 | `Ctrl+/` | Shortcut help | UI |
 
 ### Hard-wired

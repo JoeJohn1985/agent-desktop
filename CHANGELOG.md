@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.10.0] - 2026-07-28
+
+### Removed
+- **Chat export feature** (`btnExportChat`, `exportChat()`, the `Ctrl+E`
+  shortcut and its docs) — the Markdown export was unused and not worth the
+  UI real estate.
+- **"Beta" badge for Claude Code** in the provider selector/labels; Claude
+  Code is now treated as stable like Copilot. Gemini keeps its Beta badge.
+
+### Changed
+- **New-tab provider menu now only lists providers with an actual working
+  connection** (Copilot always, Claude Code once its CLI is installed,
+  direct-API providers once a key/base URL is stored) instead of showing all
+  providers with "Key nötig"/"in Vorbereitung" hint badges. Extracted the
+  connectivity check into a shared `getConnectedProviders()` helper, reused
+  by both the new-tab menu and the Settings dialog's dynamic provider tabs
+  (`getConnectedProviderConfigs()` now builds on top of it). Removed the
+  now-dead, redundant `PROVIDERS` array that predated `PROVIDER_SETTINGS`.
+
 ## [1.9.1] - 2026-07-28
 
 ### Fixed

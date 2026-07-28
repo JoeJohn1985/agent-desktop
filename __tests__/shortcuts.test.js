@@ -14,7 +14,7 @@ describe('SHORTCUT_DEFS', () => {
   test('enthält alle erwarteten konfigurierbaren Shortcuts', () => {
     const ids = SHORTCUT_DEFS.map(d => d.id).sort();
     expect(ids).toEqual([
-      'closeTab', 'exportChat', 'focusInput', 'newTab', 'nextTab',
+      'closeTab', 'focusInput', 'newTab', 'nextTab',
       'prevTab', 'search', 'showShortcuts',
     ]);
   });

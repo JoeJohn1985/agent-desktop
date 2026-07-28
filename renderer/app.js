@@ -2042,23 +2042,9 @@ const SETTINGS_TAB_LABELS = {
 
 const PROVIDER_ICON = '🔌';
 
-// Providers offered in the provider selector. `active: false` ones are shown
-// but not yet selectable (backend not implemented).
-// Order shown in the new-tab provider menu: Copilot (default) first, then the
-// direct-API providers. Gemini/OpenAI are listed but not yet selectable.
-const PROVIDERS = [
-  { id: 'copilot', active: true },
-  { id: 'claude-code', active: true },
-  { id: 'gemini', active: true },
-  { id: 'anthropic', active: true },
-  { id: 'openai', active: true },
-  { id: 'glm', active: true },
-  { id: 'ollama', active: true },
-];
-
 // Maturity markers per provider. Beta = tested but not final; Alpha = untested.
 // Copilot is the primary, fully-tested provider and carries no badge.
-const BETA_PROVIDERS = new Set(['gemini', 'claude-code']);
+const BETA_PROVIDERS = new Set(['gemini']);
 const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
 
 /** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
@@ -3216,43 +3202,6 @@ function saveSessionApproval(sessionId, manualApproval) {
 function getSessionApproval(sessionId) {
   const entry = getNamedSessions()[sessionId];
   return typeof entry?.manualApproval === 'boolean' ? entry.manualApproval : null;
-}
-
-/**
- * Export the active tab's chat history as a Markdown file download.
- * Includes user messages, assistant responses, and tool call summaries.
- */
-function exportChat() {
-  const tab = tabs.get(activeTabId);
-  if (!tab) return;
-  const lines = [];
-  const name = tab.label || 'Chat';
-  const providerName = PROVIDER_SHORT[getTabProvider(tab)] || 'Assistant';
-  lines.push(`# ${name}\n`);
-  lines.push(`*Exportiert am ${new Date().toLocaleString('de-DE')}*\n`);
-
-  for (const el of tab.streamEl.children) {
-    if (el.classList.contains('stream-input')) {
-      lines.push(`\n## 👤 Du\n\n${el.textContent.trim()}\n`);
-    } else if (el.classList.contains('stream-response')) {
-      // Use raw markdown if available, otherwise extract text
-      const raw = tab._responseRaw && el === tab._responseEl ? tab._responseRaw : el.textContent.trim();
-      lines.push(`\n## 🤖 ${providerName}\n\n${raw}\n`);
-    } else if (el.classList.contains('stream-tool-result')) {
-      const toolName = el.querySelector('strong')?.textContent || '';
-      const toolArgs = el.querySelector('.stream-tool-result__preview')?.textContent || '';
-      lines.push(`\n> 🔧 **${toolName}** ${toolArgs}\n`);
-    }
-  }
-
-  const md = lines.join('\n');
-  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${name.replace(/[^a-zA-Z0-9äöüÄÖÜß _-]/g, '')}_${new Date().toISOString().slice(0,10)}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ── Todos → modules/todos.js ─────────────────────────────────
@@ -5248,7 +5197,7 @@ function initChatInput() {
  * because it would discard the tab's conversation).
  * @param {HTMLElement} btn - The "+" button.
  */
-function openAddTabProviderMenu(btn) {
+async function openAddTabProviderMenu(btn) {
   const existing = document.querySelector('.provider-add-dropdown');
   if (existing) { existing.remove(); return; }
 
@@ -5267,26 +5216,17 @@ function openAddTabProviderMenu(btn) {
     if (closeHandler) { document.removeEventListener('click', closeHandler, true); closeHandler = null; }
   };
 
-  PROVIDERS.forEach(p => {
-    const hasKey = p.id === 'copilot' || p.id === 'claude-code' || Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
+  // Only providers with an actual working connection are offered here.
+  const providers = await getConnectedProviders();
+  providers.forEach(p => {
     const item = document.createElement('div');
-    item.className = 'model-dropdown__item' + (p.active ? '' : ' model-dropdown__item--disabled');
-    let badge = providerStageBadge(p.id);
-    if (!p.active) badge += ' <span class="model-dropdown__hint">in Vorbereitung</span>';
-    else if (!hasKey) badge += ' <span class="model-dropdown__hint">Key nötig</span>';
+    item.className = 'model-dropdown__item';
+    const badge = providerStageBadge(p.id);
     item.innerHTML = `<span class="model-dropdown__provider-icon">${providerIconHtml(p.id)}</span><span class="model-dropdown__label">${escapeHtml(PROVIDER_LABELS[p.id] || p.id)}</span>${badge}`;
     item.addEventListener('click', () => {
-      if (!p.active) {
-        showNotification(`${PROVIDER_LABELS[p.id]} ist noch in Vorbereitung.`, 'info');
-        return;
-      }
       close();
       const label = p.id === 'copilot' ? '🤖 Chat' : `🔌 ${PROVIDER_SHORT[p.id] || p.id}`;
       createTab(label, getDefaultModelForProvider(p.id), p.id);
-      // Direct-API providers need a key; Copilot and Claude Code use CLI login.
-      if (p.id !== 'copilot' && p.id !== 'claude-code' && !hasKey) {
-        showNotification(`API-Key für ${PROVIDER_LABELS[p.id]} in den Einstellungen hinterlegen.`, 'warning');
-      }
     });
     dropdown.appendChild(item);
   });
@@ -5304,8 +5244,6 @@ function initWindowControls() {
   document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
   document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
-
-  document.getElementById('btnExportChat').addEventListener('click', () => exportChat());
 
   document.getElementById('btnScrollBottom').addEventListener('click', () => {
     const tab = tabs.get(activeTabId);
@@ -5750,19 +5688,19 @@ const PROVIDER_SETTINGS = [
  * masked input, save/delete buttons and the stored/empty status.
  */
 /**
- * Providers that get their own dynamically-generated settings tab. Copilot is
- * static HTML (always present, handled separately) — this covers everything
- * else: Claude Code appears once its CLI is installed, the direct-API
- * providers once a key is stored. Ollama is keyless, so a saved base URL is
+ * Providers with an actual working connection right now: Copilot (always
+ * available), Claude Code (once its CLI is installed), and the direct-API
+ * providers (once a key is stored). Ollama is keyless, so a saved base URL is
  * its equivalent "connected" signal instead — otherwise it'd always show up
- * regardless of whether Ollama is even installed.
+ * regardless of whether Ollama is even installed. Shared by the new-tab
+ * provider menu and the Settings dialog's dynamic provider tabs.
  * @returns {Promise<Array<{id: string, label: string}>>}
  */
-async function getConnectedProviderConfigs() {
-  const configs = [];
+async function getConnectedProviders() {
+  const result = [{ id: 'copilot', label: PROVIDER_LABELS.copilot || 'Copilot' }];
   let cc = { installed: false };
   try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
-  if (cc.installed) configs.push({ id: 'claude-code', label: SETTINGS_TAB_LABELS['claude-code'] || PROVIDER_LABELS['claude-code'] || 'Claude Code' });
+  if (cc.installed) result.push({ id: 'claude-code', label: SETTINGS_TAB_LABELS['claude-code'] || PROVIDER_LABELS['claude-code'] || 'Claude Code' });
 
   await refreshProviderStatus();
   for (const p of PROVIDER_SETTINGS) {
@@ -5770,9 +5708,20 @@ async function getConnectedProviderConfigs() {
     const connected = p.keyless
       ? (p.baseUrl ? Boolean(getProviderBaseUrl(p.id)) : true)
       : Boolean(_providerStatus.keyed && _providerStatus.keyed[p.id]);
-    if (connected) configs.push({ id: p.id, label: SETTINGS_TAB_LABELS[p.id] || PROVIDER_LABELS[p.id] || p.id });
+    if (connected) result.push({ id: p.id, label: SETTINGS_TAB_LABELS[p.id] || PROVIDER_LABELS[p.id] || p.id });
   }
-  return configs;
+  return result;
+}
+
+/**
+ * Providers that get their own dynamically-generated settings tab. Copilot is
+ * static HTML (always present, handled separately by the Settings dialog), so
+ * it's excluded here.
+ * @returns {Promise<Array<{id: string, label: string}>>}
+ */
+async function getConnectedProviderConfigs() {
+  const providers = await getConnectedProviders();
+  return providers.filter(p => p.id !== 'copilot');
 }
 
 /**
@@ -6269,7 +6218,6 @@ const SHORTCUT_DEFS = [
   { id: 'prevTab',       label: 'Vorheriger Tab',         category: 'Tabs', default: { ctrl: true,  shift: true,  alt: false, key: 'Tab' } },
   { id: 'focusInput',    label: 'Eingabe fokussieren',    category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'l' } },
   { id: 'search',        label: 'Suche',                  category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'f' } },
-  { id: 'exportChat',    label: 'Chat exportieren',       category: 'Chat', default: { ctrl: true,  shift: false, alt: false, key: 'e' } },
   { id: 'showShortcuts', label: 'Tastenkürzel anzeigen',  category: 'UI',   default: { ctrl: true,  shift: false, alt: false, key: '/' } },
 ];
 
@@ -6479,7 +6427,6 @@ function initKeyboardShortcuts() {
     }
 
     if (sc('focusInput', e))    { e.preventDefault(); document.getElementById('chatInput')?.focus(); return; }
-    if (sc('exportChat', e))    { e.preventDefault(); exportChat(); return; }
     if (sc('search', e))        { e.preventDefault(); if (window._openSearch) window._openSearch(); return; }
 
     if (e.key === 'Escape') {
