@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.1] - 2026-07-28
+
+### Fixed
+- **Startup crash: `initChatInput` threw on `document.getElementById('sessionSearch').addEventListener(...)`**,
+  aborting the rest of `DOMContentLoaded` (window controls, session tools
+  popup, settings wiring, keyboard shortcuts, tooltips, … — everything
+  queued after the failing call never ran). Leftover from the sidebar ⋮-menu
+  redesign: `#sessionSearch` moved from a static, always-present element to
+  one created only while the Sessions section's menu is open (its real input
+  listener already lives in `openSectionMenu`'s `SECTION_MENUS.sessions.wire`)
+  — this one static registration at startup was missed. Removed it, and
+  hardened a second, non-crashing but equally stale reference in
+  `resumeSessionById` with a null-check.
+
 ## [1.9.0] - 2026-07-28
 
 ### Changed

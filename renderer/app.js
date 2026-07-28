@@ -3591,8 +3591,9 @@ async function resumeSessionById(sessionId) {
   setSessionName(sessionId, placeholderName);
   await loadSessions();
   await resumeSession(sessionId);
-  // Clear search field
-  document.getElementById('sessionSearch').value = '';
+  // Clear search field, if the Sessions ⋮ menu is still open.
+  const searchEl = document.getElementById('sessionSearch');
+  if (searchEl) searchEl.value = '';
   renderSessions(filterSessions());
 }
 
@@ -5230,9 +5231,9 @@ function initChatInput() {
     }
   });
 
-  document.getElementById('sessionSearch').addEventListener('input', () => {
-    renderSessions(filterSessions());
-  });
+  // Note: #sessionSearch's own input listener is wired inside openSectionMenu()
+  // (renderer/app.js SECTION_MENUS.sessions.wire) since the field is created
+  // dynamically only while the Sessions ⋮ menu is open, not present at startup.
 
   document.getElementById('btnAddTab').addEventListener('click', (e) => {
     e.stopPropagation();
