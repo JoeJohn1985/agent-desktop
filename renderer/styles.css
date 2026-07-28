@@ -727,7 +727,7 @@ body {
   display: flex;
   align-items: stretch;
   background: var(--bg-overlay);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
   height: 36px;
   padding: 0 4px;
   gap: 1px;
@@ -740,7 +740,7 @@ body {
   align-items: center;
   gap: 4px;
   padding: 0 6px 0 10px;
-  font-size: 16px;
+  font-size: 13px;
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -787,10 +787,10 @@ body {
 }
 
 /* Collapsed tabs (not active, not hovered): show only the 3-char short label,
-   add separator borders, and hide the full label + edit/close controls. */
+   add faint separator borders, and hide the full label + edit/close controls. */
 .tab:not(.tab--active):not(:hover) {
-  border-left-color: var(--border);
-  border-right-color: var(--border);
+  border-left-color: var(--border-subtle);
+  border-right-color: var(--border-subtle);
 }
 .tab:not(.tab--active):not(:hover) .tab__label,
 .tab:not(.tab--active):not(:hover) .tab__edit,
@@ -1347,22 +1347,22 @@ mark.chat-search-highlight--active {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
-  font-size: 16px;
-  line-height: 1.6;
+  padding: 20px 24px;
+  font-size: 14px;
+  line-height: 1.55;
   color: var(--text-primary);
   display: none;
 }
 .stream-output--active { display: block; }
 .stream-input {
-  margin: 20px 0 8px;
+  margin: 18px 0 8px;
   margin-left: auto;
   padding: 10px 14px;
   background: var(--user-msg-bg);
-  border-radius: var(--radius) var(--radius) 4px var(--radius);
-  font-weight: 600;
+  border-radius: 14px 14px 3px 14px;
+  font-weight: 500;
   color: #ffffff;
-  font-size: 16px;
+  font-size: 14px;
   max-width: 80%;
   width: fit-content;
   text-align: left;
@@ -1392,11 +1392,11 @@ mark.chat-search-highlight--active {
 .stream-response {
   margin: 16px 0;
   padding: 10px 14px;
-  line-height: 1.6;
+  line-height: 1.55;
   width: fit-content;
   max-width: 80%;
   background: var(--bg-surface);
-  border-radius: 4px var(--radius) var(--radius) var(--radius);
+  border-radius: 3px 14px 14px 14px;
   color: var(--text-primary);
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -1524,14 +1524,14 @@ mark.chat-search-highlight--active {
 .stream-tool-result {
   margin: 8px 0;
   padding: 4px 10px;
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-secondary);
   border-left: 2px solid var(--green);
   max-width: 80%;
 }
 .stream-tool-result summary {
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
 }
 .stream-tool-result__status { font-weight: 700; }
 .stream-tool-result__status--error { color: var(--red); }
@@ -1788,7 +1788,7 @@ mark.chat-search-highlight--active {
   gap: 2px;
   padding: 5px 12px;
   background: var(--bg-overlay);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   overflow: visible;
   position: relative;

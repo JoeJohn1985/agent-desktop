@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.1] - 2026-07-28
+
+### Changed
+- **Applied the rest of the `docs/redesign-mockup.html` direction** that the
+  earlier flattening pass (1.9.0) hadn't covered yet: structural area
+  dividers (tab bar, session-actions bar, and the faint separators between
+  collapsed tabs) now use the soft `--border-subtle` instead of the harder
+  `--border`, matching the mockup's less "boxed-in" look. Chat messages
+  moved to the mockup's finer typography — 14px instead of 16px, tighter
+  line-height, more generous outer padding — and the user message bubble
+  dropped its bold weight and got the same rounder corners as the mockup
+  (`14px 14px 3px 14px`); the assistant bubble got matching corners. Tab
+  labels shrank from 16px to 13px to match.
+
 ## [1.10.0] - 2026-07-28
 
 ### Removed
