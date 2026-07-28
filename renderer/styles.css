@@ -632,13 +632,35 @@ body {
 /* ── Sidebar Footer ───────────────────────────────────── */
 .sidebar__footer {
   margin-top: auto;
-  padding: 6px;
+  padding: 8px 10px;
   border-top: 1px solid var(--border-subtle);
   display: flex;
-  align-items: stretch;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   transition: border-color 0.3s ease;
+}
+.sidebar__footer-spacer { flex: 1; }
+/* Flat/borderless icon button — deliberately its own class rather than
+   reusing .action-btn (that one stays as-is for settings/dialog buttons,
+   which weren't part of the redesign mockup this matches). */
+.sidebar__footer-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.sidebar__footer-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .action-btn {
   padding: 0 12px;
@@ -1763,8 +1785,8 @@ mark.chat-search-highlight--active {
 .session-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 12px;
+  gap: 2px;
+  padding: 5px 12px;
   background: var(--bg-overlay);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -1777,14 +1799,14 @@ mark.chat-search-highlight--active {
 }
 
 .session-actions__btn {
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   color: var(--text-secondary);
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 4px 9px;
+  border-radius: 20px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.12s ease, color 0.12s ease;
   font-family: inherit;
   white-space: nowrap;
 }
@@ -1792,7 +1814,6 @@ mark.chat-search-highlight--active {
 .session-actions__btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: var(--text-muted);
 }
 
 .session-actions__btn:active {
@@ -1904,13 +1925,11 @@ mark.chat-search-highlight--active {
 
 .session-actions__btn--active {
   background: var(--accent, #2ea043);
-  border-color: var(--accent, #2ea043);
   color: #fff;
 }
 
 .session-actions__btn--active:hover {
   background: var(--accent-hover, #3fb950);
-  border-color: var(--accent-hover, #3fb950);
   color: #fff;
 }
 
@@ -2162,8 +2181,8 @@ mark.chat-search-highlight--active {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 6px 16px;
-  border-top: 1px solid var(--border);
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border-subtle);
   background: var(--bg-base);
 }
 
@@ -2254,34 +2273,37 @@ mark.chat-search-highlight--active {
   transition: border-color 0.2s ease;
 }
 .chat-input:focus { border-color: var(--accent); }
+/* The one filled/colored button in the input row — deliberately the sole
+   "loud" element down here, everything else (rich-text toggle) is a quiet
+   icon button that only gets a background on hover. */
 .chat-send {
-  height: 36px; width: 36px;
-  border: none; border-radius: var(--radius);
+  height: 34px; width: 34px;
+  border: none; border-radius: 10px;
   background: var(--user-msg-bg);
   color: #fff;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: filter 0.12s ease, transform 0.08s ease;
   flex-shrink: 0;
 }
 .chat-send:hover { filter: brightness(1.15); }
-
+.chat-send:active { transform: scale(0.94); }
 
 .chat-terminal-btn {
-  height: 36px;
-  width: 36px;
+  height: 34px;
+  width: 34px;
   border: none;
-  border-radius: var(--radius);
-  background: var(--bg-overlay);
+  border-radius: 10px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.12s ease, color 0.12s ease;
   flex-shrink: 0;
 }
 .chat-terminal-btn:hover {
-  background: var(--accent);
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* ── Rich-Text Editor ──────────────────────────────────── */

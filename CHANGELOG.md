@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.9.0] - 2026-07-28
+
+### Changed
+- **Flattened the app's "loud" secondary buttons**, implementing the design
+  direction agreed on in `docs/redesign-mockup.html` (design discussion via
+  `/grill-me`: filled-background + 1px-border + 36px-height buttons
+  everywhere read as boxy/cramped). Scope matches exactly what the mockup
+  showed — this does **not** touch `.action-btn` (Settings/dialog buttons),
+  which wasn't part of it:
+  - **Sidebar footer** (Tests/DevConsole/Settings): new dedicated
+    `.sidebar__footer-btn` class — transparent background, no border, 32px,
+    background only on hover. Settings pushed to the right via a new
+    `.sidebar__footer-spacer`.
+  - **Session-actions bar** (Model/Mode/Context/Tools pills): `.session-actions__btn`
+    dropped its border and filled background for a transparent pill
+    (`border-radius: 20px`) that only gets a background on hover; the
+    `--active` state keeps its accent fill (a deliberate "this is selected"
+    signal, not decoration).
+  - **Chat input row**: `.chat-terminal-btn` (rich-text toggle, export)
+    flattened the same way; `.chat-send` is now the sole filled/colored
+    button in the whole row — the one primary action, slightly reduced to
+    34px/10px radius.
+  - Increased padding on the sidebar footer and chat input bar for more
+    breathing room; softened their separator lines from `var(--border)` to
+    `var(--border-subtle)`.
+- **Documented the redesign mockup** (`docs/redesign-mockup.html`) —
+  self-contained HTML, real dark-theme CSS variables, used to align on the
+  direction before implementing. Left intentionally unstyled in scope:
+  native emoji icons (kept as-is, matching the app's existing icon choice —
+  not part of this pass) and the Settings dialog / Plugin Manager (their
+  entry points are shown, not their full UI).
+
 ## [1.8.1] - 2026-07-25
 
 ### Removed
