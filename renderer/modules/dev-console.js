@@ -24,6 +24,9 @@ function appendDevConsoleRow(body, entry) {
   const time = new Date(entry.timestamp).toLocaleTimeString('de-DE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
   row.innerHTML = `<span class="dev-console__time">${time}</span><span class="dev-console__level dev-console__level--${entry.level}">${entry.level}</span><span class="dev-console__msg">${escapeHtml(entry.message)}</span>`;
   body.appendChild(row);
+  // Cap the DOM like the array — while the panel stays open, live-appended
+  // rows would otherwise accumulate without limit.
+  while (body.childElementCount > DEV_CONSOLE_MAX_ENTRIES) body.firstElementChild.remove();
   body.scrollTop = body.scrollHeight;
 }
 

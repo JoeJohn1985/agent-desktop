@@ -53,20 +53,36 @@ function renderTodos() {
     return 0;
   });
 
+  // No inline onchange/onclick with an interpolated id: todo ids are parsed
+  // out of <cwd>/todo/todos.md (`<!-- id:(\S+) -->`), i.e. from a file any
+  // agent — or a cloned repo — can write. Inside an inline handler the browser
+  // HTML-decodes the attribute before JS parses it, so escapeAttr's &#39;
+  // would turn back into a quote and let a crafted id run arbitrary code.
+  // Delegated listeners read the same value as data, never as code.
   container.innerHTML = sorted.map(t => {
     const checked = t.status === 'done' ? 'checked' : '';
     const doneClass = t.status === 'done' ? 'todo-item--done' : '';
     return `
-      <div class="todo-item ${doneClass}" data-id="${t.id}" draggable="true">
+      <div class="todo-item ${doneClass}" data-id="${escapeAttr(t.id)}" draggable="true">
         <span class="todo-item__grip">⠿</span>
         <label class="todo-item__check">
-          <input type="checkbox" ${checked} onchange="toggleTodo('${escapeAttr(t.id)}')" />
+          <input type="checkbox" ${checked} data-toggle-todo="${escapeAttr(t.id)}" />
         </label>
         <span class="todo-item__text" data-tooltip="${escapeHtml(t.text)}">${escapeHtml(t.text)}</span>
-        <button class="todo-item__delete" onclick="deleteTodo('${escapeAttr(t.id)}')" data-tooltip="Löschen">🗑️</button>
+        <button class="todo-item__delete" data-delete-todo="${escapeAttr(t.id)}" data-tooltip="Löschen">🗑️</button>
       </div>
     `;
   }).join('');
+
+  // Re-attached per render (innerHTML above replaced the previous nodes).
+  container.onchange = (e) => {
+    const box = e.target.closest('[data-toggle-todo]');
+    if (box) toggleTodo(box.dataset.toggleTodo);
+  };
+  container.onclick = (e) => {
+    const del = e.target.closest('[data-delete-todo]');
+    if (del) deleteTodo(del.dataset.deleteTodo);
+  };
 
   initTodoDragDrop(container);
 }

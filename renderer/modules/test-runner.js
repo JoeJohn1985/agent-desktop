@@ -78,7 +78,7 @@ function renderTestResults(result, body) {
     const suiteDuration = suite.duration ? `${suite.duration}ms` : '';
 
     html += `<div class="test-runner__suite">
-      <div class="test-runner__suite-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <div class="test-runner__suite-header" data-toggle-suite>
         <span>${suiteIcon} ${escapeHtml(suite.name)}</span>
         <span class="test-runner__test-duration">${suiteDuration}</span>
       </div>
@@ -103,6 +103,15 @@ function renderTestResults(result, body) {
   }
 
   body.innerHTML = html;
+
+  // Auf-/Zuklappen der Suiten: delegierter Listener statt Inline-onclick —
+  // die CSP erlaubt kein 'unsafe-inline' für Skripte mehr.
+  body.onclick = (e) => {
+    const header = e.target.closest('[data-toggle-suite]');
+    if (!header) return;
+    const list = header.nextElementSibling;
+    if (list) list.style.display = list.style.display === 'none' ? 'block' : 'none';
+  };
 }
 
 function renderCoverageResults(result, body) {

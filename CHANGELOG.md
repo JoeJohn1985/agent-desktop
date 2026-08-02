@@ -1,5 +1,102 @@
 # Changelog
 
+## [1.11.0] - 2026-08-03
+
+### Security
+- **Removed every inline event handler** (`onclick`/`onchange` in static markup
+  and in dynamically rendered list items — Skills, Agents, Sessions, Skill
+  Manager, Plugins, Todos, tag lists, the test runner's suite toggle) in favor
+  of delegated listeners reading `data-*` attributes. HTML-attribute escaping
+  doesn't protect an inline handler: the browser decodes entities before the
+  JS parser sees them, so a crafted skill/agent name (including from an
+  auto-mirrored marketplace plugin) or a todo id (parsed from a project's
+  `todo/todos.md`) could have broken out of the string and run arbitrary code
+  with full access to the `window.copilot` bridge.
+- **Tightened the CSP**: `script-src` is now `'self'` only (dropped
+  `'unsafe-inline'`), now that nothing depends on it.
+- **`npm audit fix`**: patched a DOMPurify XSS (hit on every markdown render —
+  the app's main render path) and a protobufjs DoS.
+- **Electron 35.7.5 → 43.2.0**, closing a high-severity advisory in Electron
+  itself. Every documented breaking change for v36–43 was checked against this
+  app's actual API surface (`app`, `BrowserWindow`, `ipcMain`, `shell`,
+  `dialog`, `nativeImage`, `contextBridge`, `ipcRenderer`, `webUtils`,
+  `safeStorage`) — none apply; no native modules to rebuild. `npm audit` now
+  reports 0 vulnerabilities.
+- **Versioned the pre-commit hook** (`.githooks/pre-commit`, wired via a new
+  `prepare` script setting `core.hooksPath`) — it previously lived only in
+  the local `.git/hooks/`, so a fresh clone got no lint/test gate at all.
+  Added a matching minimal CI workflow (lint + tests on push/PR).
+
+### Fixed
+- **Auto-scroll stopped following new messages.** Batching `scrollToBottom()`
+  into one call per animation frame (perf work, see below) introduced a race:
+  content appended in the gap between insertion and the deferred scroll made
+  the view look "scrolled away", which permanently latched auto-scroll off.
+  It's now driven by actual upward scroll intent instead of position alone.
+- **Tab-switch could hang for ~1-2s.** Root cause was twofold: `readMcpConfig()`
+  shelled out to `copilot mcp list --json` *synchronously* on every session
+  start/load (blocking the entire main process, all windows, for up to the
+  CLI's cold-start time), and resuming a session rendered its *entire* history
+  into the DOM immediately, making the subsequent `display:none → block`
+  toggle a full-tree forced layout. Both fixed (see Performance).
+- **`playNotificationSound` cost 170+ ms the first time it fired** — profiling
+  showed this was `new AudioContext()`'s first-time construction cost, which
+  happened to land on whichever tab-switch/background-completion triggered
+  the first notification. Now pre-warmed at startup where the cost is
+  invisible.
+- **MCP server status could get stuck showing "disconnected"** even once a
+  session was actively using it — the background reachability probe (a raw
+  unauthenticated request) could false-negative on an OAuth-protected server
+  and then permanently overwrite the correct live status reported by the
+  session itself. Live-confirmed status now wins and is never downgraded by
+  the probe.
+- **Model-select button could show a stale label** (e.g. "Opus 4.8" after the
+  account moved to "Opus 5") for Claude Code's alias-based model ids
+  (`opus`/`sonnet`/`haiku`) — it looked up the hardcoded fallback list before
+  the live-discovered one instead of after.
+- Removed the unused `exportChat` feature (button, shortcut, docs), the
+  "Beta" badge on Claude Code, and filtered the new-tab provider menu down to
+  providers with an actual working connection.
+
+### Changed / Performance
+- **Streaming responses no longer re-run syntax highlighting on every delta.**
+  `hljs.highlightAuto()` recompiles a language's grammar into fresh
+  RegExp/mode objects on *every* call with no cross-call caching — re-running
+  it, on the whole accumulated response, every ~100ms while text streamed in
+  was the dominant cause of jank and memory churn on long responses. A fast
+  render mode now skips highlighting during streaming (still fully formatted:
+  bold/lists/headers/code blocks, just without color) and the real one runs
+  once the message settles.
+- **Chat history is no longer unbounded in the DOM.** Content older than 30
+  minutes is detached and kept in memory, reloading in on scroll-to-top like
+  reverse infinite scroll. Resuming a session now renders only the most
+  recent 20 messages live; older ones load the same way — a long-lived
+  session used to dump its *entire* history into the DOM the instant it was
+  reopened.
+- `readMcpConfig()`/CLI version checks moved off the main-thread-blocking
+  `execSync` onto async `spawn`, with a 5-minute per-cwd cache.
+- `scrollToBottom()` batched to one real scroll per animation frame instead of
+  one forced layout per streamed event.
+- `renderer/app.js` now has a lightweight `[perf]` logging hook around
+  `switchTab()` for future diagnosis via the in-app Developer Console.
+
+### Added
+- Drag-and-drop tab reordering.
+- A DevTools button in the sidebar's dev-mode row.
+- A small update-check button next to the version label.
+- Nested lists in the rich-text editor (Tab/Shift+Tab to indent/outdent).
+- Tab-dependent skill toggles — a skill force-activated in one tab no longer
+  silently applied to every other open tab.
+
+### Testing
+- Provider-layer coverage: `src/providers/agent-tools.js` (25% → 99%),
+  `src/providers/api-agent-client.js` (28% → 99%), `src/model-discovery.js`
+  (48% → 98%), `src/pricing-source.js` (56% → 98%) — the deny-list
+  enforcement and the agentic tool loop were previously the least-covered,
+  most security-relevant code in the app.
+- Project-wide: 73.95% → 83.32% statements, 63.04% → 71.44% branches,
+  1444 → 1617 tests.
+
 ## [1.10.1] - 2026-07-28
 
 ### Changed

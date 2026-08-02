@@ -1,6 +1,6 @@
 {
   "name": "agent-desktop",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "description": "Agent Desktop — lokale Agent-Anwendung für mehrere LLM-Provider (GitHub Copilot CLI, Claude Code, Anthropic, Gemini, OpenAI, Ollama, GLM)",
   "main": "main.js",
   "scripts": {
@@ -14,15 +14,16 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "check": "eslint . && jest"
+    "check": "eslint . && jest",
+    "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "author": "MSchneider",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@electron/rebuild": "^4.0.4",
+    "@electron/rebuild": "^4.2.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
-    "electron": "^35.7.5",
+    "electron": "^43.2.0",
     "eslint": "^10.2.1",
     "globals": "^17.5.0",
     "jest": "^30.3.0"

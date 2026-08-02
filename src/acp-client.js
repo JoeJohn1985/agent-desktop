@@ -537,8 +537,13 @@ class AcpClient extends EventEmitter {
   /**
    * Sends a slash command silently (without rendering to the chat UI).
    * Collects and returns the raw response text.
+   * @param {string} command
+   * @param {number} [timeoutMs] - Overrides the default slash-command timeout.
+   *   Callers that know their command should return near-instantly (/clear,
+   *   /context) can pass a shorter value so a stuck adapter fails fast with a
+   *   visible error instead of leaving the UI hanging for the full 3 minutes.
    */
-  async silentCommand(command) {
+  async silentCommand(command, timeoutMs) {
     if (this.#state === 'busy') throw new Error('Cannot run command while busy');
     await this.#ensureReady();
     if (!this.#sessionId) throw new Error('No active session');
@@ -554,7 +559,7 @@ class AcpClient extends EventEmitter {
       await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
-      }, SLASH_COMMAND_TIMEOUT_MS);
+      }, typeof timeoutMs === 'number' ? timeoutMs : SLASH_COMMAND_TIMEOUT_MS);
       // If nothing arrived via the ACP response, give adapters that emit slash
       // output on stderr (Claude Code) a moment to flush a <local-command-stdout>
       // block. Other backends return immediately.

@@ -9,8 +9,22 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
  * @type {(text: string) => string}
  */
 let markdownRender = (text) => text; // fallback: plain text
+/**
+ * Cheap variant for throttled mid-stream re-renders (~every 100ms while a
+ * response streams): skips hljs entirely. hljs.highlightAuto() recompiles a
+ * language's grammar into fresh RegExp/mode objects on every call (no cross-
+ * call caching), and marked re-parses the whole accumulated response each
+ * tick — so for an untagged code block, every single throttled tick was
+ * re-running highlightAuto() across all common languages, on text that keeps
+ * growing. That's the main source of the streaming-tab jank/memory growth.
+ * Still gets full markdown formatting (bold/lists/headers/code blocks), just
+ * without color — the final render (see `render`, called once the message is
+ * complete) adds real highlighting.
+ * @type {(text: string) => string}
+ */
+let markdownRenderFast = (text) => text;
 try {
-  const { marked } = require('marked');
+  const { marked, Marked } = require('marked');
   const hljs = require('highlight.js/lib/common');
 
   marked.use({
@@ -30,13 +44,14 @@ try {
     breaks: true,
     gfm: true,
   });
+  // Independent instance, default (non-highlighting) code renderer.
+  const markedFast = new Marked({ breaks: true, gfm: true });
 
   // DOMPurify for XSS prevention
   const DOMPurify = require('dompurify');
-  markdownRender = (text) => DOMPurify.sanitize(marked.parse(text), {
-    ADD_TAGS: ['pre', 'code'],
-    ADD_ATTR: ['class'],
-  });
+  const purifyOpts = { ADD_TAGS: ['pre', 'code'], ADD_ATTR: ['class'] };
+  markdownRender = (text) => DOMPurify.sanitize(marked.parse(text), purifyOpts);
+  markdownRenderFast = (text) => DOMPurify.sanitize(markedFast.parse(text), purifyOpts);
 } catch (e) {
   console.warn('Markdown/highlight.js not available:', e.message);
 }
@@ -44,6 +59,7 @@ try {
 /** Exposes a safe markdown renderer to the renderer process. */
 contextBridge.exposeInMainWorld('markdown', {
   render: markdownRender,
+  renderFast: markdownRenderFast,
 });
 
 /**
@@ -83,7 +99,7 @@ contextBridge.exposeInMainWorld('copilot', {
     /** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with new denied tools, reloads session. */
     restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('copilot:restartWithDeniedTools', tabId, deniedTools),
     /** @ipc copilot:silentCommand — Runs a slash command silently, returns {success, text}. */
-    silentCommand: (tabId, command) => ipcRenderer.invoke('copilot:silentCommand', tabId, command),
+    silentCommand: (tabId, command, timeoutMs) => ipcRenderer.invoke('copilot:silentCommand', tabId, command, timeoutMs),
     /** @ipc copilot:respondPermission — Answers an ACP permission request. */
     respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('copilot:respondPermission', tabId, requestId, optionId),
     /** @ipc copilot:resetBackend — Destroys a tab's backend (fresh session on next prompt). */
@@ -594,6 +610,8 @@ contextBridge.exposeInMainWorld('copilot', {
     maximize: () => ipcRenderer.send('window:maximize'),
     /** @ipc window:close */
     close: () => ipcRenderer.send('window:close'),
+    /** @ipc window:openDevTools — Opens Chromium DevTools in a detached window (dev mode only). */
+    openDevTools: () => ipcRenderer.send('window:openDevTools'),
     /** @ipc app:relaunch — Restarts the app (e.g. after Copilot login). @returns {Promise<{success: boolean}>} */
     relaunch: () => ipcRenderer.invoke('app:relaunch'),
   },

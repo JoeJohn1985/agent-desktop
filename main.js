@@ -315,7 +315,7 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       // Manual approval → drop --allow-all so the CLI asks via request_permission.
       allowAll: !options.manualApproval,
       autoApprovePermissions: !options.manualApproval,
-      mcpServers: getAcpMcpServers(cwd),
+      mcpServers: await getAcpMcpServers(cwd),
     };
     // Always include global CWD as an additional path when using a different CWD
     if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
@@ -508,11 +508,11 @@ ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
 });
 
 /** @ipc copilot:silentCommand — Runs a slash command silently and returns the text response. */
-ipcMain.handle('copilot:silentCommand', async (_event, tabId, command) => {
+ipcMain.handle('copilot:silentCommand', async (_event, tabId, command, timeoutMs) => {
   const client = backends.get(tabId);
   if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
   try {
-    const text = await client.silentCommand(command);
+    const text = await client.silentCommand(command, timeoutMs);
     return { success: true, text };
   } catch (err) {
     console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
@@ -674,13 +674,23 @@ ipcMain.on('log:write', (_event, level, message) => {
   writeLog(level || 'info', [message]);
 });
 
+/** @type {string|null} CLI version, cached for the app's lifetime (an update relaunches the app). */
+let _cliVersionCache = null;
+
+/** Async, cached `copilot --version` — the former execSync froze the whole main process. */
+async function getCliVersion() {
+  if (_cliVersionCache) return _cliVersionCache;
+  const out = await execCliAsync(['copilot', '--version']);
+  _cliVersionCache = out.trim();
+  return _cliVersionCache;
+}
+
 /** @ipc copilot:getVersions — Returns app and CLI version strings. @returns {Promise<{app: string, cli: string}>} */
 ipcMain.handle('copilot:getVersions', async () => {
   const appVersion = require('./package.json').version;
   let cliVersion = '?';
   try {
-    const { execSync } = require('child_process');
-    cliVersion = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS, env: buildEnv() }).toString().trim();
+    cliVersion = await getCliVersion();
   } catch (e) {
     console.warn('[copilot:getVersions] Fehler:', e.message || e);
   }
@@ -1143,22 +1153,54 @@ ipcMain.handle('mcp:listProject', async (_event, cwd) => {
 });
 
 /**
- * Reads the merged MCP server configuration from the CLI for a given CWD.
- * @param {string} [cwd] - Project directory (includes workspace .mcp.json/.github/mcp.json)
- * @returns {Object} The raw `mcpServers` map from `copilot mcp list --json`
+ * Runs a CLI command asynchronously and resolves with its stdout. Replaces the
+ * former execSync calls: execSync blocks the WHOLE main process (every IPC
+ * call, every window) for up to its timeout — a cold CLI start (0.5–2s) froze
+ * the entire app whenever a session was created. shell:true because the
+ * copilot CLI is a .cmd shim on Windows; arguments are static strings only.
+ * @param {string[]} argv - Command and arguments, e.g. ['copilot','--version']
+ * @param {Object} [opts] - { cwd, timeout }
+ * @returns {Promise<string>} stdout
  */
-function readMcpConfig(cwd) {
-  try {
-    const { execSync } = require('child_process');
-    const out = execSync('copilot mcp list --json', {
-      timeout: CLI_VERSION_TIMEOUT_MS,
+function execCliAsync(argv, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const { execFile } = require('child_process');
+    execFile(argv[0], argv.slice(1), {
+      timeout: opts.timeout || CLI_VERSION_TIMEOUT_MS,
       env: buildEnv(),
-      cwd: cwd || COPILOT_CWD,
-    }).toString();
-    return JSON.parse(out).mcpServers || {};
+      cwd: opts.cwd,
+      shell: true,
+      windowsHide: true,
+    }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout.toString());
+    });
+  });
+}
+
+/** @type {Map<string, {servers: Object, at: number}>} cwd → cached MCP config */
+const _mcpConfigCache = new Map();
+const MCP_CONFIG_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Reads the merged MCP server configuration from the CLI for a given CWD.
+ * Async + cached per cwd (the config changes rarely; a stale entry expires
+ * after MCP_CONFIG_TTL_MS or falls back on error to the last known value).
+ * @param {string} [cwd] - Project directory (includes workspace .mcp.json/.github/mcp.json)
+ * @returns {Promise<Object>} The raw `mcpServers` map from `copilot mcp list --json`
+ */
+async function readMcpConfig(cwd) {
+  const key = cwd || COPILOT_CWD;
+  const cached = _mcpConfigCache.get(key);
+  if (cached && Date.now() - cached.at < MCP_CONFIG_TTL_MS) return cached.servers;
+  try {
+    const out = await execCliAsync(['copilot', 'mcp', 'list', '--json'], { cwd: key });
+    const servers = JSON.parse(out).mcpServers || {};
+    _mcpConfigCache.set(key, { servers, at: Date.now() });
+    return servers;
   } catch (e) {
     console.warn('[mcp] readMcpConfig Fehler:', e.message || e);
-    return {};
+    return cached ? cached.servers : {};
   }
 }
 
@@ -1174,8 +1216,8 @@ function toAcpKeyValueArray(obj) {
  * @param {string} [cwd] - Project directory
  * @returns {Array<Object>} ACP-formatted MCP servers
  */
-function getAcpMcpServers(cwd) {
-  const servers = readMcpConfig(cwd);
+async function getAcpMcpServers(cwd) {
+  const servers = await readMcpConfig(cwd);
   return Object.entries(servers).map(([name, cfg]) => {
     const type = cfg.type || (cfg.command ? 'stdio' : 'http');
     if (type === 'stdio') {
@@ -1192,7 +1234,7 @@ function getAcpMcpServers(cwd) {
  * @returns {Promise<Array<{name: string, type: string, status: string}>>}
  */
 ipcMain.handle('mcp:list', async () => {
-  const servers = readMcpConfig();
+  const servers = await readMcpConfig();
   return Object.entries(servers).map(([name, cfg]) => ({
     name,
     type: cfg.type || (cfg.command ? 'stdio' : 'sse'),
@@ -1234,7 +1276,7 @@ function probeHttpReachable(url) {
  * @returns {Promise<Array<{name: string, type: string, status: string}>>}
  */
 ipcMain.handle('mcp:probe', async () => {
-  const servers = readMcpConfig();
+  const servers = await readMcpConfig();
   return Promise.all(Object.entries(servers).map(async ([name, cfg]) => {
     const type = cfg.type || (cfg.command ? 'stdio' : 'sse');
     let status = 'configured';
@@ -2001,8 +2043,7 @@ ipcMain.handle('copilot:status', async () => {
   let cliInstalled = false;
   let version = null;
   try {
-    const { execSync } = require('child_process');
-    version = execSync('copilot --version', { timeout: CLI_VERSION_TIMEOUT_MS, env: buildEnv() }).toString().trim();
+    version = await getCliVersion();
     cliInstalled = true;
   } catch {
     /* CLI not installed / not on PATH */
@@ -2071,6 +2112,7 @@ ipcMain.on('window:maximize', () => {
   else mainWindow?.maximize();
 });
 ipcMain.on('window:close', () => mainWindow?.close());
+ipcMain.on('window:openDevTools', () => mainWindow?.webContents.openDevTools({ mode: 'detach' }));
 
 // ── Skill Icon Mapping ─────────────────────────────────────---
 // SKILL_ICON_MAP, builtinSkillIcon, userSkillIcon imported from ./src/utils

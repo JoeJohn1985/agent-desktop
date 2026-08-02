@@ -2,17 +2,22 @@
 const _rendererOrigLog = console.log;
 const _rendererOrigWarn = console.warn;
 const _rendererOrigError = console.error;
-window._rendererLogs = [];
 
 /**
- * Redirect renderer console.log/warn/error to both the original console
- * and the main-process file logger via the copilot bridge.
+ * Single console override: original console + main-process file logger +
+ * in-app dev console (modules/dev-console.js loads before app.js, so
+ * addDevConsoleEntry — which caps its buffer — exists here). Deliberately ONE
+ * chain: a previous version had initDevConsole() re-override these again,
+ * which silently dropped the file-log leg, and kept every line forever in an
+ * uncapped window._rendererLogs array (slow leak).
  * @param {'info'|'warn'|'error'} level
  * @param {Array} args - Console arguments.
  */
 function _rendererLog(level, args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  window._rendererLogs.push({ level, message: '[renderer] ' + msg, timestamp: Date.now() });
+  if (typeof addDevConsoleEntry === 'function') {
+    addDevConsoleEntry({ level, message: '[renderer] ' + msg, timestamp: Date.now() });
+  }
   try { window.copilot.log.write(level, '[renderer] ' + msg); } catch (_) { /* bridge not ready */ }
 }
 
@@ -33,6 +38,15 @@ let agents = [];
 let mcpServers = [];
 /** @type {Array<{name: string, type: string, status: string}>} User/workspace MCP servers from `copilot mcp list`. */
 let globalMcpServers = [];
+/**
+ * @type {Map<string, string>} Server name → status, as reported live by an
+ * actual ACP session (session.mcp_servers_loaded) once it has really
+ * connected. This is authoritative — a real session succeeding is stronger
+ * evidence than our own unauthenticated reachability probe (refreshMcpStatus),
+ * which can false-negative on servers that need auth/a proxy the raw probe
+ * doesn't use. Names in here are never downgraded by the probe.
+ */
+const _liveMcpStatus = new Map();
 
 // ── Plugins State ────────────────────────────────────────────
 /** @type {Array<{success: boolean, marketplace: string, name: string, plugins: Array, error?: string}>} Marketplace browse results. */
@@ -45,8 +59,6 @@ let installedPlugins = [];
 let sessions = [];
 /** @type {string|null} Session ID of the currently active tab. */
 let activeSessionId = null;
-/** @type {Set<string>} IDs of currently enabled skills (persisted to preferences). */
-let activeSkills = new Set();
 /** @type {Set<string>} DirNames of skills disabled in ~/.copilot/settings.json */
 let disabledSkills = new Set();
 /** @type {Set<string>} DirNames of skills hidden globally in ~/.copilot/settings.json */
@@ -95,24 +107,137 @@ function shortenPath(p) {
 }
 
 // ── Auto-Scroll (per-tab) ──────────────────────────────────
+/**
+ * Scrolls a tab's stream to the bottom — batched to one real scroll per
+ * animation frame. Callers fire this for every streamed delta/tool event;
+ * reading scrollHeight synchronously each time forced a full layout pass per
+ * event, which on a large chat DOM dominated streaming cost. Deferring into
+ * rAF coalesces any number of calls per frame into a single layout.
+ */
 function scrollToBottom(streamEl) {
-  if (!streamEl) return;
-  // Check per-tab autoScroll flag (default true)
-  const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
-  if (tabEntry && tabEntry[1].autoScrollEnabled === false) return;
-  streamEl.scrollTop = streamEl.scrollHeight;
+  if (!streamEl || streamEl._scrollPending) return;
+  streamEl._scrollPending = true;
+  requestAnimationFrame(() => {
+    streamEl._scrollPending = false;
+    // Check per-tab autoScroll flag (default true) at execution time.
+    const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
+    if (tabEntry && tabEntry[1].autoScrollEnabled === false) return;
+    streamEl.scrollTop = streamEl.scrollHeight;
+    // Keep the direction baseline in sync so this jump is never later read as
+    // the user scrolling up (see initAutoScroll).
+    streamEl._lastScrollTop = streamEl.scrollTop;
+  });
 }
 
 function initAutoScroll(streamEl) {
   streamEl.addEventListener('scroll', () => {
-    const atBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
-    // Store per-tab
+    const prevTop = streamEl._lastScrollTop ?? 0;
+    const curTop = streamEl.scrollTop;
+    streamEl._lastScrollTop = curTop;
+    const atBottom = streamEl.scrollHeight - curTop - streamEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
+    // Only an actual upward scroll means "user wants to stay put". Deriving it
+    // from atBottom alone breaks with batched scrolling: content appended
+    // between scrollToBottom()'s rAF write and this event makes the element
+    // look scrolled-away, which latched auto-scroll off permanently.
+    const scrolledUp = curTop < prevTop - 1;
     const tabEntry = [...tabs.entries()].find(([, t]) => t.streamEl === streamEl);
-    if (tabEntry) tabEntry[1].autoScrollEnabled = atBottom;
+    if (tabEntry) {
+      if (atBottom) tabEntry[1].autoScrollEnabled = true;
+      else if (scrolledUp) tabEntry[1].autoScrollEnabled = false;
+    }
     const btn = document.getElementById('btnScrollBottom');
     if (btn) btn.style.display = atBottom ? 'none' : 'flex';
+
+    // Near the top → pull back in older messages pruned from the DOM (see
+    // pruneOldMessages), like scrolling up in a normal chat history.
+    if (tabEntry && streamEl.scrollTop < SCROLL_BOTTOM_THRESHOLD) {
+      restorePrunedHistory(tabEntry[1]);
+    }
   });
 }
+
+// ── Chat History Pruning ────────────────────────────────────
+// Long-running tabs (hours of use, or a resumed session with lots of
+// history) keep every message in the DOM forever, which makes every reflow
+// (typing, tab switches) slower as the page grows. Content older than
+// CHAT_HISTORY_PRUNE_AGE_MS gets detached from the DOM and kept in memory
+// (tab._prunedNodes, oldest-first) instead — cheap to hold, no layout cost —
+// and is reinserted in batches when the user scrolls near the top, like
+// infinite scroll in reverse.
+const CHAT_HISTORY_PRUNE_AGE_MS = 30 * 60 * 1000;
+const CHAT_HISTORY_RESTORE_BATCH = 30;
+
+/**
+ * Detaches stream children older than CHAT_HISTORY_PRUNE_AGE_MS from the DOM.
+ * Only top-of-turn elements (.stream-input, history bubbles) carry a
+ * `data-ts` timestamp; everything between one and the next inherits its age
+ * — children are always chronological, so age is monotonically increasing
+ * and scanning stops at the first still-fresh element. The most recent turn
+ * is always left in place so a quiet tab never looks empty.
+ * @param {Object} tab
+ */
+function pruneOldMessages(tab) {
+  if (!tab?.streamEl) return;
+  const cutoff = Date.now() - CHAT_HISTORY_PRUNE_AGE_MS;
+  const children = [...tab.streamEl.children];
+  let lastTs = null;
+  let lastTurnStart = -1;
+  const toPrune = [];
+  for (let i = 0; i < children.length; i++) {
+    const el = children[i];
+    if (el === tab.statusEl) break;
+    if (el.dataset.ts) { lastTs = Number(el.dataset.ts); lastTurnStart = toPrune.length; }
+    if (lastTs == null) continue; // age not established yet — leave it, keep scanning
+    if (lastTs < cutoff) {
+      toPrune.push(el);
+    } else {
+      break; // first still-fresh element — everything after is newer
+    }
+  }
+  // Never prune the last turn we saw, even if it qualifies, so the view
+  // isn't left empty.
+  const keepFrom = lastTurnStart >= 0 ? lastTurnStart : toPrune.length;
+  const pruneNow = toPrune.slice(0, keepFrom);
+  if (pruneNow.length === 0) return;
+
+  tab._prunedNodes = tab._prunedNodes || [];
+  for (const el of pruneNow) {
+    el.remove();
+    tab._prunedNodes.push(el);
+  }
+}
+
+/**
+ * Reinserts the most recently pruned batch of messages at the top of the
+ * stream, adjusting scrollTop so the visible content doesn't jump.
+ * Entries in _prunedNodes are either real (detached) elements from live
+ * pruning, or builder FUNCTIONS staged by insertHistoryGroups() — those are
+ * only now turned into elements (incl. their markdown parse), so restoring a
+ * long history costs one batch at a time instead of everything on resume.
+ * @param {Object} tab
+ */
+function restorePrunedHistory(tab) {
+  if (!tab?._prunedNodes?.length || !tab.streamEl || tab._restoringHistory) return;
+  const streamEl = tab.streamEl;
+  // Guard against re-entrancy: the scrollTop write below fires another
+  // 'scroll' event, which would otherwise immediately re-trigger this same
+  // restore (still "near the top") and drain _prunedNodes in a tight loop.
+  tab._restoringHistory = true;
+  const batch = tab._prunedNodes.splice(-CHAT_HISTORY_RESTORE_BATCH, CHAT_HISTORY_RESTORE_BATCH);
+  const prevScrollHeight = streamEl.scrollHeight;
+  const prevScrollTop = streamEl.scrollTop;
+  const firstChild = streamEl.firstChild;
+  for (const entry of batch) {
+    const els = typeof entry === 'function' ? entry() : [entry];
+    for (const el of els) streamEl.insertBefore(el, firstChild);
+  }
+  streamEl.scrollTop = prevScrollTop + (streamEl.scrollHeight - prevScrollHeight);
+  requestAnimationFrame(() => { tab._restoringHistory = false; });
+}
+
+// Periodic sweep across all tabs — catches tabs left open and idle rather
+// than only pruning right after a turn finishes in that specific tab.
+setInterval(() => tabs.forEach(pruneOldMessages), 5 * 60 * 1000);
 
 const THEMES = ['light', 'dark', 'gebit'];
 
@@ -143,17 +268,33 @@ function getPref(key, defaultValue) {
   return _prefs[key] !== undefined ? _prefs[key] : defaultValue;
 }
 
+/** @type {number|null} Debounce timer for the preferences write. */
+let _prefsSaveTimer = null;
+
+/** Persists the in-memory prefs to disk now (used by the debounce + unload flush). */
+function _flushPrefs() {
+  if (_prefsSaveTimer) { clearTimeout(_prefsSaveTimer); _prefsSaveTimer = null; }
+  copilot.preferences.write(_prefs).catch(e => {
+    console.warn('[prefs] Speichern fehlgeschlagen:', e.message);
+  });
+}
+
 /**
- * Write a preference value and persist asynchronously to disk.
+ * Write a preference value and persist asynchronously to disk — debounced.
+ * setPref serializes the WHOLE prefs object over IPC and the main process
+ * rewrites the file; callers like saveOpenTabs() fire on every tab render,
+ * so bursts are collapsed into one write. The unload flush below covers the
+ * shutdown race (a write scheduled <300ms before closing the window).
  * @param {string} key - Preference key.
  * @param {*} value - Value to store.
  */
 function setPref(key, value) {
   _prefs[key] = value;
-  copilot.preferences.write(_prefs).catch(e => {
-    console.warn('[prefs] Speichern fehlgeschlagen:', e.message);
-  });
+  if (_prefsSaveTimer) return;
+  _prefsSaveTimer = setTimeout(_flushPrefs, 300);
 }
+
+window.addEventListener('beforeunload', () => { if (_prefsSaveTimer) _flushPrefs(); });
 
 function getCurrentTheme() {
   return getPref('theme', 'dark');
@@ -451,10 +592,8 @@ function applyChatFontSize(size) {
  * @param {boolean} enabled
  */
 function applyDevMode(enabled) {
-  const btnTests = document.getElementById('btnTests');
-  const btnDevConsole = document.getElementById('btnDevConsole');
-  if (btnTests) btnTests.style.display = enabled ? '' : 'none';
-  if (btnDevConsole) btnDevConsole.style.display = enabled ? '' : 'none';
+  const devRow = document.getElementById('sidebarDevRow');
+  if (devRow) devRow.style.display = enabled ? '' : 'none';
   // Hide console panel when devMode is disabled
   if (!enabled) {
     const panel = document.getElementById('devConsolePanel');
@@ -510,11 +649,18 @@ function stripShellWrapper(name) {
 function renderTagList(containerId, items, removeFnName, extraArgs = []) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  const argsPrefix = extraArgs.map(a => `'${escapeAttrJs(a)}'`).join(', ');
-  const callArgs = argsPrefix ? `${argsPrefix}, ` : '';
   container.innerHTML = items.map((item, i) =>
-    `<span class="settings__tool-tag">${escapeHtml(stripShellWrapper(item))} <span class="settings__tool-tag__remove" onclick="${removeFnName}(${callArgs}${i})">&times;</span></span>`
+    `<span class="settings__tool-tag">${escapeHtml(stripShellWrapper(item))} <span class="settings__tool-tag__remove" data-remove-index="${i}">&times;</span></span>`
   ).join('');
+  // One delegated listener per render (innerHTML above dropped the previous
+  // one along with its nodes) — no inline onclick, so nothing here has to be
+  // safe against breaking out of a JS string literal.
+  container.onclick = (e) => {
+    const btn = e.target.closest('.settings__tool-tag__remove');
+    if (!btn || !container.contains(btn)) return;
+    const fn = window[removeFnName];
+    if (typeof fn === 'function') fn(...extraArgs, Number(btn.dataset.removeIndex));
+  };
 }
 
 // ── Generic Tag Input Init ───────────────────────────────────
@@ -656,6 +802,9 @@ async function createTab(label, initialModel, provider) {
     inputText: '',
     inputRichHtml: '',
     inputRichMode: false,
+    // Force-activated skills for THIS tab only — toggling one must not leak
+    // into other open tabs (each tab gets its own independent set).
+    activeSkills: new Set(),
   });
 
   switchTab(tabId);
@@ -670,6 +819,13 @@ async function createTab(label, initialModel, provider) {
  * @param {string} tabId - ID of the tab to activate.
  */
 function switchTab(tabId) {
+  // ── Perf instrumentation ──────────────────────────────────
+  // Logs go through console.log, which is already mirrored into the in-app
+  // Developer Console (🖥️ button) and the log file — no separate profiling
+  // tool needed, just reproduce the freeze and copy the console output.
+  const _t0 = performance.now();
+  const _mark = (label) => console.log(`[perf] switchTab: ${label} +${(performance.now() - _t0).toFixed(1)}ms`);
+
   // Save current input state to the active tab before switching
   if (activeTabId) {
     const prevTab = tabs.get(activeTabId);
@@ -692,26 +848,36 @@ function switchTab(tabId) {
   tabs.forEach((tab, id) => {
     tab.streamEl.classList.toggle('stream-output--active', id === tabId);
   });
+  _mark(`show/hide toggle done`);
 
   activeTabId = tabId;
   const activeTab = tabs.get(tabId);
+  console.log(`[perf] switchTab: target tab has ${activeTab?.streamEl?.childElementCount ?? '?'} DOM children, ${activeTab?._prunedNodes?.length ?? 0} staged/pruned`);
 
   // Load context for this tab's session; todos are project-scoped (by cwd).
   if (activeTab && activeTab.sessionId) {
     activeSessionId = activeTab.sessionId;
   }
   loadTodos(activeTab ? activeTab.cwd : null);
+  _mark('loadTodos kicked off');
 
   renderTabs();
+  _mark('renderTabs done');
 
   // Global skills/agents follow the newly active tab's provider (Copilot
   // keeps its native ~/.copilot/{skills,agents}; every other provider has
   // its own folder).
   loadGlobalSkillsForProvider(getTabProvider(activeTab));
   loadGlobalAgentsForProvider(getTabProvider(activeTab));
+  // loadGlobalSkillsForProvider() skips re-rendering when the provider didn't
+  // change (e.g. switching between two Copilot tabs) — but the active-skill
+  // highlighting is per-tab, so it must refresh on every tab switch regardless.
+  renderSkills();
+  _mark('skills/agents kicked off + renderSkills done');
 
   // Reload project skills/agents for the newly active tab's CWD
   loadProjectSkillsAndAgents(activeTab?.cwd || null);
+  _mark('loadProjectSkillsAndAgents kicked off (async, see its own [perf] line)');
   
   // Refresh session tools list for this tab
   renderSessionTools();
@@ -743,7 +909,6 @@ function switchTab(tabId) {
 
     richTextMode = activeTab.inputRichMode || false;
     btnToggle?.classList.toggle('active', richTextMode);
-    if (btnToggle) btnToggle.textContent = richTextMode ? '📝' : '✏️';
     toolbar?.classList.toggle('visible', richTextMode);
 
     if (richTextMode) {
@@ -756,9 +921,10 @@ function switchTab(tabId) {
       btnSend?.setAttribute('data-tooltip', 'Senden (Enter)');
     }
 
-    chatInput.style.height = 'auto';
     if (chatInput.value) {
-      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+      resizeChatInput(chatInput);
+    } else {
+      chatInput.style.height = 'auto';
     }
   }
 
@@ -777,6 +943,7 @@ function switchTab(tabId) {
       refreshUsageDisplay(tabId);
     }
   }
+  _mark('switchTab() sync work done (see click handler in renderTabs() for the paint-inclusive total)');
 }
 
 /**
@@ -884,15 +1051,69 @@ function renderTabs() {
       el.appendChild(closeBtn);
     }
 
-    el.addEventListener('click', () => switchTab(id));
+    el.addEventListener('click', () => {
+      const _clickT0 = performance.now();
+      switchTab(id);
+      // Double rAF = after the browser has actually painted the next frame,
+      // not just "before the next paint" — this is what catches forced
+      // layout/reflow cost that happens after switchTab() itself returns.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        console.log(`[perf] tab click → painted: ${(performance.now() - _clickT0).toFixed(1)}ms (this is the number that matches what you actually feel)`);
+      }));
+    });
     el.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (canSaveSession) startTabRename(id, el, labelSpan);
     });
 
+    // Drag-and-drop reordering — see reorderTabs().
+    el.draggable = true;
+    el.addEventListener('dragstart', (e) => {
+      _draggedTabId = id;
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('tab--dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('tab--dragging');
+      _draggedTabId = null;
+    });
+    el.addEventListener('dragover', (e) => {
+      if (!_draggedTabId || _draggedTabId === id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!_draggedTabId || _draggedTabId === id) return;
+      reorderTabs(_draggedTabId, id);
+    });
+
     bar.insertBefore(el, addBtn);
   });
   saveOpenTabs();
+}
+
+/** Tab ID currently being dragged in the tab bar, or null — see renderTabs(). */
+let _draggedTabId = null;
+
+/**
+ * Moves `draggedId` to `targetId`'s position in the tabs map and re-renders.
+ * Maps don't support in-place reordering, so this rebuilds it from a
+ * reordered entries array — saveOpenTabs() (called by renderTabs()) then
+ * persists the new order.
+ * @param {string} draggedId
+ * @param {string} targetId
+ */
+function reorderTabs(draggedId, targetId) {
+  const entries = [...tabs.entries()];
+  const fromIdx = entries.findIndex(([id]) => id === draggedId);
+  const toIdx = entries.findIndex(([id]) => id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const [moved] = entries.splice(fromIdx, 1);
+  entries.splice(toIdx, 0, moved);
+  tabs.clear();
+  entries.forEach(([id, tab]) => tabs.set(id, tab));
+  renderTabs();
 }
 
 /**
@@ -1185,20 +1406,24 @@ function sendMessage() {
   const inputEl = document.createElement('div');
   inputEl.className = 'stream-input';
   inputEl.textContent = text;
+  // Marks the start of a new "turn" for pruneOldMessages() — everything
+  // inserted after this until the next .stream-input belongs to this turn's
+  // age, so only turn-starts need a timestamp.
+  inputEl.dataset.ts = String(Date.now());
   tab.streamEl.insertBefore(inputEl, tab.statusEl);
 
-  // Build skill instructions prefix for active skills
+  // Build skill instructions prefix for this tab's active skills
   let skillPrefix = '';
   const activeSkillInfos = [];
-  if (activeSkills.size > 0) {
-    for (const id of activeSkills) {
+  if (tab.activeSkills.size > 0) {
+    for (const id of tab.activeSkills) {
       const s = skills.find(sk => sk.id === id);
       if (s) {
         activeSkillInfos.push({ name: s.name, icon: s.icon || '🧩' });
       }
     }
     if (activeSkillInfos.length > 0) {
-      const skillNames = [...activeSkills].map(id => {
+      const skillNames = [...tab.activeSkills].map(id => {
         const s = skills.find(sk => sk.id === id);
         return s ? `- ${s.name}` : null;
       }).filter(Boolean);
@@ -1514,12 +1739,14 @@ function initCopilotIPC() {
           }
           tab._responseRaw += delta;
         }
-        // Throttled markdown render
+        // Throttled markdown render — fast/no-highlight variant (see preload.js)
+        // since this reruns on the whole growing response every ~100ms; the
+        // final render (assistant.message / onDone) adds real highlighting.
         if (!tab._mdTimer) {
           tab._mdTimer = setTimeout(() => {
             tab._mdTimer = null;
             if (tab._responseEl && tab._responseRaw) {
-              tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+              tab._responseEl.innerHTML = window.markdown.renderFast(tab._responseRaw);
             }
           }, RESIZE_FIT_DELAY_MS);
         }
@@ -1714,18 +1941,37 @@ function initCopilotIPC() {
       }
 
       // ── Session / Setup events ────────────────────────────
-      case 'session.mcp_server_status_changed':
-        if (event.data.status === 'connected') {
-          tab.statusEl.textContent = `● ${event.data.serverName} verbunden`;
+      case 'session.mcp_server_status_changed': {
+        const { serverName, status } = event.data;
+        if (status === 'connected') {
+          tab.statusEl.textContent = `● ${serverName} verbunden`;
           tab.statusEl.style.display = 'block';
         }
+        if (serverName && status) {
+          _liveMcpStatus.set(serverName, status);
+          const g = globalMcpServers.find(g => g.name === serverName);
+          if (g) g.status = status;
+          const t = mcpServers.find(s => s.name === serverName);
+          if (t) { t.status = status; if (tabId === activeTabId) renderMcpServers(); }
+        }
         break;
+      }
 
       case 'session.mcp_servers_loaded': {
         const servers = event.data.servers || [];
         const connected = servers.filter(s => s.status === 'connected');
         tab.context.mcp = `${connected.length}/${servers.length}`;
         tab.context.mcpServers = servers;
+        // The live session just told us the real status — remember it so the
+        // background reachability probe (refreshMcpStatus) never overwrites
+        // it with a less reliable guess, and merge it into the global list
+        // too so other tabs/re-renders see the correct status.
+        for (const s of servers) {
+          if (!s.status) continue;
+          _liveMcpStatus.set(s.name, s.status);
+          const g = globalMcpServers.find(g => g.name === s.name);
+          if (g) g.status = s.status;
+        }
         if (tabId === activeTabId) {
           mcpServers = servers;
           renderMcpServers();
@@ -1927,6 +2173,7 @@ function initCopilotIPC() {
     }
 
     scrollToBottom(tab.streamEl);
+    pruneOldMessages(tab);
 
     // Play sound if tab finished in background
     if (tabId !== activeTabId) {
@@ -1983,12 +2230,19 @@ const DEFAULT_MODELS = [
   // Claude Code (provider: 'claude-code') — billed via the Claude subscription
   // (CLI login, no API key). The adapter uses ALIASES (default/sonnet/opus/haiku),
   // not full model ids; the real list is discovered via ACP and replaces these.
+  // These alias labels are only a pre-discovery fallback and go stale as soon as
+  // an alias starts pointing at a newer model — the ACP-discovered list (which
+  // takes precedence everywhere) carries the authoritative names.
   { id: 'default', label: 'Default (Sonnet 5)', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
   { id: 'sonnet', label: 'Sonnet 5', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
-  { id: 'opus', label: 'Opus 4.8', short: 'Opus 4.8', provider: 'claude-code', tier: 'sub' },
+  { id: 'opus', label: 'Opus 5', short: 'Opus 5', provider: 'claude-code', tier: 'sub' },
   { id: 'haiku', label: 'Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code', tier: 'sub' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
+  // TODO: Claude 5 (claude-sonnet-5 / claude-opus-5) hier ergänzen, sobald
+  // Preise + Kontextfenster in renderer-logic.js MODEL_PRICES/MODEL_PROVIDER
+  // und anthropic-provider.js gepflegt sind — sonst greift für sie keine
+  // Kostenschätzung. Die API-Modell-Discovery liefert sie ohnehin bereits.
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic', tier: 'paid' },
   // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
@@ -2534,8 +2788,13 @@ function updateModelSelectBtn(tabId) {
   // Explicit selection takes priority, fallback to actual model from session,
   // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
   const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
-  const found = DEFAULT_MODELS.find(m => m.id === modelId)
-    || Object.values(_dynamicModels).flat().find(m => m.id === modelId);
+  // Discovered models win over the hardcoded fallback list — same precedence as
+  // getModelsForProvider(). The other way round, a stale hardcoded label shadows
+  // the live one for ids that exist in both: Claude Code's aliases ('opus',
+  // 'sonnet', …) never change, but what they point at does, so the button kept
+  // showing e.g. "Opus 4.8" long after the adapter reported Opus 5.
+  const found = Object.values(_dynamicModels).flat().find(m => m.id === modelId)
+    || DEFAULT_MODELS.find(m => m.id === modelId);
   btn.textContent = `🧠 ${found ? found.short : modelId}`;
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
@@ -2778,25 +3037,44 @@ async function runContextAction(actionId) {
   const origText = btn.textContent;
   btn.textContent = '⏳ …';
 
+  // /context and /clear don't call the model — they should return near-
+  // instantly, so a short timeout surfaces a stuck adapter as a visible error
+  // in seconds instead of leaving the button on the hourglass for 3 minutes
+  // (the default slash-command timeout, sized for /compact's LLM call).
+  const FAST_COMMAND_TIMEOUT_MS = 20_000;
+
   try {
     if (actionId === 'show') {
-      const result = await window.copilot.chat.silentCommand(activeTabId, '/context');
+      const result = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
       if (result.success) {
         updateContextButton(result.text);
         showContextPanel(result.text);
+      } else {
+        showNotification('Kontext-Abfrage fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
       }
     } else if (actionId === 'compact') {
       const result = await window.copilot.chat.silentCommand(activeTabId, '/compact');
-      // /compact response may contain context info; also query explicitly
-      const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context');
-      if (ctx.success) updateContextButton(ctx.text);
+      if (!result.success) {
+        showNotification('Compact fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
+      } else {
+        // /compact response may contain context info; also query explicitly
+        const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
+        if (ctx.success) updateContextButton(ctx.text);
+        showNotification('Kontext komprimiert.', 'success');
+      }
     } else if (actionId === 'clear') {
-      await window.copilot.chat.silentCommand(activeTabId, '/clear');
-      const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context');
-      if (ctx.success) updateContextButton(ctx.text);
+      const result = await window.copilot.chat.silentCommand(activeTabId, '/clear', FAST_COMMAND_TIMEOUT_MS);
+      if (!result.success) {
+        showNotification('Clear fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
+      } else {
+        const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
+        if (ctx.success) updateContextButton(ctx.text);
+        showNotification('Kontext gelöscht.', 'success');
+      }
     }
   } catch (err) {
     console.warn('[context]', err.message);
+    showNotification('Aktion fehlgeschlagen: ' + err.message, 'error');
   } finally {
     btn.classList.remove('session-actions__btn--loading');
     // If button text wasn't updated by updateContextButton, restore it
@@ -3239,7 +3517,7 @@ function renderSessions(list) {
       container.innerHTML = `
         <div class="session-card session-card--id-resume">
           <div class="session-card__row">
-            <div class="session-card__main" onclick="resumeSessionById('${escapeAttr(query)}')">
+            <div class="session-card__main" data-resume-by-id="${escapeAttr(query)}">
               <div class="session-card__title" style="font-size:11px;color:var(--text-muted);">⏎ Session per ID öffnen:</div>
               <div class="session-card__id" style="font-size:10px;font-family:monospace;color:var(--accent);word-break:break-all;">${escapeHtml(query)}</div>
             </div>
@@ -3266,10 +3544,10 @@ function renderSessions(list) {
     return `
       <div class="session-card ${isLive ? 'session-card--live' : ''}" >
         <div class="session-card__row">
-          <div class="session-card__main" onclick="resumeSession('${escapeAttr(s.id)}')">
+          <div class="session-card__main" data-resume-session="${escapeAttr(s.id)}">
             <div class="session-card__title">${provIcon}<span class="session-card__title-text">${escapeHtml(title)}</span></div>
           </div>
-          <button class="session-card__menu-btn" onclick="event.stopPropagation(); openSessionCardMenu('${escapeAttr(s.id)}', this)" data-tooltip="Optionen" aria-label="Session-Optionen">⋮</button>
+          <button class="session-card__menu-btn" data-session-menu="${escapeAttr(s.id)}" data-tooltip="Optionen" aria-label="Session-Optionen">⋮</button>
         </div>
       </div>
     `;
@@ -3280,7 +3558,7 @@ function renderSessions(list) {
     html += `
       <div class="session-card session-card--id-resume" style="border-top:1px dashed var(--border);margin-top:4px;padding-top:4px;">
         <div class="session-card__row">
-          <div class="session-card__main" onclick="resumeSessionById('${escapeAttr(query)}')">
+          <div class="session-card__main" data-resume-by-id="${escapeAttr(query)}">
             <div class="session-card__title" style="font-size:11px;color:var(--text-muted);">⏎ Andere Session per ID öffnen:</div>
             <div class="session-card__id" style="font-size:10px;font-family:monospace;color:var(--accent);word-break:break-all;">${escapeHtml(query)}</div>
           </div>
@@ -3289,6 +3567,21 @@ function renderSessions(list) {
   }
 
   container.innerHTML = html;
+}
+
+/**
+ * Right-aligning a fixed-positioned dropdown under a sidebar button (via
+ * only a `right` offset) can push its left edge past the window's left edge
+ * once the box's real (content-dependent) width is known — a narrow/resized
+ * sidebar plus a wide item (e.g. the Todos sync button) makes this easy to
+ * hit. Call once the menu is in the DOM so getBoundingClientRect() is real.
+ * @param {HTMLElement} menu
+ */
+function clampMenuToViewportLeft(menu) {
+  if (menu.getBoundingClientRect().left < 8) {
+    menu.style.right = 'auto';
+    menu.style.left = '8px';
+  }
 }
 
 /**
@@ -3327,6 +3620,7 @@ function openSessionCardMenu(sessionId, btn) {
   menu.style.top = `${rect.bottom + 4}px`;
   menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
   document.body.appendChild(menu);
+  clampMenuToViewportLeft(menu);
 
   const close = () => {
     menu.remove();
@@ -3569,6 +3863,9 @@ async function displaySessionContext(tab, sessionId, tabId) {
   const headerEl = document.createElement('div');
   headerEl.className = 'stream-session-context';
   headerEl.innerHTML = `<div class="stream-session-context__header">📋 Session: ${escapeHtml(title)}</div>`;
+  // Must carry the earliest ts in this batch — it's the very first child
+  // inserted, so pruneOldMessages() needs it stamped to even start scanning.
+  headerEl.dataset.ts = String(Date.now());
   insertBefore(headerEl);
 
   // 2. Letzte Nachrichten als echte Chat-Bubbles. Direkt-API-Sessions haben
@@ -3578,14 +3875,19 @@ async function displaySessionContext(tab, sessionId, tabId) {
   try {
     const provider = getTabProvider(tab);
     if (provider === 'copilot') {
-      // Full conversation history (not just the last few) so reopening a
-      // Copilot session restores the whole verlauf in the tab.
-      renderSimpleHistory(await copilot.sessions.readAllMessages(sessionId), insertBefore);
+      // The full conversation (not just the last few messages) is fetched so
+      // reopening a session restores the whole history — but only the most
+      // recent HISTORY_LIVE_TAIL_MESSAGES are actually put in the DOM; older
+      // ones are staged in tab._prunedNodes and load in on scroll-up (see
+      // insertHistoryGroups/restorePrunedHistory). A long-lived session used
+      // to render its entire history into the DOM immediately on resume,
+      // which was the single biggest contributor to tab-switch jank.
+      renderSimpleHistory(await copilot.sessions.readAllMessages(sessionId), insertBefore, tab);
     } else if (provider === 'claude-code') {
-      renderSimpleHistory(await copilot.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore);
+      renderSimpleHistory(await copilot.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore, tab);
     } else {
       const { messages, geminiMode } = await window.copilot.providers.loadSessionHistory(sessionId);
-      renderApiHistory(messages, insertBefore);
+      renderApiHistory(messages, insertBefore, tab);
       // Restore Gemini's search/files mode so a resumed session doesn't
       // silently fall back to the default (fresh tabs start with no mode set).
       if (provider === 'gemini' && geminiMode) {
@@ -3607,16 +3909,45 @@ async function displaySessionContext(tab, sessionId, tabId) {
   requestAnimationFrame(() => scrollToBottom(tab.streamEl));
 }
 
+/** How many of the most recent history "messages" render live on resume — older
+ * ones are staged (never inserted) and load in on scroll-up. See
+ * insertHistoryGroups() and restorePrunedHistory(). */
+const HISTORY_LIVE_TAIL_MESSAGES = 20;
+
+/**
+ * Inserts history "groups" (one BUILDER FUNCTION per source message — a
+ * message can produce 0-N elements: a bubble plus tool-call lines) into the
+ * DOM, but only builds+attaches the most recent HISTORY_LIVE_TAIL_MESSAGES.
+ * Older builders go UNBUILT into tab._prunedNodes, so a long resumed session
+ * pays neither DOM cost nor markdown-parse cost for its backlog on open —
+ * restorePrunedHistory() builds them batch-wise when scrolling to the top.
+ * @param {Array<() => HTMLElement[]>} groups - Builders, oldest first.
+ * @param {(el: HTMLElement) => void} insertBefore
+ * @param {Object} tab
+ */
+function insertHistoryGroups(groups, insertBefore, tab) {
+  const cut = Math.max(0, groups.length - HISTORY_LIVE_TAIL_MESSAGES);
+  const older = groups.slice(0, cut);
+  if (older.length) {
+    tab._prunedNodes = tab._prunedNodes || [];
+    tab._prunedNodes.push(...older);
+  }
+  for (const build of groups.slice(cut)) {
+    for (const el of build()) insertBefore(el);
+  }
+}
+
 /**
  * Renders a simple {role, content}[] history (Copilot's events.jsonl or
  * Claude Code's own transcript — both already reduced to plain text turns)
  * as history bubbles.
  * @param {Array<{role: string, content: string}>} messages
  * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
+ * @param {Object} tab
  */
-function renderSimpleHistory(messages, insertBefore) {
+function renderSimpleHistory(messages, insertBefore, tab) {
   if (!Array.isArray(messages)) return;
-  for (const msg of messages) {
+  const groups = messages.map(msg => () => {
     const el = document.createElement('div');
     if (msg.role === 'user') {
       el.className = 'stream-input stream-input--history';
@@ -3625,8 +3956,12 @@ function renderSimpleHistory(messages, insertBefore) {
       el.className = 'stream-response markdown-body stream-response--history';
       el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
     }
-    insertBefore(el);
-  }
+    // Timestamp restored history too, so a long-idle tab still prunes it
+    // 30 minutes after being displayed — see pruneOldMessages().
+    el.dataset.ts = String(Date.now());
+    return [el];
+  });
+  insertHistoryGroups(groups, insertBefore, tab);
 }
 
 /**
@@ -3635,33 +3970,42 @@ function renderSimpleHistory(messages, insertBefore) {
  * agent loop) and thinking blocks are skipped.
  * @param {Array} messages - Provider-native message history.
  * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
+ * @param {Object} tab
  */
-function renderApiHistory(messages, insertBefore) {
+function renderApiHistory(messages, insertBefore, tab) {
   if (!Array.isArray(messages)) return;
 
-  const userBubble = (text) => {
-    const el = document.createElement('div');
-    el.className = 'stream-input stream-input--history';
-    el.textContent = text;
-    insertBefore(el);
-  };
-  const assistantBubble = (text) => {
-    const el = document.createElement('div');
-    el.className = 'stream-response markdown-body stream-response--history';
-    el.innerHTML = window.markdown ? window.markdown.render(text) : escapeHtml(text);
-    insertBefore(el);
-  };
-  const toolLine = (name, input) => {
-    const el = document.createElement('div');
-    el.className = 'stream-tool--history';
-    let args = '';
-    try { args = typeof formatToolArgs === 'function' ? formatToolArgs(input) : ''; } catch (_) { /* ignore */ }
-    if (!args && input) { try { args = JSON.stringify(input).slice(0, 120); } catch (_) { /* ignore */ } }
-    el.textContent = `🔧 ${name}${args ? ' — ' + args : ''}`;
-    insertBefore(el);
-  };
+  // One builder per source message (a message can yield a bubble plus several
+  // tool-call lines) — element creation incl. markdown parse happens only
+  // when the builder runs (live tail now; staged backlog on scroll-up).
+  const buildMessageEls = (msg) => {
+    const out = [];
+    const userBubble = (text) => {
+      const el = document.createElement('div');
+      el.className = 'stream-input stream-input--history';
+      el.textContent = text;
+      // Timestamp restored history too, so a long-idle tab still prunes it
+      // 30 minutes after being displayed — see pruneOldMessages().
+      el.dataset.ts = String(Date.now());
+      out.push(el);
+    };
+    const assistantBubble = (text) => {
+      const el = document.createElement('div');
+      el.className = 'stream-response markdown-body stream-response--history';
+      el.innerHTML = window.markdown ? window.markdown.render(text) : escapeHtml(text);
+      el.dataset.ts = String(Date.now());
+      out.push(el);
+    };
+    const toolLine = (name, input) => {
+      const el = document.createElement('div');
+      el.className = 'stream-tool--history';
+      let args = '';
+      try { args = typeof formatToolArgs === 'function' ? formatToolArgs(input) : ''; } catch (_) { /* ignore */ }
+      if (!args && input) { try { args = JSON.stringify(input).slice(0, 120); } catch (_) { /* ignore */ } }
+      el.textContent = `🔧 ${name}${args ? ' — ' + args : ''}`;
+      out.push(el);
+    };
 
-  for (const msg of messages) {
     if (Array.isArray(msg.parts)) {
       // Gemini shape: { role: 'user' | 'model', parts: [{text}|{functionCall}|{functionResponse}] }
       const text = msg.parts.filter(p => p.text).map(p => p.text).join('\n').trim();
@@ -3691,7 +4035,10 @@ function renderApiHistory(messages, insertBefore) {
         toolLine(tc.function?.name || 'tool', input);
       }
     }
-  }
+    return out;
+  };
+
+  insertHistoryGroups(messages.map(msg => () => buildMessageEls(msg)), insertBefore, tab);
 }
 
 // ── Delete Session ────────────────────────────────────────────
@@ -3746,19 +4093,28 @@ function renderSkills() {
     return;
   }
 
+  // Active state is per-tab — a skill toggled on in one tab must not show
+  // as active in another.
+  const activeTabSkills = tabs.get(activeTabId)?.activeSkills || new Set();
+
   if (section) section.style.display = 'block';
+  // No inline onclick with interpolated values: skill names/dirs come from
+  // third-party SKILL.md frontmatter (incl. marketplace plugins) — HTML-entity
+  // decoding would let a crafted name break out of the JS string inside an
+  // onclick attribute. Actions run via delegated listeners reading data-*
+  // attributes instead (see initListActionDelegation).
   container.innerHTML = visibleSkills.map(s => {
-    const isActive = activeSkills.has(s.id);
+    const isActive = activeTabSkills.has(s.id);
     const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
     const isProject = s.source === 'project';
     const deleteBtn = s.source === 'user' && s.dirName
-      ? `<button class="skill-card__delete" onclick="event.stopPropagation(); confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
+      ? `<button class="skill-card__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
       : '';
     const projectBadge = '';
     return `
       <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
-           onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
-        <span class="skill-card__icon">${s.icon}</span>
+           data-skill-id="${escapeAttr(s.id)}" data-tooltip="${escapeAttr(s.description)}">
+        <span class="skill-card__icon">${escapeHtml(s.icon || '🧩')}</span>
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}${projectBadge}</div>
         </div>
@@ -3770,13 +4126,14 @@ function renderSkills() {
 }
 
 /**
- * Toggle a skill's active state and persist the change.
+ * Toggle a skill's active state for the current tab only.
  * @param {string} skillId
  */
 function toggleSkill(skillId) {
-  if (activeSkills.has(skillId)) activeSkills.delete(skillId);
-  else activeSkills.add(skillId);
-  saveSetting('activeSkills', [...activeSkills]);
+  const tab = tabs.get(activeTabId);
+  if (!tab) return;
+  if (tab.activeSkills.has(skillId)) tab.activeSkills.delete(skillId);
+  else tab.activeSkills.add(skillId);
   renderSkills();
 }
 
@@ -3815,6 +4172,10 @@ async function refreshMcpStatus() {
   if (!Array.isArray(probed)) return;
   const statusByName = new Map(probed.map(s => [s.name, s.status]));
   const applyStatus = (list) => list.forEach(s => {
+    // A live session already confirmed this server's real status (by actually
+    // using it) — that's stronger evidence than our own unauthenticated probe,
+    // which can false-negative on servers that need auth the probe doesn't send.
+    if (_liveMcpStatus.has(s.name)) return;
     if (statusByName.has(s.name)) s.status = statusByName.get(s.name);
   });
   applyStatus(globalMcpServers);
@@ -3951,20 +4312,20 @@ function renderSkillManager() {
 
     const hideBtn = s.dirName ? `
       <div class="split-btn">
-        <button class="split-btn__item ${isHiddenSession ? 'split-btn__item--active' : ''}" onclick="toggleHideSession('${escapeAttr(s.dirName)}')" data-tooltip="Nur in dieser Session ausblenden">👁 Session</button>
-        <button class="split-btn__item ${isHiddenGlobal ? 'split-btn__item--active' : ''}" onclick="toggleHideGlobal('${escapeAttr(s.dirName)}')" data-tooltip="Global ausblenden">🌍 Global</button>
+        <button class="split-btn__item ${isHiddenSession ? 'split-btn__item--active' : ''}" data-hide-session="${escapeAttr(s.dirName)}" data-tooltip="Nur in dieser Session ausblenden">👁 Session</button>
+        <button class="split-btn__item ${isHiddenGlobal ? 'split-btn__item--active' : ''}" data-hide-global="${escapeAttr(s.dirName)}" data-tooltip="Global ausblenden">🌍 Global</button>
       </div>` : '';
 
     const disableBtn = s.dirName ? `
-      <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" onclick="toggleSkillDisabled('${escapeAttr(s.dirName)}')" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren'}">
+      <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" data-toggle-disabled="${escapeAttr(s.dirName)}" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren'}">
         ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'}
       </button>` : '';
 
     const deleteBtn = s.source === 'user' && s.dirName ? `
-      <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+      <button class="skill-manager__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-tooltip="Skill löschen">🗑️</button>` : '';
 
     html += `<div class="skill-manager__row">
-      <span class="${nameClass}">${s.icon || '🎯'} ${escapeHtml(s.name)}</span>
+      <span class="${nameClass}">${escapeHtml(s.icon || '🎯')} ${escapeHtml(s.name)}</span>
       ${hideBtn}${disableBtn}${deleteBtn}
     </div>`;
   }
@@ -3980,21 +4341,21 @@ function renderSkillManager() {
       const nameClass = isHiddenSession ? 'skill-manager__name skill-manager__name--hidden' : 'skill-manager__name';
 
       const hideBtn = s.dirName ? `
-        <button class="skill-manager__toggle-btn ${isHiddenSession ? 'skill-manager__toggle-btn--active' : ''}" onclick="toggleHideSession('${escapeAttr(s.dirName)}')" data-tooltip="In dieser Session ausblenden">
+        <button class="skill-manager__toggle-btn ${isHiddenSession ? 'skill-manager__toggle-btn--active' : ''}" data-hide-session="${escapeAttr(s.dirName)}" data-tooltip="In dieser Session ausblenden">
           ${isHiddenSession ? '👁\u0336 Ausgeblendet' : '👁 Sichtbar'}
         </button>` : '';
 
       const disableBtn = s.dirName ? `
-        <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" onclick="toggleSkillDisabled('${escapeAttr(s.dirName)}')" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren — wirkt global für alle Projekte mit diesem Skill-Namen'}">
+        <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" data-toggle-disabled="${escapeAttr(s.dirName)}" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren — wirkt global für alle Projekte mit diesem Skill-Namen'}">
           ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'} ${!isCLIDisabled ? '' : ''}
         </button>
         ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
 
       const deleteBtn = s.dirName && s.projectCwd ? `
-        <button class="skill-manager__delete" onclick="confirmDeleteSkill('${escapeAttr(s.dirName)}', '${escapeAttr(s.name)}', '${escapeAttrJs(s.projectCwd)}')" data-tooltip="Skill löschen">🗑️</button>` : '';
+        <button class="skill-manager__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-project-cwd="${escapeAttr(s.projectCwd)}" data-tooltip="Skill löschen">🗑️</button>` : '';
 
       html += `<div class="skill-manager__row">
-        <span class="${nameClass}">${s.icon || '🧪'} ${escapeHtml(s.name)}</span>
+        <span class="${nameClass}">${escapeHtml(s.icon || '🧪')} ${escapeHtml(s.name)}</span>
         ${hideBtn}${disableBtn}${deleteBtn}
       </div>`;
     }
@@ -4041,8 +4402,6 @@ async function reloadSkills() {
   skills = provider === 'copilot'
     ? (await copilot.skills.list() || [])
     : (await copilot.skills.listProvider(provider) || []);
-  const savedActiveSkills = getSettings().activeSkills || [];
-  activeSkills = new Set(savedActiveSkills);
   const savedDisabledSkills = await copilot.skills.getDisabled() || [];
   disabledSkills = new Set(savedDisabledSkills);
   const savedHidden = await copilot.skills.getHidden() || [];
@@ -4064,6 +4423,7 @@ async function reloadSkills() {
  * @returns {Promise<void>}
  */
 async function loadProjectSkillsAndAgents(cwd) {
+  const _t0 = performance.now();
   // Remove stale project skills
   skills = skills.filter(s => s.source !== 'project');
   agents = agents.filter(a => a.source !== 'project');
@@ -4117,6 +4477,7 @@ async function loadProjectSkillsAndAgents(cwd) {
   const tab = tabs.get(activeTabId);
   if (tab) tab.context.mcpServers = mcpServers;
   renderMcpServers();
+  console.log(`[perf] loadProjectSkillsAndAgents(${cwd || 'null'}): ${(performance.now() - _t0).toFixed(1)}ms`);
 }
 
 /**
@@ -4140,13 +4501,13 @@ function renderAgents() {
     // delete button here — agents:delete only knows Copilot's own
     // ~/.copilot/agents folder and would delete the wrong file.
     const deleteBtn = a.fileSlug && !isProject && a.source !== 'provider'
-      ? `<button class="agent-card__delete" onclick="event.stopPropagation(); confirmDeleteAgent('${escapeAttr(a.fileSlug)}', '${escapeAttr(a.name)}')" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
+      ? `<button class="agent-card__delete" data-file-slug="${escapeAttr(a.fileSlug)}" data-name="${escapeAttr(a.name)}" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
       : '';
     const projectBadge = '';
     return `
       <div class="agent-card ${isActive ? 'agent-card--active' : ''} ${isProject ? 'agent-card--project' : ''}"
-           onclick="toggleAgent('${escapeAttr(a.id)}')" data-tooltip="${escapeAttr(a.description)}">
-        <span class="agent-card__icon">${a.icon}</span>
+           data-agent-id="${escapeAttr(a.id)}" data-tooltip="${escapeAttr(a.description)}">
+        <span class="agent-card__icon">${escapeHtml(a.icon || '🤖')}</span>
         <div class="agent-card__info">
           <div class="agent-card__name">${escapeHtml(a.name)}${projectBadge}</div>
         </div>
@@ -4394,7 +4755,7 @@ function renderPlugins() {
         <div class="plugin-empty-state__icon">🧩</div>
         <div class="plugin-empty-state__title">Keine Marketplaces konfiguriert</div>
         <div class="plugin-empty-state__desc">Füge einen Marketplace hinzu um Plugins zu entdecken.</div>
-        <button class="plugin-btn plugin-btn--install" onclick="document.getElementById('btnAddPlugin').click()">+ Marketplace hinzufügen</button>
+        <button class="plugin-btn plugin-btn--install" data-click-target="btnAddPlugin">+ Marketplace hinzufügen</button>
       </div>`;
     if (sidebar) sidebar.innerHTML = '';
     return;
@@ -4405,7 +4766,7 @@ function renderPlugins() {
 
   const visibleInstalled = installedPlugins.filter(matchesQuery);
   const installedSectionId = 'plugin-section-installed';
-  sidebarHtml += `<div class="plugins-sidebar__item ${visibleInstalled.length > 0 ? '' : 'plugins-sidebar__item--empty'}" onclick="document.getElementById('${installedSectionId}').scrollIntoView({behavior:'smooth'})">
+  sidebarHtml += `<div class="plugins-sidebar__item ${visibleInstalled.length > 0 ? '' : 'plugins-sidebar__item--empty'}" data-scroll-to="${installedSectionId}">
     <span class="plugins-sidebar__icon">✓</span>
     <span class="plugins-sidebar__label">Installiert</span>
     <span class="plugins-sidebar__badge">${installedPlugins.length}</span>
@@ -4440,7 +4801,7 @@ function renderPlugins() {
     const filteredPlugins = (mp.plugins || []).filter(matchesQuery);
     const totalCount = (mp.plugins || []).length;
 
-    sidebarHtml += `<div class="plugins-sidebar__item" onclick="document.getElementById('${sectionId}').scrollIntoView({behavior:'smooth'})">
+    sidebarHtml += `<div class="plugins-sidebar__item" data-scroll-to="${sectionId}">
       <span class="plugins-sidebar__icon">🏪</span>
       <span class="plugins-sidebar__label">${escapeHtml(mpDisplayName)}</span>
       <span class="plugins-sidebar__badge">${totalCount}</span>
@@ -4453,7 +4814,7 @@ function renderPlugins() {
     html += `<span class="plugin-section__subtitle">${escapeHtml(mpSubtitle)}</span>`;
     html += `</div>`;
     html += `<span class="plugin-section__count">${totalCount}</span>`;
-    html += `<button class="plugin-section__remove-btn" onclick="removeMarketplace('${escapeAttr(mp.name || mp.marketplace)}')" title="Marketplace entfernen">✕</button>`;
+    html += `<button class="plugin-section__remove-btn" data-remove-marketplace="${escapeAttr(mp.name || mp.marketplace)}" title="Marketplace entfernen">✕</button>`;
     html += `</div>`;
 
     if (mp.error) {
@@ -4503,12 +4864,12 @@ function renderPluginTile(plugin, status, target) {
 
   let actionsHtml = '';
   if (status === 'not-installed') {
-    actionsHtml = `<button class="plugin-btn plugin-btn--install" onclick="installPlugin('${escapeAttr(target)}')">Installieren</button>`;
+    actionsHtml = `<button class="plugin-btn plugin-btn--install" data-install-plugin="${escapeAttr(target)}">Installieren</button>`;
   } else if (status === 'installed') {
-    actionsHtml = `<button class="plugin-btn plugin-btn--remove" onclick="uninstallPlugin('${escapeAttr(name)}')">Entfernen</button>`;
+    actionsHtml = `<button class="plugin-btn plugin-btn--remove" data-uninstall-plugin="${escapeAttr(name)}">Entfernen</button>`;
   } else if (status === 'update-available') {
-    actionsHtml = `<button class="plugin-btn plugin-btn--update-available" onclick="updatePlugin('${escapeAttr(name)}')">Updaten</button>`;
-    actionsHtml += `<button class="plugin-btn plugin-btn--remove" onclick="uninstallPlugin('${escapeAttr(name)}')">✕</button>`;
+    actionsHtml = `<button class="plugin-btn plugin-btn--update-available" data-update-plugin="${escapeAttr(name)}">Updaten</button>`;
+    actionsHtml += `<button class="plugin-btn plugin-btn--remove" data-uninstall-plugin="${escapeAttr(name)}">✕</button>`;
   }
 
   const meta = [author ? `👤 ${escapeHtml(author)}` : '', version ? `v${escapeHtml(version)}` : ''].filter(Boolean).join(' · ');
@@ -4969,6 +5330,7 @@ function openSectionMenu(name, btn) {
   menu.style.top = `${rect.bottom + 4}px`;
   menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
   document.body.appendChild(menu);
+  clampMenuToViewportLeft(menu);
 
   const close = () => {
     config.onClose?.();
@@ -5050,8 +5412,6 @@ async function initDataLoad() {
     console.warn('[skills] Laden fehlgeschlagen:', e.message);
     skills = [];
   }
-  const savedActiveSkills = getSettings().activeSkills || [];
-  activeSkills = new Set(savedActiveSkills);
   renderSkills();
 
   try {
@@ -5084,6 +5444,26 @@ async function initDataLoad() {
 }
 
 /**
+ * Auto-resizes the chat textarea to fit its content, growing upward. The
+ * rich-text/send buttons are pinned inside the input's bottom-right corner
+ * (see .chat-input-wrapper) on top of a full-width textarea — for a single
+ * line this deliberately lets the text run underneath them. Once content
+ * wraps past one line, an extra line's worth of height is added so the last
+ * line of text clears the button row instead of sitting behind it.
+ */
+function resizeChatInput(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  const cs = getComputedStyle(el);
+  const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+  const paddingV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const singleLineHeight = lineHeight + paddingV;
+  const natural = el.scrollHeight;
+  const extra = natural > singleLineHeight + 1 ? lineHeight : 0;
+  el.style.height = Math.min(natural + extra, CHAT_INPUT_MAX_HEIGHT) + 'px';
+}
+
+/**
  * Initialize the chat input textarea: send on Enter, arrow-key history
  * navigation, auto-resize on input, and the add-tab button.
  */
@@ -5112,8 +5492,7 @@ function initChatInput() {
         historyIndex--;
       }
       chatInput.value = inputHistory[historyIndex];
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+      resizeChatInput(chatInput);
     }
     if (e.key === 'ArrowDown' && historyIndex !== -1) {
       e.preventDefault();
@@ -5124,15 +5503,11 @@ function initChatInput() {
         historyIndex = -1;
         chatInput.value = historySavedInput;
       }
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+      resizeChatInput(chatInput);
     }
   });
 
-  chatInput.addEventListener('input', () => {
-    chatInput.style.height = 'auto';
-    chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
-  });
+  chatInput.addEventListener('input', () => resizeChatInput(chatInput));
 
   // Rich-Text contenteditable key handling
   chatInputRich.addEventListener('keydown', (e) => {
@@ -5141,6 +5516,16 @@ function initChatInput() {
       sendMessage();
     }
     // Normal Enter and Shift+Enter insert line break (default behavior)
+
+    // Tab/Shift+Tab inside a list item nests/un-nests it one level deeper —
+    // outside a list, Tab keeps its default behavior (move focus away).
+    if (e.key === 'Tab') {
+      const inList = document.queryCommandState('insertUnorderedList') || document.queryCommandState('insertOrderedList');
+      if (inList) {
+        e.preventDefault();
+        document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
+      }
+    }
   });
 
   // Rich-Text toolbar buttons
@@ -5157,7 +5542,6 @@ function initChatInput() {
   btnToggle.addEventListener('click', () => {
     richTextMode = !richTextMode;
     btnToggle.classList.toggle('active', richTextMode);
-    btnToggle.textContent = richTextMode ? '📝' : '✏️';
     toolbar.classList.toggle('visible', richTextMode);
 
     if (richTextMode) {
@@ -5171,8 +5555,7 @@ function initChatInput() {
       // Sync rich text → plain text / markdown (immer, auch bei leerem Inhalt)
       const markdown = convertHtmlToMarkdown(chatInputRich.innerHTML).trim();
       chatInput.value = markdown;
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+      resizeChatInput(chatInput);
       chatInputRich.style.display = 'none';
       chatInput.style.display = '';
       chatInput.focus();
@@ -5244,6 +5627,7 @@ function initWindowControls() {
   document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
   document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
   document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
+  document.getElementById('btnOpenDevTools')?.addEventListener('click', () => copilot.window.openDevTools());
 
   document.getElementById('btnScrollBottom').addEventListener('click', () => {
     const tab = tabs.get(activeTabId);
@@ -5339,7 +5723,7 @@ function initSettings() {
 
   const savedSettings = getSettings();
   settTheme.value = getCurrentTheme();
-  const fontSize = savedSettings.chatFontSize || 16;
+  const fontSize = savedSettings.chatFontSize || 14;
   settFontSize.value = fontSize;
   settFontSizeVal.textContent = fontSize + 'px';
   applyChatFontSize(fontSize);
@@ -6089,25 +6473,8 @@ function initDevConsole() {
   if (copilot.devConsole) {
     copilot.devConsole.onLog((entry) => addDevConsoleEntry(entry));
   }
-
-  if (window._rendererLogs) {
-    window._rendererLogs.forEach(entry => addDevConsoleEntry(entry));
-    console.log = (...args) => {
-      _rendererOrigLog(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'info', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-    console.warn = (...args) => {
-      _rendererOrigWarn(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'warn', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-    console.error = (...args) => {
-      _rendererOrigError(...args);
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      addDevConsoleEntry({ level: 'error', message: '[renderer] ' + msg, timestamp: Date.now() });
-    };
-  }
+  // Renderer logs already flow into addDevConsoleEntry via the single console
+  // override at the top of this file — no replay or re-override needed here.
 }
 
 /**
@@ -6540,8 +6907,7 @@ function initDragDrop() {
     if (parts.length > 0) {
       const prefix = chatInput.value ? '\n' : '';
       chatInput.value += prefix + parts.join('\n');
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT) + 'px';
+      resizeChatInput(chatInput);
       chatInput.focus();
     }
   });
@@ -6659,10 +7025,127 @@ async function applyUpdate(bar) {
 /** Wire the settings "check for updates" button and run the silent startup check. */
 function initUpdateChecker() {
   document.getElementById('btnCheckUpdates')?.addEventListener('click', () => checkForUpdates({ silent: false }));
+  document.getElementById('btnCheckUpdatesQuick')?.addEventListener('click', () => checkForUpdates({ silent: false }));
   // Silent check shortly after startup so it never blocks the UI, then
   // periodically while the app stays open.
   setTimeout(() => checkForUpdates({ silent: true }), 3000);
   setInterval(() => checkForUpdates({ silent: true }), UPDATE_CHECK_INTERVAL_MS);
+}
+
+/**
+ * Wires every dynamically-rendered list (skills, agents, sessions, skill
+ * manager, plugins) through delegated listeners on their static containers.
+ *
+ * These lists used to carry inline `onclick="fn('<value>')"` handlers. That is
+ * unsafe here regardless of escaping: the browser HTML-decodes an attribute
+ * BEFORE the JS parser sees it, so an `&#39;` produced by escapeAttr turns
+ * back into a real quote and a crafted value (skill/agent name from any
+ * third-party SKILL.md, including auto-mirrored marketplace plugins) could
+ * break out of the string and run arbitrary code with full access to the
+ * window.copilot bridge. Reading the same values from data-* attributes at
+ * click time removes that class of bug entirely — values are never parsed as
+ * code. Containers are static in index.html, so one listener each is enough
+ * and survives every re-render.
+ */
+function initListActionDelegation() {
+  const on = (containerId, handler) => {
+    const el = document.getElementById(containerId);
+    if (el) el.addEventListener('click', handler);
+  };
+
+  on('skillList', (e) => {
+    const del = e.target.closest('.skill-card__delete');
+    if (del) {
+      e.stopPropagation();
+      confirmDeleteSkill(del.dataset.dirName, del.dataset.name);
+      return;
+    }
+    const card = e.target.closest('.skill-card');
+    if (card?.dataset.skillId) toggleSkill(card.dataset.skillId);
+  });
+
+  on('agentList', (e) => {
+    const del = e.target.closest('.agent-card__delete');
+    if (del) {
+      e.stopPropagation();
+      confirmDeleteAgent(del.dataset.fileSlug, del.dataset.name);
+      return;
+    }
+    const card = e.target.closest('.agent-card');
+    if (card?.dataset.agentId) toggleAgent(card.dataset.agentId);
+  });
+
+  on('sessionList', (e) => {
+    const menuBtn = e.target.closest('[data-session-menu]');
+    if (menuBtn) {
+      e.stopPropagation();
+      openSessionCardMenu(menuBtn.dataset.sessionMenu, menuBtn);
+      return;
+    }
+    const byId = e.target.closest('[data-resume-by-id]');
+    if (byId) { resumeSessionById(byId.dataset.resumeById); return; }
+    const main = e.target.closest('[data-resume-session]');
+    if (main) resumeSession(main.dataset.resumeSession);
+  });
+
+  on('skillManagerBody', (e) => {
+    const hideSession = e.target.closest('[data-hide-session]');
+    if (hideSession) { toggleHideSession(hideSession.dataset.hideSession); return; }
+    const hideGlobal = e.target.closest('[data-hide-global]');
+    if (hideGlobal) { toggleHideGlobal(hideGlobal.dataset.hideGlobal); return; }
+    const toggleDisabled = e.target.closest('[data-toggle-disabled]');
+    if (toggleDisabled) { toggleSkillDisabled(toggleDisabled.dataset.toggleDisabled); return; }
+    const del = e.target.closest('.skill-manager__delete');
+    if (del) confirmDeleteSkill(del.dataset.dirName, del.dataset.name, del.dataset.projectCwd);
+  });
+
+  on('pluginList', (e) => {
+    const install = e.target.closest('[data-install-plugin]');
+    if (install) { installPlugin(install.dataset.installPlugin); return; }
+    const uninstall = e.target.closest('[data-uninstall-plugin]');
+    if (uninstall) { uninstallPlugin(uninstall.dataset.uninstallPlugin); return; }
+    const update = e.target.closest('[data-update-plugin]');
+    if (update) { updatePlugin(update.dataset.updatePlugin); return; }
+    const removeMp = e.target.closest('[data-remove-marketplace]');
+    if (removeMp) { removeMarketplace(removeMp.dataset.removeMarketplace); return; }
+    const clickTarget = e.target.closest('[data-click-target]');
+    if (clickTarget) document.getElementById(clickTarget.dataset.clickTarget)?.click();
+  });
+
+  on('pluginSidebar', (e) => {
+    const scrollTo = e.target.closest('[data-scroll-to]');
+    if (scrollTo) document.getElementById(scrollTo.dataset.scrollTo)?.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // Static markup in index.html used to carry inline onclick handlers too.
+  // Those weren't injectable (no interpolation), but they forced
+  // script-src 'unsafe-inline' in the CSP, which in turn made any *other*
+  // escaping slip directly exploitable. Routing them through one delegated
+  // listener lets the CSP drop 'unsafe-inline' entirely.
+  document.addEventListener('click', (e) => {
+    const section = e.target.closest('[data-toggle-section]');
+    if (section) { toggleSection(section.dataset.toggleSection); return; }
+
+    const sectionMenu = e.target.closest('[data-section-menu]');
+    if (sectionMenu) {
+      e.stopPropagation();
+      openSectionMenu(sectionMenu.dataset.sectionMenu, sectionMenu);
+      return;
+    }
+
+    const action = e.target.closest('[data-action]');
+    if (!action) return;
+    switch (action.dataset.action) {
+      case 'open-images-folder': openImagesFolder(); break;
+      case 'toggle-plugins-view': pluginsViewActive ? switchToChatView() : switchToPluginsView(); break;
+      case 'close-view': switchToChatView(); break;
+      case 'close-lightbox': closeLightbox(); break;
+      // closeLightbox() checks the event target itself: it only closes on a
+      // click on the backdrop or the close button, not on the image.
+      case 'lightbox-backdrop': closeLightbox(e); break;
+      case 'close-skill-manager': closeSkillManager(); break;
+    }
+  });
 }
 
 function initTooltips() {
@@ -7430,6 +7913,14 @@ function hideAppLoadingSplash() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    // Constructing an AudioContext is surprisingly expensive the first time
+    // (100+ ms, blocking the main thread) — doing it here at startup means
+    // that cost lands where it's invisible, instead of on whichever random
+    // later interaction happens to be the first notification (profiling
+    // showed this as the single biggest cause of a tab-switch feeling like
+    // it hangs, when it coincided with a background tab's first "done" beep).
+    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { /* ignore */ }
+
     await loadPreferences();
     migrateDeniedToolsToPerProvider();
     initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
@@ -7467,6 +7958,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initKeyboardShortcuts();
     initDragDrop();
     initTooltips();
+    initListActionDelegation();
     initTabModelSelector();
     initTabModeSelector();
     initGeminiModeToggle();

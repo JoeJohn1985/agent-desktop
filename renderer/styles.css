@@ -130,6 +130,8 @@ body {
   overflow: hidden;
   height: 100vh;
   transition: background 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* ── Custom Tooltips — all handled by JS ─────────────── */
@@ -177,15 +179,6 @@ body {
   font-size: 17px; font-weight: 600;
 }
 .titlebar__icon { width: 20px; height: 20px; object-fit: contain; }
-.titlebar__center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 12px;
-  color: var(--text-muted);
-  -webkit-app-region: no-drag;
-  pointer-events: none;
-}
 .titlebar__status {
   background: var(--accent-subtle);
   padding: 3px 12px;
@@ -345,7 +338,7 @@ body {
 
 /* ── Session Cards ────────────────────────────────────── */
 .session-card {
-  padding: 6px 12px;
+  padding: 3px 7px;
   margin-bottom: 2px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -629,6 +622,16 @@ body {
 .status-panel__label { color: var(--text-secondary); }
 .status-panel__value { color: var(--text-primary); font-weight: 600; }
 
+/* ── Sidebar Dev Row (only visible while dev mode is on) ── */
+.sidebar__dev-row {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 /* ── Sidebar Footer ───────────────────────────────────── */
 .sidebar__footer {
   margin-top: auto;
@@ -639,6 +642,12 @@ body {
   gap: 4px;
   flex-shrink: 0;
   transition: border-color 0.3s ease;
+}
+.sidebar__version {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  white-space: nowrap;
 }
 .sidebar__footer-spacer { flex: 1; }
 /* Flat/borderless icon button — deliberately its own class rather than
@@ -661,6 +670,13 @@ body {
 .sidebar__footer-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+/* Compact variant for the quick-update button that sits right next to the
+   version label — same look, just small enough not to dominate the row. */
+.sidebar__footer-btn--sm {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
 }
 .action-btn {
   padding: 0 12px;
@@ -727,7 +743,6 @@ body {
   display: flex;
   align-items: stretch;
   background: var(--bg-overlay);
-  border-bottom: 1px solid var(--border-subtle);
   height: 36px;
   padding: 0 4px;
   gap: 1px;
@@ -740,15 +755,13 @@ body {
   align-items: center;
   gap: 4px;
   padding: 0 6px 0 10px;
+  margin-top: 5px;
   font-size: 13px;
   color: var(--text-muted);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  /* Transparent side borders by default → no width shift when a collapsed tab
-     gets its separator borders (see below). */
-  border-left: 1px solid transparent;
-  border-right: 1px solid transparent;
+  border-radius: 5px 5px 0 0;
   cursor: pointer;
   min-width: 0;
   max-width: 200px;
@@ -766,6 +779,7 @@ body {
 .tab__short { flex-shrink: 0; }
 .tab__app-icon { width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
 .tab__provider-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-secondary); position: relative; top: 1px; }
+.tab--dragging { opacity: 0.4; }
 
 /* Provider brand icons (inline SVG, monochrome via currentColor) */
 .provider-icon { width: 14px; height: 14px; display: inline-block; vertical-align: middle; flex-shrink: 0; }
@@ -787,11 +801,7 @@ body {
 }
 
 /* Collapsed tabs (not active, not hovered): show only the 3-char short label,
-   add faint separator borders, and hide the full label + edit/close controls. */
-.tab:not(.tab--active):not(:hover) {
-  border-left-color: var(--border-subtle);
-  border-right-color: var(--border-subtle);
-}
+   and hide the full label + edit/close controls. */
 .tab:not(.tab--active):not(:hover) .tab__label,
 .tab:not(.tab--active):not(:hover) .tab__edit,
 .tab:not(.tab--active):not(:hover) .tab__close {
@@ -1362,7 +1372,8 @@ mark.chat-search-highlight--active {
   border-radius: 14px 14px 3px 14px;
   font-weight: 500;
   color: #ffffff;
-  font-size: 14px;
+  /* No own font-size — inherits from .stream-output so it always matches
+     the assistant bubble (and the user's font-size setting), see F1. */
   max-width: 80%;
   width: fit-content;
   text-align: left;
@@ -1787,7 +1798,6 @@ mark.chat-search-highlight--active {
   align-items: center;
   gap: 2px;
   padding: 5px 12px;
-  background: var(--bg-overlay);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   overflow: visible;
@@ -1885,6 +1895,7 @@ mark.chat-search-highlight--active {
 .section-menu {
   position: fixed;
   min-width: 200px;
+  max-width: 260px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1899,7 +1910,7 @@ mark.chat-search-highlight--active {
   color: var(--text-primary);
   cursor: pointer;
   transition: background 0.1s;
-  white-space: nowrap;
+  white-space: normal;
 }
 .section-menu__item:hover { background: var(--bg-hover); }
 .section-menu__item--danger { color: #f38ba8; }
@@ -2182,7 +2193,6 @@ mark.chat-search-highlight--active {
   align-items: flex-end;
   gap: 8px;
   padding: 10px 16px 14px;
-  border-top: 1px solid var(--border-subtle);
   background: var(--bg-base);
 }
 
@@ -2259,8 +2269,12 @@ mark.chat-search-highlight--active {
 .chat-input {
   width: 100%;
   min-height: 36px;
-  max-height: 120px;
+  max-height: 150px;
   padding: 6px 12px;
+  /* Explicit px, not a unitless ratio — resizeChatInput() in app.js reads this
+     via getComputedStyle to size the "grow one line" reserve, and a unitless
+     value doesn't reliably resolve to a pixel figure there. */
+  line-height: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-surface);
@@ -2273,42 +2287,66 @@ mark.chat-search-highlight--active {
   transition: border-color 0.2s ease;
 }
 .chat-input:focus { border-color: var(--accent); }
-/* The one filled/colored button in the input row — deliberately the sole
-   "loud" element down here, everything else (rich-text toggle) is a quiet
-   icon button that only gets a background on hover. */
+/* Rich-text/send buttons overlay the input's bottom-right corner (see
+   .chat-input-wrapper) on top of the full-width textarea — see
+   resizeChatInput() in app.js for how text stays clear of them once it wraps
+   past one line. Bare icons only: no border/fill/background in any state
+   (hover/active/toggled-on), just a color change — see F1/F2/F3. */
 .chat-send {
+  position: absolute;
+  right: 6px;
+  bottom: 0px;
   height: 34px; width: 34px;
-  border: none; border-radius: 10px;
-  background: var(--user-msg-bg);
-  color: #fff;
-  font-size: 18px;
-  cursor: pointer;
-  transition: filter 0.12s ease, transform 0.08s ease;
-  flex-shrink: 0;
-}
-.chat-send:hover { filter: brightness(1.15); }
-.chat-send:active { transform: scale(0.94); }
-
-.chat-terminal-btn {
-  height: 34px;
-  width: 34px;
   border: none;
   border-radius: 10px;
   background: transparent;
   color: var(--text-muted);
   font-size: 18px;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: color 0.12s ease, transform 0.08s ease;
   flex-shrink: 0;
 }
+.chat-send:hover { color: var(--text-primary); }
+.chat-send:active { color: var(--text-primary); transform: scale(0.94); }
+
+.chat-terminal-btn {
+  position: absolute;
+  right: 34px;
+  bottom: 0px;
+  height: 34px;
+  width: 34px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.12s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .chat-terminal-btn:hover {
-  background: var(--bg-hover);
   color: var(--text-primary);
+}
+/* Monochrome pencil icon (stroke-only, no fill) — takes the button's
+   currentColor so hover/active states recolor it like plain text, unlike
+   the previous ✏️/📝 emoji which always rendered in their own fixed color. */
+.chat-terminal-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ── Rich-Text Editor ──────────────────────────────────── */
 .chat-input-wrapper {
   flex: 1;
+  width: 100%;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2387,8 +2425,7 @@ mark.chat-search-highlight--active {
   border-top-right-radius: 0;
 }
 #btnToggleRichText.active {
-  background: var(--accent);
-  color: #fff;
+  color: var(--accent);
 }
 
 /* ── Session Tools Popup ──────────────────────────────── */
@@ -3633,7 +3670,6 @@ mark.chat-search-highlight--active {
 .tab--fixed {
   margin-left: auto;
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
   font-size: 14px;
   padding: 0 14px;
   gap: 6px;

@@ -2,7 +2,12 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
+  <!-- script-src bewusst OHNE 'unsafe-inline': es gibt keine Inline-Handler
+       und keine Inline-<script>-Blöcke mehr (alles läuft über delegierte
+       Listener in app.js). Damit ist eine etwaige künftige Escaping-Lücke
+       nicht mehr direkt ausführbar. style-src braucht 'unsafe-inline' weiter,
+       weil der Code element.style.* setzt. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agent Desktop</title>
   <link rel="stylesheet" href="styles.css" />
@@ -29,9 +34,6 @@
       <img class="titlebar__icon" src="../assets/icon.png" alt="App Icon">
       <span class="titlebar__title">Agent Desktop</span>
     </div>
-    <div class="titlebar__center">
-      <span id="sbVersion" data-tooltip="App / CLI Version">🏷️ –</span>
-    </div>
     <div class="titlebar__controls">
       <button class="titlebar__btn" id="btnWindowMinimize" data-tooltip="Minimieren">─</button>
       <button class="titlebar__btn" id="btnWindowMaximize" data-tooltip="Maximieren">□</button>
@@ -48,9 +50,9 @@
       <div class="sidebar__sections">
       <!-- Sessions Section -->
       <div class="sidebar__section" id="sessionsSection" data-icon="📂">
-        <div class="sidebar__header" onclick="toggleSection('sessions')">
+        <div class="sidebar__header" data-toggle-section="sessions">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="sessionsChevron">▾</span> 📂 Sessions</span>
-          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('sessions', this)" data-tooltip="Suchen" aria-label="Sessions durchsuchen">⋮</button>
+          <button class="sidebar__menu-btn" data-section-menu="sessions" data-tooltip="Suchen" aria-label="Sessions durchsuchen">⋮</button>
         </div>
         <div class="sidebar__content" id="sessionsContent">
           <div class="sidebar__list" id="sessionList"></div>
@@ -59,9 +61,9 @@
 
       <!-- Skills Section -->
       <div class="sidebar__section" id="skillsSection" data-icon="🛠️">
-        <div class="sidebar__header" onclick="toggleSection('skills')">
+        <div class="sidebar__header" data-toggle-section="skills">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="skillsChevron">▾</span> 🛠️ Skills</span>
-          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('skills', this)" data-tooltip="Optionen" aria-label="Skills-Optionen">⋮</button>
+          <button class="sidebar__menu-btn" data-section-menu="skills" data-tooltip="Optionen" aria-label="Skills-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="skillsContent">
           <div class="sidebar__list" id="skillList"></div>
@@ -70,9 +72,9 @@
 
       <!-- Agents Section -->
       <div class="sidebar__section" id="agentsSection" data-icon="🤖">
-        <div class="sidebar__header" onclick="toggleSection('agents')">
+        <div class="sidebar__header" data-toggle-section="agents">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="agentsChevron">▾</span> 🤖 Agents</span>
-          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('agents', this)" data-tooltip="Optionen" aria-label="Agents-Optionen">⋮</button>
+          <button class="sidebar__menu-btn" data-section-menu="agents" data-tooltip="Optionen" aria-label="Agents-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="agentsContent">
           <div class="sidebar__list" id="agentList"></div>
@@ -81,7 +83,7 @@
 
       <!-- MCP-Server Sektion -->
       <div class="sidebar__section" id="mcpSection" data-icon="🔌">
-        <div class="sidebar__header" onclick="toggleSection('mcp')">
+        <div class="sidebar__header" data-toggle-section="mcp">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="mcpChevron">▾</span> 🔌 MCP-Server</span>
         </div>
         <div class="sidebar__content" id="mcpContent">
@@ -91,9 +93,9 @@
 
       <!-- Todos Section -->
       <div class="sidebar__section" id="todosSection" data-icon="✅">
-        <div class="sidebar__header" onclick="toggleSection('todos')">
+        <div class="sidebar__header" data-toggle-section="todos">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="todosChevron">▾</span> ✅ Todos</span>
-          <button class="sidebar__menu-btn" onclick="event.stopPropagation(); openSectionMenu('todos', this)" data-tooltip="Optionen" aria-label="Todos-Optionen">⋮</button>
+          <button class="sidebar__menu-btn" data-section-menu="todos" data-tooltip="Optionen" aria-label="Todos-Optionen">⋮</button>
         </div>
         <div class="sidebar__content" id="todosContent">
           <div class="sidebar__list" id="todoList"></div>
@@ -102,22 +104,28 @@
 
       <!-- Images Section -->
       <div class="sidebar__section" id="imagesSection" data-icon="🖼️">
-        <div class="sidebar__header" onclick="toggleSection('images')">
+        <div class="sidebar__header" data-toggle-section="images">
           <span class="sidebar__header-left"><span class="sidebar__chevron" id="imagesChevron">▾</span> 🖼️ Bilder</span>
         </div>
         <div class="sidebar__content" id="imagesContent">
           <div class="image-gallery" id="imageGallery"></div>
           <div class="image-gallery__actions">
-            <button class="image-gallery__open-folder" onclick="openImagesFolder()" data-tooltip="Ordner öffnen">📂 Ordner öffnen</button>
+            <button class="image-gallery__open-folder" data-action="open-images-folder" data-tooltip="Ordner öffnen">📂 Ordner öffnen</button>
           </div>
         </div>
       </div>
       </div><!-- end sidebar__sections -->
 
+      <!-- Dev Mode row — own row above the footer, only shown while dev mode is on -->
+      <div class="sidebar__dev-row" id="sidebarDevRow" style="display:none;">
+        <button class="sidebar__footer-btn" id="btnTests" data-tooltip="Tests ausführen">🧪</button>
+        <button class="sidebar__footer-btn" id="btnDevConsole" data-tooltip="Developer Console">🖥️</button>
+        <button class="sidebar__footer-btn" id="btnOpenDevTools" data-tooltip="Chromium DevTools öffnen">🐞</button>
+      </div>
       <!-- Quick Actions -->
       <div class="sidebar__footer">
-        <button class="sidebar__footer-btn" id="btnTests" data-tooltip="Tests ausführen" style="display:none;">🧪</button>
-        <button class="sidebar__footer-btn" id="btnDevConsole" data-tooltip="Developer Console" style="display:none;">🖥️</button>
+        <span id="sbVersion" class="sidebar__version" data-tooltip="App / CLI Version">🏷️ –</span>
+        <button class="sidebar__footer-btn sidebar__footer-btn--sm" id="btnCheckUpdatesQuick" data-tooltip="Nach Updates suchen">🔄</button>
         <div class="sidebar__footer-spacer"></div>
         <button class="sidebar__footer-btn" id="btnSettings" data-tooltip="Einstellungen">⚙️</button>
       </div>
@@ -131,7 +139,7 @@
       <div class="tab-bar" id="tabBar">
         <!-- Tabs werden dynamisch eingefügt -->
         <button class="tab-add" id="btnAddTab" data-tooltip="Neuer Tab (Ctrl+T)">+</button>
-        <button class="tab tab--fixed tab--plugins" id="tabPlugins" onclick="pluginsViewActive ? switchToChatView() : switchToPluginsView()">
+        <button class="tab tab--fixed tab--plugins" id="tabPlugins" data-action="toggle-plugins-view">
           🧩 Plugins <span class="tab--plugins__badge" id="pluginCount">0</span>
         </button>
       </div>
@@ -147,7 +155,7 @@
           <div class="plugins-view__actions">
             <button class="plugin-actions__btn" id="btnAddPlugin" data-tooltip="Plugin/Marketplace hinzufügen">+</button>
             <button class="plugin-actions__btn" id="btnRefreshPlugins" data-tooltip="Plugins aktualisieren">🔄</button>
-            <button class="plugin-actions__btn plugins-view__close" onclick="switchToChatView()" data-tooltip="Plugin Manager schließen">✕</button>
+            <button class="plugin-actions__btn plugins-view__close" data-action="close-view" data-tooltip="Plugin Manager schließen">✕</button>
           </div>
         </div>
         <div class="plugins-view__body">
@@ -180,7 +188,7 @@
           </div>
           <div class="plugins-view__actions">
             <button class="plugin-actions__btn" id="btnClearCostLog" data-tooltip="Kostenverlauf löschen">🗑️</button>
-            <button class="plugin-actions__btn plugins-view__close" onclick="switchToChatView()" data-tooltip="Kosten schließen">✕</button>
+            <button class="plugin-actions__btn plugins-view__close" data-action="close-view" data-tooltip="Kosten schließen">✕</button>
           </div>
         </div>
         <div class="costs-view__page-body">
@@ -283,9 +291,9 @@
           </div>
           <textarea class="chat-input" id="chatInput" placeholder="Nachricht eingeben…" rows="1"></textarea>
           <div class="chat-input chat-input-rich" id="chatInputRich" contenteditable="true" style="display:none;" data-placeholder="Nachricht eingeben…"></div>
+          <button class="chat-terminal-btn" id="btnToggleRichText" data-tooltip="Rich-Text-Editor umschalten"><svg viewBox="0 0 16 16"><path d="M11.5 1.5l3 3-8.5 8.5-3.8 1 1-3.8 8.3-8.7z"/><path d="M9.5 3.5l3 3"/></svg></button>
+          <button class="chat-send" id="btnSend" data-tooltip="Senden (Enter)">➤</button>
         </div>
-        <button class="chat-terminal-btn" id="btnToggleRichText" data-tooltip="Rich-Text-Editor umschalten">✏️</button>
-        <button class="chat-send" id="btnSend" data-tooltip="Senden (Enter)">➤</button>
       </div>
       <!-- Session Info Bar removed — info moved to sidebar -->
     </main>
@@ -333,7 +341,7 @@
             <label class="settings__label">Schriftgröße Chat</label>
             <div class="settings__range-row">
               <input type="range" class="settings__range" id="settFontSize" min="12" max="22" step="1" />
-              <span class="settings__range-value" id="settFontSizeVal">16px</span>
+              <span class="settings__range-value" id="settFontSizeVal">14px</span>
             </div>
           </div>
           <div class="settings__group">
@@ -535,11 +543,11 @@
   </div>
 
   <!-- Image Lightbox -->
-  <div class="image-lightbox" id="imageLightbox" onclick="closeLightbox(event)">
+  <div class="image-lightbox" id="imageLightbox" data-action="lightbox-backdrop">
     <div class="image-lightbox__content">
       <img id="lightboxImg" src="" alt="" />
       <div class="image-lightbox__info" id="lightboxInfo"></div>
-      <button class="image-lightbox__close" onclick="closeLightbox()" data-tooltip="Schließen (Esc)">&times;</button>
+      <button class="image-lightbox__close" data-action="close-lightbox" data-tooltip="Schließen (Esc)">&times;</button>
     </div>
   </div>
 
@@ -584,7 +592,7 @@
     <div class="overlay__dialog overlay__dialog--skill-manager">
       <div class="skill-manager__header">
         <span class="skill-manager__title">Skills verwalten</span>
-        <button onclick="closeSkillManager()" class="skill-manager__close">✕</button>
+        <button data-action="close-skill-manager" class="skill-manager__close">✕</button>
       </div>
       <div class="skill-manager__body" id="skillManagerBody">
         <!-- wird dynamisch befüllt -->
