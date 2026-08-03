@@ -864,21 +864,16 @@ function switchTab(tabId) {
   renderTabs();
   _mark('renderTabs done');
 
-  // Global skills/agents follow the newly active tab's provider (Copilot
-  // keeps its native ~/.copilot/{skills,agents}; every other provider has
-  // its own folder).
-  loadGlobalSkillsForProvider(getTabProvider(activeTab));
-  loadGlobalAgentsForProvider(getTabProvider(activeTab));
-  // loadGlobalSkillsForProvider() skips re-rendering when the provider didn't
-  // change (e.g. switching between two Copilot tabs) — but the active-skill
-  // highlighting is per-tab, so it must refresh on every tab switch regardless.
+  // Skills/Agents hängen an Provider UND Projekt — eine Quelle, ein Aufruf.
+  // Überspringt sich selbst, wenn beides gleich geblieben ist.
+  loadContextForTab(getTabProvider(activeTab), activeTab?.cwd || null);
+  // Die Aktiv-Markierung ist dagegen pro Tab, muss also auch dann neu
+  // gezeichnet werden, wenn die Liste selbst unverändert bleibt.
   renderSkills();
-  _mark('skills/agents kicked off + renderSkills done');
+  _mark('context load kicked off + renderSkills done');
 
-  // Reload project skills/agents for the newly active tab's CWD
-  loadProjectSkillsAndAgents(activeTab?.cwd || null);
-  _mark('loadProjectSkillsAndAgents kicked off (async, see its own [perf] line)');
-  
+  loadProjectMcpServers(activeTab?.cwd || null);
+
   // Refresh session tools list for this tab
   renderSessionTools();
 
@@ -1976,7 +1971,7 @@ function initCopilotIPC() {
           mcpServers = servers;
           renderMcpServers();
           // Re-merge project MCP entries from .github/mcp.json
-          if (tab.cwd) loadProjectSkillsAndAgents(tab.cwd);
+          if (tab.cwd) loadProjectMcpServers(tab.cwd);
         }
         tab.statusEl.textContent = '● MCP Server geladen';
         break;
@@ -1988,9 +1983,9 @@ function initCopilotIPC() {
         tab.context.skillsList = skillsList;
         tab.statusEl.textContent = '● Skills geladen';
         tab.statusEl.style.display = 'block';
-        // Reload project skills from .github/skills/ using the tab's CWD
+        // Skills des Providers für dieses Projekt neu laden
         if (tabId === activeTabId) {
-          loadProjectSkillsAndAgents(tab.cwd);
+          loadContextForTab(getTabProvider(tab), tab.cwd || null, { force: true });
         }
         break;
       }
@@ -3739,7 +3734,8 @@ async function changeTabCwd(tabId, tab, newCwd) {
     if (tab.sessionId) saveSessionCwd(tab.sessionId, newCwd);
   }
   if (tabId === activeTabId) {
-    loadProjectSkillsAndAgents(newCwd);
+    loadContextForTab(getTabProvider(tab), newCwd);
+    loadProjectMcpServers(newCwd);
     loadTodos(newCwd); // todos are project-scoped → follow the new cwd
   }
 }
@@ -4365,93 +4361,64 @@ function renderSkillManager() {
   body.innerHTML = html;
 }
 
+// ── Skills & Agents pro Tab ──────────────────────────────────
+// Welche Skills/Agents existieren, hängt von BEIDEM ab: Provider und Projekt.
+// Jeder Provider liest andere Ordner (siehe src/context-paths.js), deshalb gibt
+// es keine providerneutrale Liste — und deshalb wird hier auch nichts mehr aus
+// mehreren Quellen zusammengemischt. Der Main-Prozess liefert für (provider,
+// cwd) genau eine fertige Liste; die Sidebar zeigt sie unverändert an.
+
+/** Letzter geladener Kontext, als Schlüssel — verhindert unnötige Rescans. */
+let _lastContextKey = null;
+
 /**
- * Loads the "global" (non-project) skill list for a given provider and
- * replaces whatever global skills were previously in `skills`, keeping any
- * merged-in project skills (source 'project') intact. Copilot keeps its
- * native ~/.copilot/skills scan (builtin+user+plugin); every other provider
- * reads its own ~/.agent-desktop/<provider>/skills folder — the model
- * decides itself which skill to read, so there's no "active" list to send.
+ * Lädt Skills und Agents für einen Tab und rendert die Sidebar neu.
+ * Beim Wechsel zwischen zwei Tabs mit gleichem Provider UND gleichem Projekt
+ * passiert nichts (gleiche Liste) — das ist der häufigste Fall.
  * @param {string} provider
+ * @param {string|null} cwd
+ * @param {{force?: boolean}} [opts] - force: Guard übergehen (Reload-Button).
  * @returns {Promise<void>}
  */
-let _lastGlobalSkillsProvider = null;
-async function loadGlobalSkillsForProvider(provider) {
-  if (provider === _lastGlobalSkillsProvider) return;
-  _lastGlobalSkillsProvider = provider;
-  const projectSkills = skills.filter(s => s.source === 'project');
+async function loadContextForTab(provider, cwd, opts = {}) {
+  const key = `${provider} ${cwd || ''}`;
+  if (!opts.force && key === _lastContextKey) return;
+  _lastContextKey = key;
+
   try {
-    const globalSkills = provider === 'copilot'
-      ? (await copilot.skills.list() || [])
-      : (await copilot.skills.listProvider(provider) || []);
-    skills = [...globalSkills, ...projectSkills];
+    [skills, agents] = await Promise.all([
+      copilot.context.listSkills(provider, cwd || null).then(r => r || []),
+      copilot.context.listAgents(provider, cwd || null).then(r => r || []),
+    ]);
   } catch (e) {
-    console.warn('[skills] Laden fehlgeschlagen:', e.message);
+    console.warn('[context] Skills/Agents konnten nicht geladen werden:', e.message);
+    skills = [];
+    agents = [];
   }
+
   renderSkills();
+  renderAgents();
 }
 
-/**
- * Reload skills from the main process and re-render the sidebar list.
- * Shows a spinning indicator on the reload button during the operation.
- * @returns {Promise<void>}
- */
+/** Erzwingt einen Neuaufbau der Skill-/Agent-Liste (Reload-Button im ⋮-Menü). */
 async function reloadSkills() {
-  const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
-  _lastGlobalSkillsProvider = provider;
-  skills = provider === 'copilot'
-    ? (await copilot.skills.list() || [])
-    : (await copilot.skills.listProvider(provider) || []);
-  const savedDisabledSkills = await copilot.skills.getDisabled() || [];
-  disabledSkills = new Set(savedDisabledSkills);
-  const savedHidden = await copilot.skills.getHidden() || [];
-  hiddenSkillsGlobal = new Set(savedHidden);
-  // Session-hidden aus preferences laden
-  const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
-  const allSessions = getNamedSessions();
-  hiddenSkillsSession = new Set(allSessions[sessionId]?.hiddenSkills || []);
-  renderSkills();
-  renderSkillManager();
+  const tab = tabs.get(activeTabId);
+  await loadContextForTab(getTabProvider(tab), tab?.cwd || null, { force: true });
 }
 
-// ── Agents ───────────────────────────────────────────────────
+/** Gleiche Quelle wie reloadSkills — Skills und Agents kommen zusammen. */
+async function reloadAgents() {
+  return reloadSkills();
+}
+
 /**
- * Load project-specific skills and agents from .github/skills/ and .github/agents/
- * in the given CWD, merge them into the global lists, and re-render the sidebar.
- * Removes previously loaded project skills/agents before merging fresh ones.
- * @param {string|null} cwd - Absolute path to scan, or null to clear project entries
+ * Lädt die projektbezogenen MCP-Server für ein Arbeitsverzeichnis und mischt
+ * sie über die globalen. Rein MCP — Skills/Agents laufen über
+ * loadContextForTab().
+ * @param {string|null} cwd
  * @returns {Promise<void>}
  */
-async function loadProjectSkillsAndAgents(cwd) {
-  const _t0 = performance.now();
-  // Remove stale project skills
-  skills = skills.filter(s => s.source !== 'project');
-  agents = agents.filter(a => a.source !== 'project');
-
-  if (cwd) {
-    try {
-      const projectSkills = await copilot.skills.listProject(cwd) || [];
-      for (const ps of projectSkills) {
-        ps.source = 'project';
-        ps.projectCwd = cwd;  // Speichere das Projekt-CWD für späteres Löschen
-        if (!skills.find(s => s.id === ps.id)) skills.push(ps);
-      }
-    } catch (e) {
-      console.warn('[skills] Projekt-Skills konnten nicht geladen werden:', e.message);
-    }
-    try {
-      const projectAgents = await copilot.agents.listProject(cwd) || [];
-      for (const pa of projectAgents) {
-        pa.source = 'project';
-        if (!agents.find(a => a.id === pa.id)) agents.push(pa);
-      }
-    } catch (e) {
-      console.warn('[agents] Projekt-Agents konnten nicht geladen werden:', e.message);
-    }
-  }
-
-  // Rebuild from the global (user/workspace) servers, then merge project
-  // MCP servers from .github/mcp.json on top.
+async function loadProjectMcpServers(cwd) {
   mcpServers = globalMcpServers.map(s => ({ ...s }));
 
   if (cwd) {
@@ -4470,14 +4437,9 @@ async function loadProjectSkillsAndAgents(cwd) {
     }
   }
 
-  renderSkills();
-  renderAgents();
-
-  // Persist merged mcpServers back to tab context
   const tab = tabs.get(activeTabId);
   if (tab) tab.context.mcpServers = mcpServers;
   renderMcpServers();
-  console.log(`[perf] loadProjectSkillsAndAgents(${cwd || 'null'}): ${(performance.now() - _t0).toFixed(1)}ms`);
 }
 
 /**
@@ -4529,51 +4491,6 @@ function toggleAgent(agentId) {
   renderAgents();
 }
 
-/**
- * Reload agents from the main process and re-render the sidebar list.
- * @returns {Promise<void>}
- */
-async function reloadAgents() {
-  try {
-    const provider = activeTabId ? getTabProvider(tabs.get(activeTabId)) : 'copilot';
-    _lastGlobalAgentsProvider = provider;
-    agents = provider === 'copilot'
-      ? (await copilot.agents.list() || [])
-      : (await copilot.agents.listProvider(provider) || []);
-    const savedActiveAgents = getSettings().activeAgents || [];
-    activeAgents = new Set(savedActiveAgents);
-    renderAgents();
-  } catch (e) {
-    console.warn('[agents] Reload fehlgeschlagen:', e.message);
-  }
-}
-
-/**
- * Loads the "global" (non-project) agent list for a given provider and
- * replaces whatever global agents were previously in `agents`, keeping any
- * merged-in project agents (source 'project') intact. Copilot keeps its
- * native ~/.copilot/agents scan; every other provider reads its own
- * ~/.agent-desktop/<provider>/agents folder — the model decides itself
- * which agent's persona to adopt, so there's no "active" list to send.
- * @param {string} provider
- * @returns {Promise<void>}
- */
-let _lastGlobalAgentsProvider = null;
-async function loadGlobalAgentsForProvider(provider) {
-  if (provider === _lastGlobalAgentsProvider) return;
-  _lastGlobalAgentsProvider = provider;
-  const projectAgents = agents.filter(a => a.source === 'project');
-  try {
-    const globalAgents = provider === 'copilot'
-      ? (await copilot.agents.list() || [])
-      : (await copilot.agents.listProvider(provider) || []);
-    agents = [...globalAgents, ...projectAgents];
-  } catch (e) {
-    console.warn('[agents] Laden fehlgeschlagen:', e.message);
-  }
-  renderAgents();
-}
-
 // ── Skill/Agent Delete Confirmation ──────────────────────────
 /**
  * Show an inline confirmation dialog to delete a skill.
@@ -4605,13 +4522,8 @@ function confirmDeleteSkill(dirName, skillName, cwd = null) {
       
       if (result.success) {
         console.log(`[skills] Gelöscht: ${dirName} (cwd: ${cwd ? 'project' : 'user'})`);
-        if (cwd) {
-          await loadProjectSkillsAndAgents(cwd);
-          renderSkills();
-          renderSkillManager();
-        } else {
-          await reloadSkills();
-        }
+        await reloadSkills();
+        renderSkillManager();
       } else {
         console.error('[skills] Löschen fehlgeschlagen:', result.error);
         alert(`Fehler beim Löschen: ${result.error}`);
@@ -5405,25 +5317,11 @@ async function initStatusbar() {
  * @returns {Promise<void>}
  */
 async function initDataLoad() {
-  try {
-    skills = await copilot.skills.list() || [];
-    _lastGlobalSkillsProvider = 'copilot';
-  } catch (e) {
-    console.warn('[skills] Laden fehlgeschlagen:', e.message);
-    skills = [];
-  }
-  renderSkills();
-
-  try {
-    agents = await copilot.agents.list() || [];
-    _lastGlobalAgentsProvider = 'copilot';
-  } catch (e) {
-    console.warn('[agents] Laden fehlgeschlagen:', e.message);
-    agents = [];
-  }
+  // Skills/Agents werden nicht hier geladen: sie hängen an Provider und
+  // Projekt des aktiven Tabs, und der existiert zu diesem Zeitpunkt noch
+  // nicht. Das übernimmt loadContextForTab() beim ersten switchTab().
   const savedActiveAgents = getSettings().activeAgents || [];
   activeAgents = new Set(savedActiveAgents);
-  renderAgents();
 
   try {
     globalMcpServers = await copilot.mcp.list() || [];
@@ -7123,15 +7021,19 @@ function initListActionDelegation() {
   // escaping slip directly exploitable. Routing them through one delegated
   // listener lets the CSP drop 'unsafe-inline' entirely.
   document.addEventListener('click', (e) => {
-    const section = e.target.closest('[data-toggle-section]');
-    if (section) { toggleSection(section.dataset.toggleSection); return; }
-
+    // The ⋮ button sits INSIDE the section header, so the more specific match
+    // has to win. Checking the header first would swallow every menu click —
+    // closest() walks up from the button and finds the header, and a single
+    // delegated listener can't stopPropagation against itself. That's exactly
+    // what the old inline `event.stopPropagation()` used to handle.
     const sectionMenu = e.target.closest('[data-section-menu]');
     if (sectionMenu) {
-      e.stopPropagation();
       openSectionMenu(sectionMenu.dataset.sectionMenu, sectionMenu);
       return;
     }
+
+    const section = e.target.closest('[data-toggle-section]');
+    if (section) { toggleSection(section.dataset.toggleSection); return; }
 
     const action = e.target.closest('[data-action]');
     if (!action) return;
@@ -7936,12 +7838,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!restored) {
       await createTab('🤖 Chat');
     } else {
-      // Re-run after restore so project skills load with the now-set tab.cwd.
-      // (createTab triggers switchTab before tab.cwd is assigned, so the first
-      // loadProjectSkillsAndAgents call runs with null cwd and clears results.)
+      // Erneut laden, sobald tab.cwd steht: createTab() ruft switchTab() auf,
+      // bevor das Arbeitsverzeichnis gesetzt ist — der erste Ladelauf sieht
+      // also noch cwd=null und würde die Projekt-Skills verschlucken.
       const restoredActiveTab = tabs.get(activeTabId);
       if (restoredActiveTab?.cwd) {
-        loadProjectSkillsAndAgents(restoredActiveTab.cwd);
+        loadContextForTab(getTabProvider(restoredActiveTab), restoredActiveTab.cwd);
+        loadProjectMcpServers(restoredActiveTab.cwd);
       }
     }
 

@@ -23,6 +23,7 @@ const secureStore = require('./src/secure-store');
 const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills, migrateApiSessions } = require('./src/data-dir');
+const { skillDirs, agentDirs, needsContextInjection } = require('./src/context-paths');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 
 app.name = 'agent-desktop';
@@ -338,7 +339,6 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   }
 
   // Session management: load existing or create new
-  let isNewlyCreatedSession = false;
   if (!client.sessionId) {
     const mcpNames = (clientOptions.mcpServers || []).map(s => s.name);
     console.log(`[acp:tab${tabId}] ${options.sessionId ? 'load' : 'new'} session with MCP servers: [${mcpNames.join(', ') || 'none'}]`);
@@ -346,35 +346,22 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
       await client.loadSession(options.sessionId, cwd);
     } else {
       await client.newSession(cwd);
-      isNewlyCreatedSession = true;
     }
   }
 
-  // Claude Code has no native agents folder of its own here (unlike Copilot,
-  // whose CLI reads ~/.copilot/agents itself) — inject a lazy agents index
-  // once, invisibly, as part of the very first prompt of a brand-new session.
-  // It then stays part of that session's own history for the rest of the chat.
-  // Skills are NOT injected here: Claude Code discovers ~/.claude/skills on
-  // its own (confirmed empirically — same SKILL.md format we use everywhere
-  // else, see providerSkillsDir('claude-code') in data-dir.js), so an app-side
-  // index would just load the same skills a second time. Project-level
-  // `.github/skills` is still injected below, since that's our own convention,
-  // not one Claude discovers by itself.
-  let promptContext;
-  if (provider === 'claude-code' && isNewlyCreatedSession) {
-    const { buildSkillsIndex, buildAgentsIndex } = require('./src/providers/system-context');
-    const agents = _scanAgentsIndex([
-      providerAgentsDir('claude-code'),
-      path.join(cwd, '.github', 'agents'),
-    ], yaml.parse);
-    const skills = _scanSkillsIndex([
-      path.join(cwd, '.github', 'skills'),
-    ], yaml.parse);
-    promptContext = [buildAgentsIndex(agents), buildSkillsIndex(skills)].filter(Boolean).join('\n\n---\n\n') || undefined;
-  }
+  // No app-side context injection for ACP providers. Both Copilot and Claude
+  // Code discover their own skills and agents from their native folders (see
+  // src/context-paths.js for the exact locations) — injecting an index here
+  // would load the same files a second time and waste context.
+  //
+  // This used to inject `.github/skills` + `.github/agents` for Claude Code,
+  // which was wrong twice over: it only ran for *newly created* sessions (so a
+  // resumed session silently lost them), and it pushed GitHub's convention
+  // onto a provider that reads `.claude/` — the folder it actually discovers
+  // by itself, and which the sidebar now shows instead.
 
   // Send prompt (async — events stream to renderer via AcpClient)
-  client.prompt(prompt, promptContext).catch((err) => {
+  client.prompt(prompt).catch((err) => {
     // Cancellation is a normal user action, not an error.
     if (err.message === 'Cancelled') return;
     console.error(`[acp:tab${tabId}] prompt error:`, err.message);
@@ -425,25 +412,23 @@ async function sendApiPrompt(tabId, prompt, options) {
   let systemContext = '';
   try {
     const { composeSystemContext } = require('./src/providers/system-context');
-    const CONTEXT_PROVIDERS = new Set(LAZY_CONTEXT_PROVIDERS.filter(p => p !== 'claude-code'));
-    if (CONTEXT_PROVIDERS.has(provider)) systemContext = composeSystemContext({
-      cwd,
-      // Agents/Skills are provider-scoped (~/.agent-desktop/<provider>/…) plus
-      // any project-level ones (cwd/.github/…) — exposed as lazy indexes, not
-      // inlined. The model reloads a file itself via read_file only once it
-      // judges the agent/skill relevant to the current task.
-      agents: _scanAgentsIndex([
-        providerAgentsDir(provider),
-        path.join(cwd, '.github', 'agents'),
-      ], yaml.parse),
-      skills: _scanSkillsIndex([
-        providerSkillsDir(provider),
-        path.join(cwd, '.github', 'skills'),
-      ], yaml.parse),
-      // Instructions are eager, not lazy (see buildInstructionsBlock): every
-      // file in the provider's instructions folder is always inlined in full.
-      instructions: resolveInstructions(provider),
-    });
+    if (needsContextInjection(provider)) {
+      // Agents/Skills come from the provider's own global folder plus the
+      // project-level ones — both resolved centrally in context-paths.js, the
+      // same source the sidebar reads, so what the model sees and what the UI
+      // lists can't drift apart. Exposed as lazy indexes, not inlined: the
+      // model reads a file itself only once it judges it relevant.
+      const sd = skillDirs(provider, cwd);
+      const ad = agentDirs(provider, cwd);
+      systemContext = composeSystemContext({
+        cwd,
+        agents: await _scanAgentsIndex([...ad.global, ...ad.project], yaml.parse),
+        skills: await _scanSkillsIndex([...sd.global, ...sd.project], yaml.parse),
+        // Instructions are eager, not lazy (see buildInstructionsBlock): every
+        // file in the provider's instructions folder is always inlined in full.
+        instructions: resolveInstructions(provider),
+      });
+    }
   } catch (e) {
     console.warn('[api] composeSystemContext failed:', e?.message);
   }
@@ -1075,53 +1060,100 @@ ipcMain.handle('preferences:write', async (_event, prefs) => {
   return writePreferences(prefs);
 });
 
-/** @ipc skills:list — Scans builtin and user skills. @returns {Promise<Array<Object>>} */
-// Skills
-ipcMain.handle('skills:list', async () => {
-  return scanSkills();
-});
+/** Every provider id the renderer may ask about. Anything else is rejected
+ *  before it reaches a path join — see the validation note below. */
+const ALL_PROVIDERS = ['copilot', 'claude-code', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
 
 /**
- * @ipc skills:listProvider — Scans a provider's skills folder for a non-Copilot
- * provider (Claude Code, Anthropic, OpenAI, GLM, Ollama). Copilot keeps its
- * native ~/.copilot/skills and is not handled here. Claude Code is itself a
- * special case within providerSkillsDir(): it resolves to Claude's own native
- * ~/.claude/skills rather than an app-managed ~/.agent-desktop/... folder.
+ * Validates an IPC-supplied (provider, cwd) pair. `provider` ends up in a
+ * filesystem path, so it must come from the fixed allow-list rather than be
+ * trusted; `cwd` is only ever used as a base for path.join and is required to
+ * be absolute so a relative value can't resolve against the process cwd.
+ * @returns {{provider: string, cwd: string|null}|null} null if invalid.
+ */
+function validateContextTarget(provider, cwd) {
+  if (!ALL_PROVIDERS.includes(provider)) return null;
+  const safeCwd = (typeof cwd === 'string' && cwd && path.isAbsolute(cwd)) ? cwd : null;
+  return { provider, cwd: safeCwd };
+}
+
+/**
+ * @ipc context:listSkills — Every skill the given provider can actually see in
+ * the given project, in one call. Replaces the old skills:list /
+ * skills:listProvider / skills:listProject trio: those made the renderer merge
+ * three sources and guess which apply to which provider, which is exactly how
+ * the sidebar ended up listing skills a provider couldn't use (and hiding ones
+ * it could). Paths come from context-paths.js — the same resolver the prompt
+ * injection uses, so UI and model can't disagree.
  * @param {string} provider
- * @returns {Promise<Array<Object>>} Skills with source 'provider'
+ * @param {string|null} cwd - Active project directory.
+ * @returns {Promise<Array<Object>>} Skills with source 'builtin' | 'global' | 'project'
  */
-ipcMain.handle('skills:listProvider', async (_event, provider) => {
-  // provider comes straight from the renderer over IPC — validate against the
-  // known allow-list before it's used to build a filesystem path (providerSkillsDir
-  // just path.joins it; an unchecked value could otherwise traverse outside DATA_DIR).
-  if (!LAZY_CONTEXT_PROVIDERS.includes(provider)) return [];
-  const dir = providerSkillsDir(provider);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
-  return _scanSkillDirectory(dir, 'provider', userSkillIcon, yaml.parse);
+ipcMain.handle('context:listSkills', async (_event, provider, cwd) => {
+  const target = validateContextTarget(provider, cwd);
+  if (!target) return [];
+
+  const dirs = skillDirs(target.provider, target.cwd, { skillsDirOverride: readFolderConfig().skillsDir });
+  const out = [];
+
+  // Copilot additionally ships builtin skills inside its CLI package, and needs
+  // marketplace plugin skills mirrored into its user folder first (see
+  // scanBuiltinCopilotSkills / syncMarketplaceSkills for why).
+  if (target.provider === 'copilot') {
+    out.push(...await scanBuiltinCopilotSkills());
+    try { syncMarketplaceSkills({ userSkillsDir: dirs.global[0] }); } catch (_) { /* best effort */ }
+  }
+
+  for (const dir of dirs.global) {
+    out.push(...await _scanSkillDirectory(dir, 'global', userSkillIcon, yaml.parse));
+  }
+  for (const dir of dirs.project) {
+    out.push(...await _scanSkillDirectory(dir, 'project', userSkillIcon, yaml.parse));
+  }
+
+  // First occurrence wins (builtin < global < project is the scan order, so a
+  // project skill never silently shadows a global one of the same name).
+  const seen = new Set();
+  return out.filter(s => !seen.has(s.dirName) && seen.add(s.dirName));
 });
 
 /**
- * @ipc skills:listProject — Scans .github/skills/ in a given CWD for project-specific skills.
- * @param {string} cwd - Absolute path to scan
- * @returns {Promise<Array<Object>>} Project skills with source 'project'
+ * @ipc context:listAgents — Agents counterpart of context:listSkills.
+ * @param {string} provider
+ * @param {string|null} cwd
+ * @returns {Promise<Array<Object>>} Agents with source 'global' | 'project'
  */
-ipcMain.handle('skills:listProject', async (_event, cwd) => {
-  if (!cwd || typeof cwd !== 'string') return [];
-  const projectSkillsDir = path.join(cwd, '.github', 'skills');
-  if (!fs.existsSync(projectSkillsDir)) return [];
-  return scanSkillDirectory(projectSkillsDir, 'project', userSkillIcon);
+ipcMain.handle('context:listAgents', async (_event, provider, cwd) => {
+  const target = validateContextTarget(provider, cwd);
+  if (!target) return [];
+
+  const dirs = agentDirs(target.provider, target.cwd, { agentsDirOverride: readFolderConfig().agentsDir });
+  const out = [];
+  for (const dir of dirs.global) {
+    out.push(...(await scanAgentsDirectory(dir, yaml.parse)).map(a => ({ ...a, source: 'global' })));
+  }
+  for (const dir of dirs.project) {
+    out.push(...(await scanAgentsDirectory(dir, yaml.parse)).map(a => ({ ...a, source: 'project' })));
+  }
+
+  const seen = new Set();
+  return out.filter(a => !seen.has(a.fileSlug) && seen.add(a.fileSlug));
 });
 
 /**
- * @ipc agents:listProject — Scans .github/agents/ in a given CWD for project-specific agents.
- * @param {string} cwd - Absolute path to scan
- * @returns {Promise<Array<Object>>} Project agents with source 'project'
+ * @ipc context:paths — The resolved skill/agent folders for a provider+project.
+ * Lets the UI tell the user where to actually put a file, instead of them
+ * having to know each vendor's convention.
+ * @returns {Promise<{skills: {global: string[], project: string[]}, agents: {global: string[], project: string[]}}>}
  */
-ipcMain.handle('agents:listProject', async (_event, cwd) => {
-  if (!cwd || typeof cwd !== 'string') return [];
-  const projectAgentsDir = path.join(cwd, '.github', 'agents');
-  if (!fs.existsSync(projectAgentsDir)) return [];
-  return scanAgentsDirectory(projectAgentsDir, yaml.parse);
+ipcMain.handle('context:paths', async (_event, provider, cwd) => {
+  const target = validateContextTarget(provider, cwd);
+  if (!target) return { skills: { global: [], project: [] }, agents: { global: [], project: [] } };
+  const cfg = readFolderConfig();
+  return {
+    skills: skillDirs(target.provider, target.cwd, { skillsDirOverride: cfg.skillsDir }),
+    agents: agentDirs(target.provider, target.cwd, { agentsDirOverride: cfg.agentsDir }),
+  };
 });
 
 /**
@@ -1287,26 +1319,8 @@ ipcMain.handle('mcp:probe', async () => {
   }));
 });
 
-/** @ipc agents:list — Scans .agent.md files. @returns {Promise<Array<Object>>} */
-// Agents
-ipcMain.handle('agents:list', async () => {
-  return scanAgents();
-});
-
-/**
- * @ipc agents:listProvider — Scans ~/.agent-desktop/<provider>/agents/ for a
- * non-Copilot provider (Claude Code, Anthropic, OpenAI, GLM, Ollama).
- * Copilot keeps its native ~/.copilot/agents and is not handled here.
- * @param {string} provider
- * @returns {Promise<Array<Object>>} Agents with source 'provider'
- */
-ipcMain.handle('agents:listProvider', async (_event, provider) => {
-  // Same allow-list validation as skills:listProvider — see comment there.
-  if (!LAZY_CONTEXT_PROVIDERS.includes(provider)) return [];
-  const dir = providerAgentsDir(provider);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
-  return scanAgentsDirectory(dir, yaml.parse).map(a => ({ ...a, source: 'provider' }));
-});
+// Agents are listed via context:listAgents (provider- and project-aware) —
+// the old agents:list / agents:listProvider split lived here.
 
 /**
  * @ipc skills:delete — Deletes a user skill directory.
@@ -2119,33 +2133,18 @@ ipcMain.on('window:openDevTools', () => mainWindow?.webContents.openDevTools({ m
 
 // ── Skills Scanner ────────────────────────────────────────────
 /**
- * Scans a directory for SKILL.md files and parses their YAML frontmatter.
+ * Skills bundled inside the installed Copilot CLI package. Copilot-only —
+ * every other provider's skills come from plain folders resolved by
+ * context-paths.js. The package path is versioned, so the newest version
+ * directory wins.
  *
- * @param {string} dir - Absolute path to the skills directory
- * @param {'builtin'|'user'} source - Whether these are builtin or user skills
- * @param {(name: string) => string} iconFn - Icon resolver function
- * @returns {Array<Object>} Parsed skill metadata
+ * @returns {Promise<Array<Object>>} Builtin skills, or [] if the CLI isn't installed.
  */
-function scanSkillDirectory(dir, source, iconFn) {
-  return _scanSkillDirectory(dir, source, iconFn, yaml.parse);
-}
-
-/**
- * Scans and returns all skills from the builtin Copilot CLI package and the
- * user's ~/.copilot/skills/ directory — the latter also receives a fresh
- * mirror of any installed marketplace/plugin skills first (see
- * syncMarketplaceSkills), so they're included too.
- *
- * @returns {Array<Object>} Combined list of builtin and user (incl. mirrored plugin) skills
- */
-function scanSkills() {
-  const skills = [];
-
-  // 1) Builtin skills from the installed Copilot CLI package
+async function scanBuiltinCopilotSkills() {
   const pkgBase = path.join(process.env.LOCALAPPDATA || '', 'copilot', 'pkg', 'universal');
-  if (fs.existsSync(pkgBase)) {
-    // Find the latest version directory
-    const versions = fs.readdirSync(pkgBase, { withFileTypes: true })
+  let versions;
+  try {
+    versions = (await fs.promises.readdir(pkgBase, { withFileTypes: true }))
       .filter(d => d.isDirectory())
       .map(d => d.name)
       .sort((a, b) => {
@@ -2156,43 +2155,14 @@ function scanSkills() {
         }
         return 0;
       });
-
-    const latestVersion = versions[0];
-    if (latestVersion) {
-      const skillsDir = path.join(pkgBase, latestVersion, 'builtin-skills');
-      skills.push(...scanSkillDirectory(skillsDir, 'builtin', builtinSkillIcon));
-    }
+  } catch (_) {
+    return []; // Copilot CLI not installed — not an error.
   }
 
-  // 2) User skills from ~/.copilot/skills/ — also the mirror target for
-  // marketplace plugin skills (see below), so they show up as 'user' here.
-  const userSkillsDir = folderConfig.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
-
-  // Mirror marketplace/plugin skills (~/.copilot/installed-plugins/…/skills/)
-  // into userSkillsDir before scanning it. Necessary because `copilot --acp`
-  // — the mode this app always runs Copilot in — never exposes plugin skills
-  // to the model on its own, only builtin + user ones (confirmed empirically;
-  // the CLI's own interactive/-p modes don't have this gap). Mirroring is
-  // idempotent and only ever touches directories it created itself.
-  try {
-    syncMarketplaceSkills({ userSkillsDir });
-  } catch (_) { /* best effort — never block the skill list on a mirror failure */ }
-
-  skills.push(...scanSkillDirectory(userSkillsDir, 'user', userSkillIcon));
-
-  return skills;
-}
-
-// ── Agents Scanner ────────────────────────────────────────────
-/**
- * Scans the agents directory for .agent.md files and parses their frontmatter.
- *
- * @returns {Array<Object>} Parsed agent metadata
- */
-function scanAgents() {
-  const config = readFolderConfig();
-  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-  return scanAgentsDirectory(agentsDir, yaml.parse);
+  const latestVersion = versions[0];
+  if (!latestVersion) return [];
+  const skillsDir = path.join(pkgBase, latestVersion, 'builtin-skills');
+  return _scanSkillDirectory(skillsDir, 'builtin', builtinSkillIcon, yaml.parse);
 }
 
 // ── App Lifecycle ────────────────────────────────────────────

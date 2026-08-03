@@ -16,7 +16,9 @@ const os = require('os');
 // ══════════════════════════════════════════════════════════════
 
 jest.mock('fs');
+jest.mock('fs/promises');
 
+const fsp = require('fs/promises');
 const { readFolderConfig } = require('../src/scanners');
 const { scanAgentsDirectory } = require('../src/agents');
 
@@ -120,64 +122,72 @@ describe('folders:read agentsDir Logik (simuliert)', () => {
 // ══════════════════════════════════════════════════════════════
 
 describe('scanAgents Config-Integration', () => {
-  // Simuliert scanAgents() Logik aus main.js:
-  // const config = readFolderConfig();
-  // const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-  // return scanAgentsDirectory(agentsDir, yaml.parse);
-
+  // scanAgentsDirectory ist asynchron (fs/promises) — siehe src/agents.js.
   const yamlParse = jest.fn();
+
+  function mockAgentTree(tree) {
+    fsp.readdir.mockImplementation(async (dir) => {
+      const names = tree[dir];
+      if (!Array.isArray(names)) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+      return names;
+    });
+    fsp.readFile.mockImplementation(async (file) => {
+      const content = tree[file];
+      if (typeof content !== 'string') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+      return content;
+    });
+  }
 
   beforeEach(() => {
     yamlParse.mockReset();
+    fsp.readdir.mockReset();
+    fsp.readFile.mockReset();
   });
 
-  test('scanAgentsDirectory wird mit konfiguriertem Pfad aufgerufen', () => {
+  test('scanAgentsDirectory wird mit konfiguriertem Pfad aufgerufen', async () => {
     const customDir = 'D:\\custom\\agents';
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['test.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: Test\n---\n');
+    mockAgentTree({
+      [customDir]: ['test.agent.md'],
+      [path.join(customDir, 'test.agent.md')]: '---\nname: Test\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'Test' });
 
-    const result = scanAgentsDirectory(customDir, yamlParse);
-    expect(fs.existsSync).toHaveBeenCalledWith(customDir);
+    const result = await scanAgentsDirectory(customDir, yamlParse);
+    expect(fsp.readdir).toHaveBeenCalledWith(customDir);
     expect(result).toHaveLength(1);
   });
 
-  test('scanAgentsDirectory funktioniert mit Default-Pfad', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['helper.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: Helper\ndescription: Hilft\n---\n');
+  test('scanAgentsDirectory funktioniert mit Default-Pfad', async () => {
+    mockAgentTree({
+      [DEFAULT_AGENTS_DIR]: ['helper.agent.md'],
+      [path.join(DEFAULT_AGENTS_DIR, 'helper.agent.md')]: '---\nname: Helper\ndescription: Hilft\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'Helper', description: 'Hilft' });
 
-    const result = scanAgentsDirectory(DEFAULT_AGENTS_DIR, yamlParse);
-    expect(fs.existsSync).toHaveBeenCalledWith(DEFAULT_AGENTS_DIR);
+    const result = await scanAgentsDirectory(DEFAULT_AGENTS_DIR, yamlParse);
+    expect(fsp.readdir).toHaveBeenCalledWith(DEFAULT_AGENTS_DIR);
     expect(result[0].name).toBe('Helper');
   });
 
-  test('scanAgentsDirectory gibt [] zurück wenn konfigurierter Pfad nicht existiert', () => {
-    fs.existsSync.mockReturnValue(false);
-    const result = scanAgentsDirectory('X:\\nonexistent\\agents', yamlParse);
-    expect(result).toEqual([]);
+  test('scanAgentsDirectory gibt [] zurück wenn konfigurierter Pfad nicht existiert', async () => {
+    mockAgentTree({});
+    await expect(scanAgentsDirectory('X:\\nonexistent\\agents', yamlParse)).resolves.toEqual([]);
   });
 
-  test('Fallback-Logik: config.agentsDir || default', () => {
-    // Simuliere die vollständige scanAgents-Logik
-    function scanAgentsSimulated(configJson) {
-      fs.existsSync.mockImplementation((p) => p === CONFIG_PATH || p === DEFAULT_AGENTS_DIR);
-      fs.readFileSync.mockImplementation((p) => {
-        if (p === CONFIG_PATH) return JSON.stringify(configJson);
-        return '---\nname: Found\n---\n';
-      });
-      fs.readdirSync.mockReturnValue(['found.agent.md']);
-      yamlParse.mockReturnValue({ name: 'Found' });
+  test('Fallback-Logik: config.agentsDir || default', async () => {
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue(JSON.stringify({}));
+    mockAgentTree({
+      [DEFAULT_AGENTS_DIR]: ['found.agent.md'],
+      [path.join(DEFAULT_AGENTS_DIR, 'found.agent.md')]: '---\nname: Found\n---\n',
+    });
+    yamlParse.mockReturnValue({ name: 'Found' });
 
-      const config = readFolderConfig(CONFIG_PATH);
-      const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-      return scanAgentsDirectory(agentsDir, yamlParse);
-    }
+    const config = readFolderConfig(CONFIG_PATH);
+    const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
+    const result = await scanAgentsDirectory(agentsDir, yamlParse);
 
-    // Ohne agentsDir in Config → Default wird genutzt
-    const result = scanAgentsSimulated({});
+    expect(agentsDir).toBe(DEFAULT_AGENTS_DIR);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('Found');
   });
@@ -196,8 +206,10 @@ describe('IPC-Handler Integrität für Agents-Settings', () => {
     expect(mainJsContent).toMatch(/ipcMain\.handle\(['"]folders:read['"]/);
   });
 
-  test('agents:list IPC-Handler ist registriert', () => {
-    expect(mainJsContent).toMatch(/ipcMain\.handle\(['"]agents:list['"]/);
+  test('context:listAgents IPC-Handler ist registriert', () => {
+    // Löste agents:list/agents:listProvider/agents:listProject ab: Agents
+    // hängen an Provider UND Projekt, daher ein einziger Handler mit beidem.
+    expect(mainJsContent).toMatch(/ipcMain\.handle\(['"]context:listAgents['"]/);
   });
 
   test('folders:read Handler gibt agentsDir zurück', () => {
@@ -206,21 +218,22 @@ describe('IPC-Handler Integrität für Agents-Settings', () => {
     expect(mainJsContent).toMatch(/agentsDir:\s*config\.agentsDir\s*\|\|/);
   });
 
-  test('scanAgents() liest config mit readFolderConfig()', () => {
-    // Prüft dass scanAgents die Config-Funktion verwendet
-    const scanAgentsBlock = mainJsContent.match(/function scanAgents\(\)[\s\S]*?^}/m);
-    expect(scanAgentsBlock).not.toBeNull();
-    expect(scanAgentsBlock[0]).toContain('readFolderConfig()');
+  test('context:listAgents reicht den konfigurierten agentsDir durch', () => {
+    // Die Pfadauflösung liegt jetzt in src/context-paths.js; main.js gibt nur
+    // noch den konfigurierbaren Copilot-Ordner als Override hinein.
+    const handler = mainJsContent.match(/ipcMain\.handle\('context:listAgents'[\s\S]*?^\}\);/m);
+    expect(handler).not.toBeNull();
+    expect(handler[0]).toContain('agentDirs(');
+    expect(handler[0]).toMatch(/agentsDirOverride:\s*readFolderConfig\(\)\.agentsDir/);
   });
 
-  test('scanAgents() verwendet config.agentsDir mit Fallback', () => {
-    const scanAgentsBlock = mainJsContent.match(/function scanAgents\(\)[\s\S]*?^}/m);
-    expect(scanAgentsBlock).not.toBeNull();
-    expect(scanAgentsBlock[0]).toMatch(/config\.agentsDir\s*\|\|/);
+  test('context-paths.js kennt den Copilot-Default ~/.copilot/agents', () => {
+    const contextPaths = jest.requireActual('fs')
+      .readFileSync(path.resolve(__dirname, '..', 'src', 'context-paths.js'), 'utf-8');
+    expect(contextPaths).toMatch(/path\.join\(os\.homedir\(\),\s*'\.copilot',\s*'agents'\)/);
   });
 
-  test('Default-Fallback-Pfad enthält .copilot/agents', () => {
-    // Prüft dass der Default-Pfad korrekt definiert ist
+  test('folders:read liefert weiterhin den Default-Fallback', () => {
     expect(mainJsContent).toMatch(/path\.join\(os\.homedir\(\),\s*['"]\.copilot['"]\s*,\s*['"]agents['"]\)/);
   });
 });

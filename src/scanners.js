@@ -4,6 +4,7 @@
  */
 
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 
 // ── scanSkillDirectory ───────────────────────────────────────
@@ -15,35 +16,42 @@ const path = require('path');
  * @param {string} source - Herkunftsbezeichnung (z.B. 'user', 'builtin')
  * @param {(name: string) => string} iconFn - Fallback-Funktion für Icon-Ermittlung
  * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
- * @returns {Array<{id: string, dirName: string, name: string, description: string, source: string, icon: string}>}
+ * @returns {Promise<Array<{id: string, dirName: string, name: string, description: string, source: string, icon: string}>>}
  */
-function scanSkillDirectory(dir, source, iconFn, yamlParse) {
-  const results = [];
-  if (!fs.existsSync(dir)) return results;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const skillMd = path.join(dir, entry.name, 'SKILL.md');
-    if (!fs.existsSync(skillMd)) continue;
-
-    try {
-      const raw = fs.readFileSync(skillMd, 'utf-8').replace(/^\uFEFF/, '');
-      const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      if (frontmatter) {
-        const meta = yamlParse(frontmatter[1]);
-        results.push({
-          id: meta.name || entry.name,
-          dirName: entry.name,
-          name: meta.name || entry.name,
-          description: meta.description || '',
-          source,
-          icon: meta.icon || iconFn(meta.name || entry.name),
-        });
-      }
-    } catch (e) {
-      console.warn(`[skills:scan:${source}] Fehler:`, e.message || e);
-    }
+async function scanSkillDirectory(dir, source, iconFn, yamlParse) {
+  let dirEntries;
+  try {
+    dirEntries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (_) {
+    return []; // Verzeichnis fehlt oder ist nicht lesbar — beides kein Fehlerfall.
   }
-  return results;
+
+  // Parallel statt sequentiell: auf einem Netzlaufwerk dominiert die Latenz pro
+  // Datei, nicht der Durchsatz.
+  const results = await Promise.all(dirEntries.filter(e => e.isDirectory()).map(async (entry) => {
+    const skillMd = path.join(dir, entry.name, 'SKILL.md');
+    try {
+      const raw = (await fsp.readFile(skillMd, 'utf-8')).replace(/^\uFEFF/, '');
+      const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (!frontmatter) return null;
+      const meta = yamlParse(frontmatter[1]);
+      return {
+        id: meta.name || entry.name,
+        dirName: entry.name,
+        name: meta.name || entry.name,
+        description: meta.description || '',
+        source,
+        icon: meta.icon || iconFn(meta.name || entry.name),
+      };
+    } catch (e) {
+      // Ordner ohne SKILL.md ist der Normalfall, kein Fehler \u2014 nur echte
+      // Lese-/Parse-Probleme melden.
+      if (e.code !== 'ENOENT') console.warn(`[skills:scan:${source}] Fehler:`, e.message || e);
+      return null;
+    }
+  }));
+
+  return results.filter(Boolean);
 }
 
 /**
@@ -55,14 +63,14 @@ function scanSkillDirectory(dir, source, iconFn, yamlParse) {
  *
  * @param {string[]} dirs - Skill directories to scan, in priority order.
  * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
- * @returns {Array<{name: string, description: string, file: string}>}
+ * @returns {Promise<Array<{name: string, description: string, file: string}>>}
  */
-function scanSkillsIndex(dirs, yamlParse) {
+async function scanSkillsIndex(dirs, yamlParse) {
   const entries = [];
   const seen = new Set();
   for (const dir of dirs) {
     if (!dir) continue;
-    for (const s of scanSkillDirectory(dir, 'user', () => '', yamlParse)) {
+    for (const s of await scanSkillDirectory(dir, 'user', () => '', yamlParse)) {
       if (seen.has(s.dirName)) continue;
       seen.add(s.dirName);
       entries.push({ name: s.name, description: s.description, file: path.join(dir, s.dirName, 'SKILL.md') });

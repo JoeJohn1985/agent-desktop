@@ -1,23 +1,49 @@
 /**
  * Tests für src/agents.js — Agent-Scanner-Funktionen
+ *
+ * Die Scanner sind asynchron (fs/promises), damit der Main-Prozess beim
+ * Scannen nicht blockiert — deshalb wird hier `fs/promises` gemockt.
  */
 
-jest.mock('fs');
+jest.mock('fs/promises');
 
-const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const { scanAgentsDirectory, scanAgentsIndex } = require('../src/agents');
 
 const AGENTS_DIR = path.join('C:', 'Users', 'test', '.copilot', 'agents');
+const ROBOT = '\u{1F916}';
+
+function enoent() {
+  const e = new Error('ENOENT: no such file or directory');
+  e.code = 'ENOENT';
+  return e;
+}
+
+/**
+ * Baut ein virtuelles Dateisystem.
+ * @param {Object} tree - '<verzeichnis>': ['datei', …] und '<datei>': 'inhalt'.
+ */
+function mockTree(tree) {
+  fsp.readdir.mockImplementation(async (dir) => {
+    const names = tree[dir];
+    if (!Array.isArray(names)) throw enoent();
+    return names;
+  });
+  fsp.readFile.mockImplementation(async (file) => {
+    const content = tree[file];
+    if (typeof content !== 'string') throw enoent();
+    return content;
+  });
+}
 
 // Einfacher yamlParse-Mock
 const yamlParse = jest.fn();
 
 beforeEach(() => {
   jest.restoreAllMocks();
-  fs.existsSync.mockReset();
-  fs.readFileSync.mockReset();
-  fs.readdirSync.mockReset();
+  fsp.readdir.mockReset();
+  fsp.readFile.mockReset();
   yamlParse.mockReset();
 });
 
@@ -27,198 +53,187 @@ beforeEach(() => {
 
 describe('scanAgentsDirectory', () => {
 
-  test('gibt [] zurück wenn Verzeichnis nicht existiert', () => {
-    fs.existsSync.mockReturnValue(false);
-    expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn Verzeichnis nicht existiert', async () => {
+    mockTree({});
+    await expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).resolves.toEqual([]);
   });
 
-  test('gibt [] zurück wenn Verzeichnis leer ist', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue([]);
-    expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn Verzeichnis leer ist', async () => {
+    mockTree({ [AGENTS_DIR]: [] });
+    await expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).resolves.toEqual([]);
   });
 
-  test('ignoriert Dateien ohne .agent.md Endung', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['readme.md', 'config.json', 'notes.txt']);
-    expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).toEqual([]);
-    expect(fs.readFileSync).not.toHaveBeenCalled();
+  test('ignoriert Dateien ohne .agent.md Endung', async () => {
+    mockTree({ [AGENTS_DIR]: ['readme.md', 'config.json', 'notes.txt'] });
+    await expect(scanAgentsDirectory(AGENTS_DIR, yamlParse)).resolves.toEqual([]);
+    expect(fsp.readFile).not.toHaveBeenCalled();
   });
 
-  test('parst name aus YAML-Frontmatter korrekt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['code-reviewer.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: Code Reviewer\ndescription: Reviews code\n---\n\n# Content');
+  test('parst name aus YAML-Frontmatter korrekt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['code-reviewer.agent.md'],
+      [path.join(AGENTS_DIR, 'code-reviewer.agent.md')]: '---\nname: Code Reviewer\ndescription: Reviews code\n---\n\n# Content',
+    });
     yamlParse.mockReturnValue({ name: 'Code Reviewer', description: 'Reviews code' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('Code Reviewer');
   });
 
-  test('parst description aus YAML-Frontmatter korrekt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['helper.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: Helper\ndescription: Hilft bei Aufgaben\n---\n');
+  test('parst description aus YAML-Frontmatter korrekt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['helper.agent.md'],
+      [path.join(AGENTS_DIR, 'helper.agent.md')]: '---\nname: Helper\ndescription: Hilft bei Aufgaben\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'Helper', description: 'Hilft bei Aufgaben' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result[0].description).toBe('Hilft bei Aufgaben');
   });
 
-  test('gibt korrektes Objekt {id, name, description, icon} zurück', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['test-agent.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: TestAgent\ndescription: Ein Test\n---\n');
+  test('gibt korrektes Objekt {id, fileSlug, name, description, icon} zurück', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['test-agent.agent.md'],
+      [path.join(AGENTS_DIR, 'test-agent.agent.md')]: '---\nname: TestAgent\ndescription: Ein Test\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'TestAgent', description: 'Ein Test' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result[0]).toEqual({
       id: 'TestAgent',
       fileSlug: 'test-agent',
       name: 'TestAgent',
       description: 'Ein Test',
-      icon: '🤖',
+      icon: ROBOT,
     });
   });
 
-  test('icon ist immer 🤖', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['a.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: A\nicon: 🔥\n---\n');
-    yamlParse.mockReturnValue({ name: 'A', icon: '🔥' });
+  test('icon ist immer das Roboter-Symbol, auch wenn die Datei eins vorgibt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['a.agent.md'],
+      [path.join(AGENTS_DIR, 'a.agent.md')]: '---\nname: A\nicon: FLAMME\n---\n',
+    });
+    yamlParse.mockReturnValue({ name: 'A', icon: 'FLAMME' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
-    expect(result[0].icon).toBe('🤖');
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    expect(result[0].icon).toBe(ROBOT);
   });
 
-  test('verwendet Dateiname als Fallback wenn name fehlt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['fallback-agent.agent.md']);
-    fs.readFileSync.mockReturnValue('---\ndescription: Kein Name\n---\n');
+  test('verwendet Dateiname als Fallback wenn name fehlt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['fallback-agent.agent.md'],
+      [path.join(AGENTS_DIR, 'fallback-agent.agent.md')]: '---\ndescription: Kein Name\n---\n',
+    });
     yamlParse.mockReturnValue({ description: 'Kein Name' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result[0].id).toBe('fallback-agent');
     expect(result[0].name).toBe('fallback-agent');
   });
 
-  test('verwendet leeren String als Fallback wenn description fehlt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['nodesc.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: NoDesc\n---\n');
+  test('verwendet leeren String als Fallback wenn description fehlt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['nodesc.agent.md'],
+      [path.join(AGENTS_DIR, 'nodesc.agent.md')]: '---\nname: NoDesc\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'NoDesc' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result[0].description).toBe('');
   });
 
-  test('entfernt BOM (\\uFEFF) am Dateianfang', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['bom.agent.md']);
-    fs.readFileSync.mockReturnValue('\uFEFF---\nname: BomAgent\ndescription: BOM test\n---\n');
+  test('entfernt BOM am Dateianfang', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['bom.agent.md'],
+      [path.join(AGENTS_DIR, 'bom.agent.md')]: '﻿---\nname: BomAgent\ndescription: BOM test\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'BomAgent', description: 'BOM test' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('BomAgent');
   });
 
-  test('ignoriert Dateien ohne Frontmatter', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['no-frontmatter.agent.md']);
-    fs.readFileSync.mockReturnValue('# Just markdown\n\nKein Frontmatter hier.');
+  test('ignoriert Dateien ohne Frontmatter', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['no-frontmatter.agent.md'],
+      [path.join(AGENTS_DIR, 'no-frontmatter.agent.md')]: '# Just markdown\n\nKein Frontmatter hier.',
+    });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toEqual([]);
     expect(yamlParse).not.toHaveBeenCalled();
   });
 
-  test('verarbeitet mehrere Agent-Dateien korrekt', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['agent-a.agent.md', 'agent-b.agent.md']);
-
-    let readCount = 0;
-    fs.readFileSync.mockImplementation(() => {
-      readCount++;
-      return `---\nname: Agent${readCount}\ndescription: Desc${readCount}\n---\n`;
+  test('verarbeitet mehrere Agent-Dateien korrekt', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['agent-a.agent.md', 'agent-b.agent.md'],
+      [path.join(AGENTS_DIR, 'agent-a.agent.md')]: '---\nname: AgentA\ndescription: DescA\n---\n',
+      [path.join(AGENTS_DIR, 'agent-b.agent.md')]: '---\nname: AgentB\ndescription: DescB\n---\n',
     });
+    yamlParse.mockImplementation((raw) => ({ name: raw.match(/name: (\S+)/)[1], description: 'x' }));
 
-    let parseCount = 0;
-    yamlParse.mockImplementation(() => {
-      parseCount++;
-      return { name: `Agent${parseCount}`, description: `Desc${parseCount}` };
-    });
-
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(2);
-    expect(result[0].name).toBe('Agent1');
-    expect(result[1].name).toBe('Agent2');
+    expect(result.map(r => r.name).sort()).toEqual(['AgentA', 'AgentB']);
   });
 
-  test('fängt Parse-Fehler und fährt mit nächster Datei fort', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['broken.agent.md', 'good.agent.md']);
-
-    let readCount = 0;
-    fs.readFileSync.mockImplementation(() => {
-      readCount++;
-      return `---\nname: file${readCount}\n---\n`;
+  test('fängt Parse-Fehler und fährt mit nächster Datei fort', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['broken.agent.md', 'good.agent.md'],
+      [path.join(AGENTS_DIR, 'broken.agent.md')]: '---\nname: broken\n---\n',
+      [path.join(AGENTS_DIR, 'good.agent.md')]: '---\nname: GoodAgent\n---\n',
     });
-
-    let parseCount = 0;
-    yamlParse.mockImplementation(() => {
-      parseCount++;
-      if (parseCount === 1) throw new Error('Invalid YAML');
+    yamlParse.mockImplementation((raw) => {
+      if (raw.includes('broken')) throw new Error('Invalid YAML');
       return { name: 'GoodAgent', description: 'works' };
     });
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('GoodAgent');
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
-  test('fängt Lesefehler (EACCES) und fährt fort', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['denied.agent.md', 'ok.agent.md']);
-
-    let readCount = 0;
-    fs.readFileSync.mockImplementation(() => {
-      readCount++;
-      if (readCount === 1) throw new Error('EACCES: permission denied');
-      return '---\nname: OK\n---\n';
+  test('fängt Lesefehler (EACCES) und fährt fort', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['denied.agent.md', 'ok.agent.md'],
+      [path.join(AGENTS_DIR, 'ok.agent.md')]: '---\nname: OK\n---\n',
+      // denied.agent.md fehlt im Baum -> Lesen wirft
     });
     yamlParse.mockReturnValue({ name: 'OK' });
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('OK');
     warnSpy.mockRestore();
   });
 
-  test('unterstützt Windows-Zeilenumbrüche (\\r\\n) in Frontmatter', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['win.agent.md']);
-    fs.readFileSync.mockReturnValue('---\r\nname: WinAgent\r\ndescription: Windows\r\n---\r\nContent');
+  test('unterstützt Windows-Zeilenumbrüche in Frontmatter', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['win.agent.md'],
+      [path.join(AGENTS_DIR, 'win.agent.md')]: '---\r\nname: WinAgent\r\ndescription: Windows\r\n---\r\nContent',
+    });
     yamlParse.mockReturnValue({ name: 'WinAgent', description: 'Windows' });
 
-    const result = scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    const result = await scanAgentsDirectory(AGENTS_DIR, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('WinAgent');
   });
 
-  test('liest Dateien mit utf-8 Encoding', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue(['test.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: Test\n---\n');
+  test('liest Dateien mit utf-8 Encoding', async () => {
+    mockTree({
+      [AGENTS_DIR]: ['test.agent.md'],
+      [path.join(AGENTS_DIR, 'test.agent.md')]: '---\nname: Test\n---\n',
+    });
     yamlParse.mockReturnValue({ name: 'Test' });
 
-    scanAgentsDirectory(AGENTS_DIR, yamlParse);
-    expect(fs.readFileSync).toHaveBeenCalledWith(
+    await scanAgentsDirectory(AGENTS_DIR, yamlParse);
+    expect(fsp.readFile).toHaveBeenCalledWith(
       path.join(AGENTS_DIR, 'test.agent.md'),
       'utf-8'
     );
@@ -231,41 +246,42 @@ describe('scanAgentsDirectory', () => {
 
 describe('scanAgentsIndex', () => {
   const PROVIDER_DIR = path.join('C:', 'test', 'userData', '.agent-desktop', 'claude-code', 'agents');
-  const PROJECT_DIR = path.join('C:', 'myproject', '.github', 'agents');
+  const PROJECT_DIR = path.join('C:', 'myproject', '.agent-desktop', 'agents');
 
-  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', () => {
-    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR);
-    fs.readdirSync.mockReturnValue(['planner.agent.md']);
-    fs.readFileSync.mockReturnValue('---\nname: planner\ndescription: Plant Aufgaben\n---\n\nVolltext-Anleitung');
+  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', async () => {
+    mockTree({
+      [PROVIDER_DIR]: ['planner.agent.md'],
+      [path.join(PROVIDER_DIR, 'planner.agent.md')]: '---\nname: planner\ndescription: Plant Aufgaben\n---\n\nVolltext-Anleitung',
+    });
     yamlParse.mockReturnValue({ name: 'planner', description: 'Plant Aufgaben' });
 
-    const result = scanAgentsIndex([PROVIDER_DIR], yamlParse);
+    const result = await scanAgentsIndex([PROVIDER_DIR], yamlParse);
     expect(result).toEqual([
       { name: 'planner', description: 'Plant Aufgaben', file: path.join(PROVIDER_DIR, 'planner.agent.md') },
     ]);
   });
 
-  test('ignoriert leere/undefined Verzeichnisse', () => {
-    expect(scanAgentsIndex([null, undefined, ''], yamlParse)).toEqual([]);
+  test('ignoriert leere/undefined Verzeichnisse', async () => {
+    mockTree({});
+    await expect(scanAgentsIndex([null, undefined, ''], yamlParse)).resolves.toEqual([]);
   });
 
-  test('dedupliziert nach fileSlug über mehrere Verzeichnisse, erstes Match gewinnt', () => {
-    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR || p === PROJECT_DIR);
-    fs.readdirSync.mockImplementation((dir) => {
-      if (dir === PROVIDER_DIR) return ['shared.agent.md'];
-      if (dir === PROJECT_DIR) return ['shared.agent.md'];
-      return [];
+  test('dedupliziert nach fileSlug über mehrere Verzeichnisse, erstes Match gewinnt', async () => {
+    mockTree({
+      [PROVIDER_DIR]: ['shared.agent.md'],
+      [PROJECT_DIR]: ['shared.agent.md'],
+      [path.join(PROVIDER_DIR, 'shared.agent.md')]: '---\nname: shared\ndescription: Provider-Version\n---\n',
+      [path.join(PROJECT_DIR, 'shared.agent.md')]: '---\nname: shared\ndescription: Projekt-Version\n---\n',
     });
-    fs.readFileSync.mockReturnValue('---\nname: shared\ndescription: Provider-Version\n---\n');
     yamlParse.mockReturnValue({ name: 'shared', description: 'Provider-Version' });
 
-    const result = scanAgentsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
+    const result = await scanAgentsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].file).toBe(path.join(PROVIDER_DIR, 'shared.agent.md'));
   });
 
-  test('gibt [] zurück wenn keine Verzeichnisse existieren', () => {
-    fs.existsSync.mockReturnValue(false);
-    expect(scanAgentsIndex([PROVIDER_DIR], yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn keine Verzeichnisse existieren', async () => {
+    mockTree({});
+    await expect(scanAgentsIndex([PROVIDER_DIR], yamlParse)).resolves.toEqual([]);
   });
 });

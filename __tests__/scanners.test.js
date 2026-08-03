@@ -1,10 +1,17 @@
 /**
  * Tests für src/scanners.js — Scanner- und Config-Funktionen
+ *
+ * scanSkillDirectory/scanSkillsIndex sind asynchron (fs/promises), damit der
+ * Main-Prozess beim Scannen nicht blockiert — deshalb wird hier `fs/promises`
+ * gemockt. readFolderConfig/writeFolderConfig sind weiterhin synchron und
+ * nutzen den `fs`-Mock.
  */
 
 jest.mock('fs');
+jest.mock('fs/promises');
 
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const { scanSkillDirectory, scanSkillsIndex, readFolderConfig, writeFolderConfig } = require('../src/scanners');
 
@@ -16,6 +23,30 @@ function dirent(name, isDir = true) {
   return { name, isDirectory: () => isDir, isFile: () => !isDir };
 }
 
+function enoent() {
+  const e = new Error('ENOENT: no such file or directory');
+  e.code = 'ENOENT';
+  return e;
+}
+
+/**
+ * Baut ein virtuelles Dateisystem für die async-Scanner.
+ * @param {Object} tree - '<verzeichnis>': ['eintrag', …] und '<datei>': 'inhalt'.
+ *   Alles, was nicht im Baum steht, wirft ENOENT — wie echtes fs.
+ */
+function mockTree(tree) {
+  fsp.readdir.mockImplementation(async (dir, opts) => {
+    const names = tree[dir];
+    if (!Array.isArray(names)) throw enoent();
+    return opts && opts.withFileTypes ? names.map(n => dirent(n)) : names;
+  });
+  fsp.readFile.mockImplementation(async (file) => {
+    const content = tree[file];
+    if (typeof content !== 'string') throw enoent();
+    return content;
+  });
+}
+
 // Einfacher yamlParse-Mock
 const yamlParse = jest.fn();
 
@@ -23,9 +54,10 @@ beforeEach(() => {
   jest.restoreAllMocks();
   fs.existsSync.mockReset();
   fs.readFileSync.mockReset();
-  fs.readdirSync.mockReset();
   fs.writeFileSync.mockReset();
   fs.mkdirSync.mockReset();
+  fsp.readdir.mockReset();
+  fsp.readFile.mockReset();
   yamlParse.mockReset();
 });
 
@@ -34,44 +66,45 @@ beforeEach(() => {
 // ══════════════════════════════════════════════════════════════
 
 describe('scanSkillDirectory', () => {
-  const iconFn = jest.fn(() => '🧩');
+  const iconFn = jest.fn(() => 'ICON');
 
   beforeEach(() => {
     iconFn.mockClear();
+    iconFn.mockReturnValue('ICON');
   });
 
-  test('gibt [] zurück wenn dir nicht existiert', () => {
-    fs.existsSync.mockReturnValue(false);
-    expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn dir nicht existiert', async () => {
+    mockTree({});
+    await expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).resolves.toEqual([]);
   });
 
-  test('gibt [] zurück wenn keine Unterverzeichnisse vorhanden', () => {
-    fs.existsSync.mockReturnValue(true);
-    fs.readdirSync.mockReturnValue([]);
-    expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn keine Unterverzeichnisse vorhanden', async () => {
+    mockTree({ [SKILLS_DIR]: [] });
+    await expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).resolves.toEqual([]);
   });
 
-  test('ignoriert Verzeichnisse ohne SKILL.md', () => {
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      return false; // SKILL.md existiert nicht
-    });
-    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
-    expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).toEqual([]);
+  test('ignoriert Verzeichnisse ohne SKILL.md', async () => {
+    mockTree({ [SKILLS_DIR]: ['my-skill'] }); // SKILL.md fehlt -> ENOENT
+    await expect(scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse)).resolves.toEqual([]);
   });
 
-  test('parst Frontmatter korrekt', () => {
+  test('meldet eine fehlende SKILL.md nicht als Fehler', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockTree({ [SKILLS_DIR]: ['leerer-ordner'] });
+    await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  test('parst Frontmatter korrekt', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'code-review', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
+    mockTree({
+      [SKILLS_DIR]: ['code-review'],
+      [skillMdPath]: '---\nname: code-review\ndescription: Reviews code\nicon: LUPE\n---\n\n# Content',
     });
-    fs.readdirSync.mockReturnValue([dirent('code-review')]);
-    fs.readFileSync.mockReturnValue('---\nname: code-review\ndescription: Reviews code\nicon: 🔍\n---\n\n# Content');
-    yamlParse.mockReturnValue({ name: 'code-review', description: 'Reviews code', icon: '🔍' });
+    yamlParse.mockReturnValue({ name: 'code-review', description: 'Reviews code', icon: 'LUPE' });
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'builtin', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'builtin', iconFn, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       id: 'code-review',
@@ -79,214 +112,121 @@ describe('scanSkillDirectory', () => {
       name: 'code-review',
       description: 'Reviews code',
       source: 'builtin',
-      icon: '🔍',
+      icon: 'LUPE',
     });
   });
 
-  test('entfernt BOM (\\uFEFF) am Dateianfang', () => {
+  test('entfernt BOM am Dateianfang', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'my-skill', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
+    mockTree({
+      [SKILLS_DIR]: ['my-skill'],
+      [skillMdPath]: '﻿---\nname: bom-skill\ndescription: BOM test\n---\n',
     });
-    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
-    fs.readFileSync.mockReturnValue('\uFEFF---\nname: bom-skill\ndescription: BOM test\n---\n');
     yamlParse.mockReturnValue({ name: 'bom-skill', description: 'BOM test' });
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('bom-skill');
   });
 
-  test('gibt icon aus meta zurück wenn vorhanden', () => {
+  test('gibt icon aus meta zurück wenn vorhanden', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'my-skill', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
-    fs.readFileSync.mockReturnValue('---\nname: test\nicon: 🚀\n---\n');
-    yamlParse.mockReturnValue({ name: 'test', icon: '🚀' });
+    mockTree({ [SKILLS_DIR]: ['my-skill'], [skillMdPath]: '---\nname: test\nicon: RAKETE\n---\n' });
+    yamlParse.mockReturnValue({ name: 'test', icon: 'RAKETE' });
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
-    expect(result[0].icon).toBe('🚀');
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    expect(result[0].icon).toBe('RAKETE');
     expect(iconFn).not.toHaveBeenCalled();
   });
 
-  test('verwendet iconFn als Fallback wenn kein icon in meta', () => {
+  test('verwendet iconFn als Fallback wenn kein icon in meta', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'my-skill', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
-    fs.readFileSync.mockReturnValue('---\nname: no-icon\ndescription: test\n---\n');
+    mockTree({ [SKILLS_DIR]: ['my-skill'], [skillMdPath]: '---\nname: no-icon\ndescription: test\n---\n' });
     yamlParse.mockReturnValue({ name: 'no-icon', description: 'test' });
-    iconFn.mockReturnValue('🎯');
+    iconFn.mockReturnValue('ZIEL');
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
-    expect(result[0].icon).toBe('🎯');
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    expect(result[0].icon).toBe('ZIEL');
     expect(iconFn).toHaveBeenCalledWith('no-icon');
   });
 
-  test('fängt Parse-Fehler und fährt fort', () => {
+  test('fängt Parse-Fehler und fährt fort', async () => {
     const skill1Path = path.join(SKILLS_DIR, 'skill-1', 'SKILL.md');
     const skill2Path = path.join(SKILLS_DIR, 'skill-2', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skill1Path || p === skill2Path) return true;
-      return false;
+    mockTree({
+      [SKILLS_DIR]: ['skill-1', 'skill-2'],
+      [skill1Path]: '---\nname: broken\n---\n',
+      [skill2Path]: '---\nname: good\ndescription: works\n---\n',
     });
-    fs.readdirSync.mockReturnValue([dirent('skill-1'), dirent('skill-2')]);
-
-    let readCount = 0;
-    fs.readFileSync.mockImplementation(() => {
-      readCount++;
-      if (readCount === 1) return '---\nname: broken\n---\n';
-      return '---\nname: good\ndescription: works\n---\n';
-    });
-
-    let parseCount = 0;
-    yamlParse.mockImplementation(() => {
-      parseCount++;
-      if (parseCount === 1) throw new Error('Invalid YAML');
+    yamlParse.mockImplementation((raw) => {
+      if (raw.includes('broken')) throw new Error('Invalid YAML');
       return { name: 'good', description: 'works' };
     });
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('good');
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
-  test('verarbeitet mehrere Skills korrekt', () => {
+  test('verarbeitet mehrere Skills korrekt', async () => {
     const s1Path = path.join(SKILLS_DIR, 'skill-a', 'SKILL.md');
     const s2Path = path.join(SKILLS_DIR, 'skill-b', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === s1Path || p === s2Path) return true;
-      return false;
+    mockTree({
+      [SKILLS_DIR]: ['skill-a', 'skill-b'],
+      [s1Path]: '---\nname: skill-a\n---\n',
+      [s2Path]: '---\nname: skill-b\n---\n',
     });
-    fs.readdirSync.mockReturnValue([dirent('skill-a'), dirent('skill-b')]);
-    fs.readFileSync.mockReturnValue('---\nname: x\n---\n');
+    yamlParse.mockImplementation((raw) => ({ name: raw.match(/name: (\S+)/)[1], description: 'Desc' }));
 
-    let count = 0;
-    yamlParse.mockImplementation(() => {
-      count++;
-      return { name: `skill-${count}`, description: `Desc ${count}` };
-    });
-
-    const result = scanSkillDirectory(SKILLS_DIR, 'builtin', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'builtin', iconFn, yamlParse);
     expect(result).toHaveLength(2);
-    expect(result[0].name).toBe('skill-1');
-    expect(result[1].name).toBe('skill-2');
+    expect(result.map(r => r.name).sort()).toEqual(['skill-a', 'skill-b']);
   });
 
-  test('verwendet entry.name als Fallback wenn meta.name fehlt', () => {
+  test('verwendet entry.name als Fallback wenn meta.name fehlt', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'fallback-dir', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('fallback-dir')]);
-    fs.readFileSync.mockReturnValue('---\ndescription: no name\n---\n');
+    mockTree({ [SKILLS_DIR]: ['fallback-dir'], [skillMdPath]: '---\ndescription: no name\n---\n' });
     yamlParse.mockReturnValue({ description: 'no name' });
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
     expect(result[0].id).toBe('fallback-dir');
     expect(result[0].name).toBe('fallback-dir');
     expect(iconFn).toHaveBeenCalledWith('fallback-dir');
   });
 
-  test('ignoriert SKILL.md ohne Frontmatter', () => {
+  test('ignoriert SKILL.md ohne Frontmatter', async () => {
     const skillMdPath = path.join(SKILLS_DIR, 'no-fm', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === SKILLS_DIR) return true;
-      if (p === skillMdPath) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('no-fm')]);
-    fs.readFileSync.mockReturnValue('# Just markdown\n\nNo frontmatter here.');
+    mockTree({ [SKILLS_DIR]: ['no-fm'], [skillMdPath]: '# Just markdown\n\nNo frontmatter here.' });
 
-    const result = scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
+    const result = await scanSkillDirectory(SKILLS_DIR, 'user', iconFn, yamlParse);
     expect(result).toEqual([]);
     expect(yamlParse).not.toHaveBeenCalled();
   });
 
   // ── Projekt-Skills (source='project') ─────────────────────
 
-  test('setzt source="project" korrekt (Projekt-Skill aus .github/)', () => {
-    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
-    const skillMdPath = path.join(githubSkillsDir, 'my-skill', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === githubSkillsDir) return true;
-      if (p === skillMdPath) return true;
-      return false;
+  test('setzt source="project" korrekt', async () => {
+    const projectSkillsDir = path.join('C:', 'myproject', '.agent-desktop', 'skills');
+    const skillMdPath = path.join(projectSkillsDir, 'my-skill', 'SKILL.md');
+    mockTree({
+      [projectSkillsDir]: ['my-skill'],
+      [skillMdPath]: '---\nname: my-skill\ndescription: A project skill\n---\n',
     });
-    fs.readdirSync.mockReturnValue([dirent('my-skill')]);
-    fs.readFileSync.mockReturnValue('---\nname: my-skill\ndescription: A project skill\n---\n');
     yamlParse.mockReturnValue({ name: 'my-skill', description: 'A project skill' });
 
-    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
+    const result = await scanSkillDirectory(projectSkillsDir, 'project', iconFn, yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('project');
     expect(result[0].name).toBe('my-skill');
   });
 
-  test('Projekt-Skill enthält alle Pflichtfelder', () => {
-    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
-    const skillMdPath = path.join(githubSkillsDir, 'code-review', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === githubSkillsDir) return true;
-      if (p === skillMdPath) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('code-review')]);
-    fs.readFileSync.mockReturnValue('---\nname: code-review\ndescription: Reviews code\nicon: 🔍\n---\n');
-    yamlParse.mockReturnValue({ name: 'code-review', description: 'Reviews code', icon: '🔍' });
-
-    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
-    expect(result[0]).toEqual({
-      id: 'code-review',
-      dirName: 'code-review',
-      name: 'code-review',
-      description: 'Reviews code',
-      source: 'project',
-      icon: '🔍',
-    });
-  });
-
-  test('gibt [] zurück wenn .github/skills/ nicht existiert', () => {
-    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
-    fs.existsSync.mockReturnValue(false);
-
-    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
-    expect(result).toEqual([]);
-  });
-
-  test('mehrere Projekt-Skills haben alle source="project"', () => {
-    const githubSkillsDir = path.join('C:', 'myproject', '.github', 'skills');
-    const s1Path = path.join(githubSkillsDir, 'skill-a', 'SKILL.md');
-    const s2Path = path.join(githubSkillsDir, 'skill-b', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      if (p === githubSkillsDir) return true;
-      if (p === s1Path || p === s2Path) return true;
-      return false;
-    });
-    fs.readdirSync.mockReturnValue([dirent('skill-a'), dirent('skill-b')]);
-    fs.readFileSync.mockReturnValue('---\nname: x\n---\n');
-    let count = 0;
-    yamlParse.mockImplementation(() => ({ name: `skill-${++count}` }));
-
-    const result = scanSkillDirectory(githubSkillsDir, 'project', iconFn, yamlParse);
-    expect(result).toHaveLength(2);
-    expect(result.every(s => s.source === 'project')).toBe(true);
+  test('gibt [] zurück wenn das Projekt-Skillverzeichnis fehlt', async () => {
+    mockTree({});
+    const dir = path.join('C:', 'myproject', '.agent-desktop', 'skills');
+    await expect(scanSkillDirectory(dir, 'project', iconFn, yamlParse)).resolves.toEqual([]);
   });
 });
 
@@ -296,47 +236,46 @@ describe('scanSkillDirectory', () => {
 
 describe('scanSkillsIndex', () => {
   const PROVIDER_DIR = path.join('C:', 'test', 'userData', '.agent-desktop', 'claude-code', 'skills');
-  const PROJECT_DIR = path.join('C:', 'myproject', '.github', 'skills');
+  const PROJECT_DIR = path.join('C:', 'myproject', '.agent-desktop', 'skills');
 
-  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', () => {
+  test('baut Index mit name/description/absolutem Dateipfad, ohne Volltext', async () => {
     const skillMdPath = path.join(PROVIDER_DIR, 'pdf', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => p === PROVIDER_DIR || p === skillMdPath);
-    fs.readdirSync.mockReturnValue([dirent('pdf')]);
-    fs.readFileSync.mockReturnValue('---\nname: pdf\ndescription: PDF-Verarbeitung\n---\n\nVolltext-Anleitung');
+    mockTree({
+      [PROVIDER_DIR]: ['pdf'],
+      [skillMdPath]: '---\nname: pdf\ndescription: PDF-Verarbeitung\n---\n\nVolltext-Anleitung',
+    });
     yamlParse.mockReturnValue({ name: 'pdf', description: 'PDF-Verarbeitung' });
 
-    const result = scanSkillsIndex([PROVIDER_DIR], yamlParse);
+    const result = await scanSkillsIndex([PROVIDER_DIR], yamlParse);
     expect(result).toEqual([
       { name: 'pdf', description: 'PDF-Verarbeitung', file: skillMdPath },
     ]);
   });
 
-  test('ignoriert leere/undefined Verzeichnisse', () => {
-    expect(scanSkillsIndex([null, undefined, ''], yamlParse)).toEqual([]);
+  test('ignoriert leere/undefined Verzeichnisse', async () => {
+    mockTree({});
+    await expect(scanSkillsIndex([null, undefined, ''], yamlParse)).resolves.toEqual([]);
   });
 
-  test('dedupliziert nach dirName über mehrere Verzeichnisse, erstes Match gewinnt', () => {
+  test('dedupliziert nach dirName über mehrere Verzeichnisse, erstes Match gewinnt', async () => {
     const providerSkillMd = path.join(PROVIDER_DIR, 'shared', 'SKILL.md');
     const projectSkillMd = path.join(PROJECT_DIR, 'shared', 'SKILL.md');
-    fs.existsSync.mockImplementation((p) => {
-      return p === PROVIDER_DIR || p === providerSkillMd || p === PROJECT_DIR || p === projectSkillMd;
+    mockTree({
+      [PROVIDER_DIR]: ['shared'],
+      [PROJECT_DIR]: ['shared'],
+      [providerSkillMd]: '---\nname: shared\ndescription: Provider-Version\n---\n',
+      [projectSkillMd]: '---\nname: shared\ndescription: Projekt-Version\n---\n',
     });
-    fs.readdirSync.mockImplementation((dir) => {
-      if (dir === PROVIDER_DIR) return [dirent('shared')];
-      if (dir === PROJECT_DIR) return [dirent('shared')];
-      return [];
-    });
-    fs.readFileSync.mockReturnValue('---\nname: shared\ndescription: Provider-Version\n---\n');
     yamlParse.mockReturnValue({ name: 'shared', description: 'Provider-Version' });
 
-    const result = scanSkillsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
+    const result = await scanSkillsIndex([PROVIDER_DIR, PROJECT_DIR], yamlParse);
     expect(result).toHaveLength(1);
     expect(result[0].file).toBe(providerSkillMd);
   });
 
-  test('gibt [] zurück wenn keine Verzeichnisse existieren', () => {
-    fs.existsSync.mockReturnValue(false);
-    expect(scanSkillsIndex([PROVIDER_DIR], yamlParse)).toEqual([]);
+  test('gibt [] zurück wenn keine Verzeichnisse existieren', async () => {
+    mockTree({});
+    await expect(scanSkillsIndex([PROVIDER_DIR], yamlParse)).resolves.toEqual([]);
   });
 });
 

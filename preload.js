@@ -336,45 +336,30 @@ contextBridge.exposeInMainWorld('copilot', {
   // ── Skills ────────────────────────────────────────────────
 
   /**
-   * Skill management — list and delete user/builtin skills.
+   * Skills and agents, always resolved for a concrete (provider, project)
+   * pair — there is no provider-agnostic list, because there is no
+   * provider-agnostic answer: each provider reads different folders (see
+   * src/context-paths.js).
    *
-   * @namespace copilot.skills
+   * @namespace copilot.context
    */
-  skills: {
-    /** @ipc skills:list @returns {Promise<Array<Object>>} All discovered skills (builtin + user) */
-    list: () => ipcRenderer.invoke('skills:list'),
-    /** @ipc skills:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project skills from cwd/.github/skills/ */
-    listProject: (cwd) => ipcRenderer.invoke('skills:listProject', cwd),
-    /** @ipc skills:listProvider @param {string} provider @returns {Promise<Array<Object>>} Skills from ~/.agent-desktop/<provider>/skills/ (all providers except Copilot, which keeps its native ~/.copilot/skills) */
-    listProvider: (provider) => ipcRenderer.invoke('skills:listProvider', provider),
-    /** @ipc skills:delete @param {string} dirName - Skill directory name @returns {Promise<{success: boolean, error?: string}>} */
-    delete: (dirName) => ipcRenderer.invoke('skills:delete', dirName),
-    /** @ipc skills:deleteProject @param {string} cwd @param {string} dirName @returns {Promise<{success: boolean, error?: string}>} */
-    deleteProject: (cwd, dirName) => ipcRenderer.invoke('skills:deleteProject', cwd, dirName),
-    /** @ipc skills:getDisabled @returns {Promise<string[]>} */
-    getDisabled: () => ipcRenderer.invoke('skills:getDisabled'),
-    /** @ipc skills:setDisabled @param {string[]} list @returns {Promise<{success: boolean, error?: string}>} */
-    setDisabled: (list) => ipcRenderer.invoke('skills:setDisabled', list),
-    /** @ipc skills:getHidden @returns {Promise<string[]>} */
-    getHidden: () => ipcRenderer.invoke('skills:getHidden'),
-    /** @ipc skills:setHidden @param {string[]} list @returns {Promise<{success: boolean, error?: string}>} */
-    setHidden: (list) => ipcRenderer.invoke('skills:setHidden', list),
+  context: {
+    /** @ipc context:listSkills @param {string} provider @param {string|null} cwd @returns {Promise<Array<Object>>} */
+    listSkills: (provider, cwd) => ipcRenderer.invoke('context:listSkills', provider, cwd),
+    /** @ipc context:listAgents @param {string} provider @param {string|null} cwd @returns {Promise<Array<Object>>} */
+    listAgents: (provider, cwd) => ipcRenderer.invoke('context:listAgents', provider, cwd),
+    /** @ipc context:paths @param {string} provider @param {string|null} cwd @returns {Promise<{skills: {global: string[], project: string[]}, agents: {global: string[], project: string[]}}>} */
+    paths: (provider, cwd) => ipcRenderer.invoke('context:paths', provider, cwd),
   },
 
   // ── Agents ────────────────────────────────────────────────
 
   /**
-   * Agent management — list and delete .agent.md files.
+   * Agent file management (listing lives in copilot.context).
    *
    * @namespace copilot.agents
    */
   agents: {
-    /** @ipc agents:list @returns {Promise<Array<Object>>} All discovered agents */
-    list: () => ipcRenderer.invoke('agents:list'),
-    /** @ipc agents:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project agents from cwd/.github/agents/ */
-    listProject: (cwd) => ipcRenderer.invoke('agents:listProject', cwd),
-    /** @ipc agents:listProvider @param {string} provider @returns {Promise<Array<Object>>} Agents from ~/.agent-desktop/<provider>/agents/ (all providers except Copilot, which keeps its native ~/.copilot/agents) */
-    listProvider: (provider) => ipcRenderer.invoke('agents:listProvider', provider),
     /** @ipc agents:delete @param {string} fileSlug - Agent file slug (without .agent.md) @returns {Promise<{success: boolean, error?: string}>} */
     delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
   },

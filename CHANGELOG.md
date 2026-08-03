@@ -1,5 +1,55 @@
 # Changelog
 
+## [1.12.0] - 2026-08-03
+
+### Changed
+- **Skills and agents are now resolved per (provider, project) instead of being
+  merged from three provider-agnostic lists.** Which skills exist depends on
+  *both* the provider and the open project — each provider reads different
+  folders — so there is no provider-neutral answer, and pretending otherwise
+  is what made the sidebar unreliable. A new `src/context-paths.js` is the
+  single place that answers "which folders does this provider read?", and both
+  the sidebar and the prompt injection go through it, so the UI can't drift
+  from what the model actually sees.
+
+  | Provider | Global | Project |
+  |---|---|---|
+  | Copilot | `~/.copilot/skills` + builtin + marketplace mirror | `.github/skills` |
+  | Claude Code | `~/.claude/skills` | `<cwd>/.claude/skills` |
+  | Direct-API | `~/.agent-desktop/<provider>/skills` | `<cwd>/.agent-desktop/skills` |
+
+  Agents follow the same pattern. Direct-API providers moved off `.github/`
+  deliberately: that's GitHub Copilot's convention, not a cross-vendor
+  standard, and reusing it made app-managed files look like Copilot's.
+
+- **Three IPC handler pairs collapsed into `context:listSkills` /
+  `context:listAgents`** (plus `context:paths` so the UI can tell the user
+  where to put a file). The renderer no longer merges `list` +
+  `listProvider` + `listProject` results and guesses which apply where.
+
+- **Scanners are fully async** (`fs/promises`, files read in parallel). They
+  run in the main process, which is the bottleneck for every window and all
+  IPC — with sync `fs`, a project with many skills on a slow drive (network
+  share, OneDrive sync, virus scanner) stalled the whole app on every tab
+  switch. Also skips redundant work entirely when provider *and* project are
+  unchanged, the common case when switching between two tabs of one project.
+
+### Fixed
+- **Sidebar ⋮ menus stopped opening** — clicking one only collapsed the
+  section. Regression from moving the inline handlers to delegated listeners:
+  the ⋮ button sits inside the section header, so `closest()` matched the
+  header first and returned before reaching the menu branch. A single
+  delegated listener can't `stopPropagation()` against itself, which is what
+  the old inline `event.stopPropagation()` had handled.
+- **Claude Code lost its project skills on resumed sessions.** The app
+  injected a `.github/skills` index into the prompt, but only for *newly
+  created* sessions — resuming silently dropped them. The injection is gone
+  entirely: Claude Code discovers `.claude/skills` itself, in both new and
+  resumed sessions, and the sidebar now shows that folder instead of the
+  `.github` one it never read on its own.
+- Skills a provider cannot see are no longer listed in the sidebar, and ones
+  it can see (Claude Code's `<cwd>/.claude/skills`) are no longer hidden.
+
 ## [1.11.0] - 2026-08-03
 
 ### Security

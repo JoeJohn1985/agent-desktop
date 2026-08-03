@@ -3,40 +3,50 @@
  * Dependency-Injection für yamlParse ermöglicht einfaches Testen.
  */
 
-const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
+
+/** Entfernt ein führendes Byte-Order-Mark (U+FEFF), das Editoren gern setzen. */
+function stripBom(text) {
+  return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+}
 
 /**
  * Scannt ein Verzeichnis nach *.agent.md Dateien und parst YAML-Frontmatter.
+ * Asynchron aus demselben Grund wie scanSkillDirectory — siehe scanners.js.
  * @param {string} agentsDir - Pfad zum Agents-Verzeichnis
  * @param {function} yamlParse - YAML-Parser-Funktion
- * @returns {Array<{id: string, name: string, description: string, icon: string}>}
+ * @returns {Promise<Array<{id: string, name: string, description: string, icon: string}>>}
  */
-function scanAgentsDirectory(agentsDir, yamlParse) {
-  const agents = [];
-  if (!fs.existsSync(agentsDir)) return agents;
+async function scanAgentsDirectory(agentsDir, yamlParse) {
+  let files;
+  try {
+    files = await fsp.readdir(agentsDir);
+  } catch (_) {
+    return []; // Verzeichnis fehlt oder ist nicht lesbar — beides kein Fehlerfall.
+  }
 
-  for (const file of fs.readdirSync(agentsDir)) {
-    if (!file.endsWith('.agent.md')) continue;
+  const results = await Promise.all(files.filter(f => f.endsWith('.agent.md')).map(async (file) => {
     try {
       const fileSlug = file.replace('.agent.md', '');
-      const raw = fs.readFileSync(path.join(agentsDir, file), 'utf-8').replace(/^\uFEFF/, '');
+      const raw = stripBom(await fsp.readFile(path.join(agentsDir, file), 'utf-8'));
       const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      if (frontmatter) {
-        const meta = yamlParse(frontmatter[1]);
-        agents.push({
-          id: meta.name || fileSlug,
-          fileSlug,
-          name: meta.name || fileSlug,
-          description: meta.description || '',
-          icon: '🤖',
-        });
-      }
+      if (!frontmatter) return null;
+      const meta = yamlParse(frontmatter[1]);
+      return {
+        id: meta.name || fileSlug,
+        fileSlug,
+        name: meta.name || fileSlug,
+        description: meta.description || '',
+        icon: '\u{1F916}',
+      };
     } catch (e) {
       console.warn('[agents:scan] Fehler:', e.message || e);
+      return null;
     }
-  }
-  return agents;
+  }));
+
+  return results.filter(Boolean);
 }
 
 /**
@@ -49,14 +59,14 @@ function scanAgentsDirectory(agentsDir, yamlParse) {
  *
  * @param {string[]} dirs - Agent directories to scan, in priority order.
  * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
- * @returns {Array<{name: string, description: string, file: string}>}
+ * @returns {Promise<Array<{name: string, description: string, file: string}>>}
  */
-function scanAgentsIndex(dirs, yamlParse) {
+async function scanAgentsIndex(dirs, yamlParse) {
   const entries = [];
   const seen = new Set();
   for (const dir of dirs) {
     if (!dir) continue;
-    for (const a of scanAgentsDirectory(dir, yamlParse)) {
+    for (const a of await scanAgentsDirectory(dir, yamlParse)) {
       if (seen.has(a.fileSlug)) continue;
       seen.add(a.fileSlug);
       entries.push({ name: a.name, description: a.description, file: path.join(dir, `${a.fileSlug}.agent.md`) });
