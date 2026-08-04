@@ -7,12 +7,11 @@
        Listener in app.js). Damit ist eine etwaige künftige Escaping-Lücke
        nicht mehr direkt ausführbar. style-src braucht 'unsafe-inline' weiter,
        weil der Code element.style.* setzt. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: file:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agent Desktop</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/github-dark.css" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" />
 </head>
 <body>
 
@@ -334,7 +333,6 @@
             <select class="settings__select" id="settTheme">
               <option value="light">☀️ Hell</option>
               <option value="dark">🌙 Dunkel</option>
-              <option value="gebit">🏢 GEBIT</option>
             </select>
           </div>
           <div class="settings__group">

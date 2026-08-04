@@ -50,9 +50,9 @@ describe('Preferences Manager', () => {
     });
 
     test('ergänzt fehlende Default-Felder', () => {
-      fs.writeFileSync(prefsPath, JSON.stringify({ theme: 'gebit' }), 'utf-8');
+      fs.writeFileSync(prefsPath, JSON.stringify({ theme: 'custom-theme' }), 'utf-8');
       const result = mgr.read();
-      expect(result.theme).toBe('gebit');
+      expect(result.theme).toBe('custom-theme');
       expect(result.namedSessions).toEqual({});
       expect(result.deniedTools).toEqual([]);
       expect(result.openTabs).toEqual([]);
@@ -128,11 +128,11 @@ describe('Preferences Manager', () => {
     test('write() legt fehlendes Elternverzeichnis an', () => {
       const nestedPath = path.join(tempDir, 'a', 'b', 'c', 'preferences.json');
       const nestedMgr = createPreferencesManager(nestedPath);
-      const ok = nestedMgr.write({ theme: 'gebit' });
+      const ok = nestedMgr.write({ theme: 'custom-theme' });
       expect(ok).toBe(true);
       expect(fs.existsSync(nestedPath)).toBe(true);
       const content = JSON.parse(fs.readFileSync(nestedPath, 'utf-8'));
-      expect(content.theme).toBe('gebit');
+      expect(content.theme).toBe('custom-theme');
     });
 
     test('write() wirft aussagekräftigen Fehler wenn Schreiben fehlschlägt', () => {
@@ -157,12 +157,12 @@ describe('Preferences Manager', () => {
     test('kopiert alte Datei wenn Ziel nicht existiert', () => {
       const oldPath = path.join(tempDir, 'legacy', 'preferences.json');
       fs.mkdirSync(path.dirname(oldPath), { recursive: true });
-      fs.writeFileSync(oldPath, JSON.stringify({ theme: 'gebit', custom: 1 }), 'utf-8');
+      fs.writeFileSync(oldPath, JSON.stringify({ theme: 'custom-theme', custom: 1 }), 'utf-8');
 
       const migrated = mgr.migrateFromIfExists(oldPath);
       expect(migrated).toBe(true);
       expect(fs.existsSync(prefsPath)).toBe(true);
-      expect(JSON.parse(fs.readFileSync(prefsPath, 'utf-8')).theme).toBe('gebit');
+      expect(JSON.parse(fs.readFileSync(prefsPath, 'utf-8')).theme).toBe('custom-theme');
     });
 
     test('kopiert auch .bak mit', () => {

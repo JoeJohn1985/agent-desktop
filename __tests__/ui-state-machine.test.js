@@ -44,7 +44,7 @@ class TabStateMachine {
 // ── Theme State Machine ─────────────────────────────────────
 
 class ThemeStateMachine {
-  constructor(themes = ['light', 'dark', 'gebit'], defaultTheme = 'dark') {
+  constructor(themes = ['light', 'dark'], defaultTheme = 'dark') {
     this.themes = themes;
     this.current = defaultTheme;
   }
@@ -166,8 +166,7 @@ describe('Theme State Machine', () => {
   });
 
   test('cycle rotiert durch Themes', () => {
-    // dark → gebit → light → dark
-    expect(theme.cycle()).toBe('gebit');
+    // dark → light → dark
     expect(theme.cycle()).toBe('light');
     expect(theme.cycle()).toBe('dark');
   });
@@ -205,7 +204,7 @@ describe('Preferences State Machine', () => {
 
   test('getAll gibt Kopie zurück (keine Referenz)', () => {
     const all = prefs.getAll();
-    all.theme = 'gebit';
+    all.theme = 'light';
     expect(prefs.get('theme')).toBe('dark'); // Original unverändert
   });
 

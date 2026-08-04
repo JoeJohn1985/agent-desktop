@@ -90,37 +90,6 @@
   --shadow-sidebar: 2px 0 12px rgba(0,0,0,0.3);
 }
 
-[data-theme="gebit"] {
-  --bg-base: #EFF1F4;
-  --bg-surface: #E0E3E8;
-  --bg-overlay: #D4D7DE;
-  --bg-hover: #C8CCD4;
-  --bg-active: #B8BCC6;
-  --text-primary: #00335E;
-  --text-secondary: #3E4143;
-  --text-muted: #5F5F5F;
-  --accent: #3B63A0;
-  --accent-hover: #00376A;
-  --accent-subtle: rgba(59,99,160,0.1);
-  --user-msg-bg: #00376A;
-  --green: #006C52;
-  --yellow: #FFC000;
-  --red: #C00000;
-  --peach: #E08A3C;
-  --border: #A0A4AD;
-  --border-subtle: rgba(0,51,94,0.12);
-  --badge-active-bg: rgba(0,108,82,0.12);
-  --badge-plan-bg: rgba(59,99,160,0.12);
-  --shadow-sidebar: 2px 0 10px rgba(0,51,94,0.1);
-}
-[data-theme="gebit"] body,
-[data-theme="gebit"] {
-  font-family: 'Barlow', 'Segoe UI', system-ui, sans-serif;
-}
-[data-theme="gebit"] .tab--active {
-  border-bottom-color: #3B63A0;
-}
-
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {

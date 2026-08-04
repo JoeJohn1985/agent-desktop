@@ -49,7 +49,7 @@ test.describe('App Start', () => {
 
   test('HTML hat korrektes data-theme Attribut', async () => {
     const theme = await window.locator('html').getAttribute('data-theme');
-    expect(['light', 'dark', 'gebit']).toContain(theme);
+    expect(['light', 'dark']).toContain(theme);
   });
 
   test('Sidebar ist sichtbar', async () => {
@@ -97,7 +97,7 @@ test.describe('Theme-Wechsel', () => {
 
   test('Theme persistiert nach Wechsel (data-theme gesetzt)', async () => {
     const theme = await window.locator('html').getAttribute('data-theme');
-    expect(['light', 'dark', 'gebit']).toContain(theme);
+    expect(['light', 'dark']).toContain(theme);
   });
 });
 

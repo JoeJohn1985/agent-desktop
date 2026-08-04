@@ -233,7 +233,7 @@ function restorePrunedHistory(tab) {
 // than only pruning right after a turn finishes in that specific tab.
 setInterval(() => tabs.forEach(pruneOldMessages), 5 * 60 * 1000);
 
-const THEMES = ['light', 'dark', 'gebit'];
+const THEMES = ['light', 'dark'];
 
 // ── Preferences (file-based persistence) ────────────────────
 /** @type {Object<string, *>} In-memory cache of user preferences (file-backed). */
