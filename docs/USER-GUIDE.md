@@ -391,7 +391,7 @@ Everything that applies across every provider, not to one specific backend.
 
 | Setting | Options |
 |---|---|
-| **Theme** | Light, Dark, GEBIT |
+| **Theme** | Light, Dark |
 | **Chat font size** | 12–24 px (slider) |
 | **Notification sound** | On / Off |
 | **Default provider** | Provider new tabs and "+" start with |
@@ -442,7 +442,6 @@ The ⌨️ icon in the sidebar footer (or `Ctrl+/`) opens an overlay with all cu
 |---|---|
 | **Light** | Light default theme |
 | **Dark** | Dark theme |
-| **GEBIT** | Corporate theme by GEBIT Solutions |
 
 Switch via: **Settings → App → Theme**.
 
@@ -476,4 +475,4 @@ Configurable shortcuts can be customized via **Settings → Shortcuts**.
 
 ---
 
-> **Agent Desktop v1.0.0** · Built for GEBIT Solutions
+> **Agent Desktop**

@@ -345,7 +345,7 @@ describe('plugin:marketplace-list', () => {
       '  ◆ copilot-plugins (GitHub: github/copilot-plugins)',
       '  ◆ awesome-copilot (GitHub: github/awesome-copilot)',
       'Custom marketplaces:',
-      '  ◆ gebit-copilot-marketplace (GitLab: https://gitlab.local.gebit.de/aidev/gebit-copilot-marketplace)',
+      '  ◆ internal-copilot-marketplace (GitLab: https://gitlab.example.internal/aidev/internal-copilot-marketplace)',
     ].join('\n');
 
     mockExecFileSuccess(stdout);
@@ -366,9 +366,9 @@ describe('plugin:marketplace-list', () => {
       source: 'github/awesome-copilot',
     });
     expect(result.marketplaces[2]).toEqual({
-      name: 'gebit-copilot-marketplace',
+      name: 'internal-copilot-marketplace',
       type: 'GitLab',
-      source: 'https://gitlab.local.gebit.de/aidev/gebit-copilot-marketplace',
+      source: 'https://gitlab.example.internal/aidev/internal-copilot-marketplace',
     });
   });
 
@@ -508,9 +508,9 @@ describe('plugin:marketplace-add', () => {
   });
 
   test('Erfolg mit URL → success: true', async () => {
-    mockExecFileSuccess('Marketplace "gebit-copilot-marketplace" added successfully.');
+    mockExecFileSuccess('Marketplace "internal-copilot-marketplace" added successfully.');
 
-    const result = await handler('https://gitlab.local.gebit.de/aidev/gebit-copilot-marketplace.git');
+    const result = await handler('https://gitlab.example.internal/aidev/internal-copilot-marketplace.git');
 
     expect(result.success).toBe(true);
     expect(typeof result.message).toBe('string');
@@ -519,18 +519,18 @@ describe('plugin:marketplace-add', () => {
   test('ruft korrekte CLI-Argumente auf', async () => {
     mockExecFileSuccess('added');
 
-    await handler('https://gitlab.local.gebit.de/aidev/test.git');
+    await handler('https://gitlab.example.internal/aidev/test.git');
 
     const [cmd, args, opts] = mockExecFile.mock.calls[0];
     expect(cmd).toBe('copilot');
-    expect(args).toEqual(['plugin', 'marketplace', 'add', 'https://gitlab.local.gebit.de/aidev/test.git']);
+    expect(args).toEqual(['plugin', 'marketplace', 'add', 'https://gitlab.example.internal/aidev/test.git']);
     expect(opts.timeout).toBe(30000);
   });
 
   test('CLI-Fehler → success: false', async () => {
     mockExecFileError('Failed to add marketplace');
 
-    const result = await handler('https://gitlab.local.gebit.de/aidev/broken.git');
+    const result = await handler('https://gitlab.example.internal/aidev/broken.git');
 
     expect(result.success).toBe(false);
     expect(typeof result.error).toBe('string');
@@ -565,7 +565,7 @@ describe('plugin:marketplace-remove', () => {
   test('Erfolg → success: true', async () => {
     mockExecFileSuccess('Marketplace removed.');
 
-    const result = await handler('gebit-copilot-marketplace');
+    const result = await handler('internal-copilot-marketplace');
 
     expect(result.success).toBe(true);
     expect(typeof result.message).toBe('string');
@@ -574,11 +574,11 @@ describe('plugin:marketplace-remove', () => {
   test('ruft korrekte CLI-Argumente auf', async () => {
     mockExecFileSuccess('removed');
 
-    await handler('gebit-copilot-marketplace');
+    await handler('internal-copilot-marketplace');
 
     const [cmd, args, opts] = mockExecFile.mock.calls[0];
     expect(cmd).toBe('copilot');
-    expect(args).toEqual(['plugin', 'marketplace', 'remove', 'gebit-copilot-marketplace']);
+    expect(args).toEqual(['plugin', 'marketplace', 'remove', 'internal-copilot-marketplace']);
     expect(opts.timeout).toBe(15000);
   });
 

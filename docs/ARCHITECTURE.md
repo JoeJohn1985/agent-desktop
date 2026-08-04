@@ -20,7 +20,7 @@
 - Persistent sessions, skills, tools, and permissions
 - Drag & drop for files and images
 - Context monitoring (`/context`) and management (`/compact`, `/clear`) directly from the UI
-- Themes (Light, Dark, GEBIT), settings, sub-agent routing, test runner
+- Themes (Light, Dark), settings, sub-agent routing, test runner
 - Cost tracking based on token usage and model prices
 
 ### 1.2 Quality goals
@@ -186,7 +186,7 @@
 | `preload.js` | **Context bridge** — exposes `window.copilot` and `window.markdown` |
 | `renderer/index.html` | **App shell** — custom titlebar, sidebar, chat area, settings overlay |
 | `renderer/app.js` | **Frontend logic** — chat UI, tab management, settings, cost visualization |
-| `renderer/styles.css` | **All styles** — CSS variables, 3 themes (Light/Dark/GEBIT) |
+| `renderer/styles.css` | **All styles** — CSS variables, 2 themes (Light/Dark) |
 | `renderer/modules/*.js` | **UI modules** — images, todos, test runner, session tools, dev console, cost panel |
 | `src/acp-client.js` | **AcpClient** (Copilot backend) — JSON-RPC over NDJSON stdio, session management, silentCommand |
 | `src/providers/*.js` | **Direct-API backends** — registry, `ApiAgentClient` (agent loop), Anthropic adapter, tool runtime, session store, system context |
@@ -520,7 +520,7 @@ Token data comes from `/usage` (via `silentCommand`). The delta per prompt is st
 
 ### 8.5 Theme system
 
-Three themes via CSS custom properties (`:root`, `[data-theme="dark"]`, `[data-theme="gebit"]`).
+Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 
 ### 8.6 Per-tab state
 

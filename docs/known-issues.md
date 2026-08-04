@@ -68,4 +68,4 @@ Previously `PREFS_PATH = path.join(__dirname, 'preferences.json')`. In packaged 
 - File removed from the index with `git rm --cached preferences.json` (the local file is left untouched).
 - Defaults come from `PREFS_DEFAULTS` in `src/preferences.js` — no example file needed.
 
-**Background:** during a commit on `fix/linux-path`, local state (theme `gebit`, open tab) was briefly lost because `preferences.json` was versioned and accidentally reset on `git checkout -- preferences.json`. Recovery was only possible thanks to the automatic `.bak`.
+**Background:** during a commit on `fix/linux-path`, local state (theme choice, open tab) was briefly lost because `preferences.json` was versioned and accidentally reset on `git checkout -- preferences.json`. Recovery was only possible thanks to the automatic `.bak`.

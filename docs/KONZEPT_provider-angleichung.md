@@ -30,7 +30,7 @@ The identifier `copilot-desktop` is coupled to **user data**:
 **Consequence:** changing the *internal* name/path would make every user lose keys, settings, cost history, and session names.
 → **We change only the visible display name.** Internal IDs (`copilot-desktop`, userData path, `package.json` `name`) stay **unchanged**.
 
-**Open:** the desired **display name** (e.g. "Agent Desktop", "Local Agent", "GEBIT Agent" …). → please decide.
+**Open:** the desired **display name** (e.g. "Agent Desktop", "Local Agent" …). → please decide.
 
 ---
 
