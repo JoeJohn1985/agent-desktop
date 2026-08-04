@@ -84,7 +84,7 @@ Direct-API providers only (Anthropic, OpenAI, GLM, Ollama) — Copilot and Claud
 ### Setup (one-time)
 
 ```powershell
-git clone https://github.com/matthias-schneider_gebit/agent-desktop.git
+git clone https://github.com/JoeJohn1985/agent-desktop.git
 cd agent-desktop
 pwsh setup.ps1
 ```
