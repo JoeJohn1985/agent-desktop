@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.13.0] - 2026-08-04
+
+### Removed
+- **The Skill Manager (hide/disable/its dedicated overlay) is gone.** It never
+  fit the provider-aware model from 1.12.0: "disabled" and "hidden" were
+  stored in Copilot's own `~/.copilot/settings.json`, yet filtered the sidebar
+  for *every* provider — disabling a skill for Copilot silently hid it from
+  Anthropic/Ollama tabs too, where the setting has no meaning at all. Rather
+  than patch that cross-contamination, the mechanism is removed entirely:
+  skills and agents are now managed where they live, in each provider's own
+  folder (see 1.12.0's `src/context-paths.js`). The sidebar shows exactly what
+  a provider can see — nothing to hide, nothing to disable on top of that.
+- Deleting a user skill/agent from the sidebar is gone with it — same reason:
+  the old handlers assumed a single Copilot-shaped layout and would have
+  needed the same per-provider rework the rest of this area just got.
+- Four test files that only exercised the removed feature
+  (`skill-manager(-renderer)`, `skills-disabled(-renderer)`).
+
+### Changed
+- `renderSkills()`/`renderAgents()` no longer filter their input — the list
+  from `context:listSkills`/`context:listAgents` already *is* exactly what the
+  active tab's provider can see, so filtering again could only ever hide
+  something that should be visible.
+
 ## [1.12.0] - 2026-08-03
 
 ### Changed

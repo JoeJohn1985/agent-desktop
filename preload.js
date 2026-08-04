@@ -352,17 +352,6 @@ contextBridge.exposeInMainWorld('copilot', {
     paths: (provider, cwd) => ipcRenderer.invoke('context:paths', provider, cwd),
   },
 
-  // ── Agents ────────────────────────────────────────────────
-
-  /**
-   * Agent file management (listing lives in copilot.context).
-   *
-   * @namespace copilot.agents
-   */
-  agents: {
-    /** @ipc agents:delete @param {string} fileSlug - Agent file slug (without .agent.md) @returns {Promise<{success: boolean, error?: string}>} */
-    delete: (fileSlug) => ipcRenderer.invoke('agents:delete', fileSlug),
-  },
 
   // ── MCP ────────────────────────────────────────────────────
 

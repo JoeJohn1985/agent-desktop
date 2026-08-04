@@ -59,12 +59,6 @@ let installedPlugins = [];
 let sessions = [];
 /** @type {string|null} Session ID of the currently active tab. */
 let activeSessionId = null;
-/** @type {Set<string>} DirNames of skills disabled in ~/.copilot/settings.json */
-let disabledSkills = new Set();
-/** @type {Set<string>} DirNames of skills hidden globally in ~/.copilot/settings.json */
-let hiddenSkillsGlobal = new Set();
-/** @type {Set<string>} DirNames of skills hidden for the current session only */
-let hiddenSkillsSession = new Set();
 /** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
 let activeAgents = new Set();
 /** @type {string} User home directory path, loaded from main process at startup. */
@@ -2206,8 +2200,6 @@ window.resumeSession = resumeSession;
 window.confirmDeleteSession = confirmDeleteSession;
 window.toggleTodo = toggleTodo;
 window.deleteTodo = deleteTodo;
-window.confirmDeleteSkill = confirmDeleteSkill;
-window.confirmDeleteAgent = confirmDeleteAgent;
 
 // ── Model Switcher ────────────────────────────────────────────
 // NOTE: `/model` without argument opens an interactive TUI picker that crashes
@@ -4079,18 +4071,18 @@ function cancelDeleteSession() {
 function renderSkills() {
   const container = document.getElementById('skillList');
   const section = container.closest('.sidebar__section');
-  const visibleSkills = skills.filter(s => {
-    if (!s.dirName) return true;
-    return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName) && !disabledSkills.has(s.dirName);
-  });
 
-  if (visibleSkills.length === 0) {
+  // Kein Filtern mehr: die Liste enthält per Konstruktion genau die Skills,
+  // die der Provider dieses Tabs in diesem Projekt tatsächlich liest (siehe
+  // loadContextForTab / src/context-paths.js). Alles, was hier ankommt, ist
+  // verfügbar — und alles Verfügbare kommt hier an.
+  if (skills.length === 0) {
     if (section) section.style.display = 'none';
     return;
   }
 
-  // Active state is per-tab — a skill toggled on in one tab must not show
-  // as active in another.
+  // Der Aktiv-Zustand ist dagegen pro Tab: ein in einem Tab erzwungener Skill
+  // darf in anderen Tabs nicht als aktiv erscheinen.
   const activeTabSkills = tabs.get(activeTabId)?.activeSkills || new Set();
 
   if (section) section.style.display = 'block';
@@ -4099,22 +4091,16 @@ function renderSkills() {
   // decoding would let a crafted name break out of the JS string inside an
   // onclick attribute. Actions run via delegated listeners reading data-*
   // attributes instead (see initListActionDelegation).
-  container.innerHTML = visibleSkills.map(s => {
+  container.innerHTML = skills.map(s => {
     const isActive = activeTabSkills.has(s.id);
-    const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
     const isProject = s.source === 'project';
-    const deleteBtn = s.source === 'user' && s.dirName
-      ? `<button class="skill-card__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-tooltip="Skill löschen" aria-label="Skill löschen">🗑️</button>`
-      : '';
-    const projectBadge = '';
     return `
-      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
+      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isProject ? 'skill-card--project' : ''}"
            data-skill-id="${escapeAttr(s.id)}" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${escapeHtml(s.icon || '🧩')}</span>
         <div class="skill-card__info">
-          <div class="skill-card__name">${escapeHtml(s.name)}${projectBadge}</div>
+          <div class="skill-card__name">${escapeHtml(s.name)}</div>
         </div>
-        ${deleteBtn}
         <div class="skill-card__toggle"></div>
       </div>
     `;
@@ -4220,146 +4206,6 @@ function renderMcpServers() {
   }).join('');
 }
 
-/**
- * Toggle a skill's CLI-disabled state and persist to ~/.copilot/settings.json.
- * @param {string} dirName
- */
-async function toggleSkillDisabled(dirName) {
-  if (disabledSkills.has(dirName)) disabledSkills.delete(dirName);
-  else disabledSkills.add(dirName);
-  await copilot.skills.setDisabled([...disabledSkills]);
-  renderSkills();
-  renderSkillManager();
-}
-
-/**
- * Toggle a skill's global hidden state and persist to ~/.copilot/settings.json.
- * @param {string} dirName
- */
-async function toggleHideGlobal(dirName) {
-  if (hiddenSkillsGlobal.has(dirName)) hiddenSkillsGlobal.delete(dirName);
-  else hiddenSkillsGlobal.add(dirName);
-  await copilot.skills.setHidden([...hiddenSkillsGlobal]);
-  renderSkills();
-  renderSkillManager();
-}
-
-/**
- * Toggle a skill's session hidden state and persist to preferences.
- * @param {string} dirName
- */
-async function toggleHideSession(dirName) {
-  if (hiddenSkillsSession.has(dirName)) hiddenSkillsSession.delete(dirName);
-  else hiddenSkillsSession.add(dirName);
-  const sessionId = activeTabId ? tabs.get(activeTabId)?.sessionId : null;
-  if (sessionId) {
-    const all = getNamedSessions();
-    if (!all[sessionId]) all[sessionId] = { name: '', deniedTools: [], lastUsed: new Date().toISOString() };
-    all[sessionId].hiddenSkills = [...hiddenSkillsSession];
-    setPref('namedSessions', all);
-  }
-  renderSkills();
-  renderSkillManager();
-}
-
-/**
- * Open the Skill Manager overlay.
- */
-function openSkillManager() {
-  const overlay = document.getElementById('skillManagerOverlay');
-  if (overlay) {
-    overlay.classList.add('overlay--visible');
-    renderSkillManager();
-  }
-}
-
-/**
- * Close the Skill Manager overlay.
- */
-function closeSkillManager() {
-  const overlay = document.getElementById('skillManagerOverlay');
-  if (overlay) overlay.classList.remove('overlay--visible');
-}
-
-/**
- * Render the Skill Manager overlay content with all skills and their actions.
- */
-function renderSkillManager() {
-  const body = document.getElementById('skillManagerBody');
-  if (!body) return;
-
-  const globalSkills = skills.filter(s => s.source !== 'project');
-  const projectSkills = skills.filter(s => s.source === 'project');
-
-  let html = '';
-
-  // Global Skills section
-  html += '<div class="skill-manager__section">';
-  html += '<div class="skill-manager__section-title">Globale Skills</div>';
-  if (globalSkills.length === 0) {
-    html += '<div class="skill-manager__empty">Keine globalen Skills vorhanden</div>';
-  }
-  for (const s of globalSkills) {
-    const isHiddenGlobal = s.dirName && hiddenSkillsGlobal.has(s.dirName);
-    const isHiddenSession = s.dirName && hiddenSkillsSession.has(s.dirName);
-    const isHidden = isHiddenGlobal || isHiddenSession;
-    const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
-    const nameClass = isHidden ? 'skill-manager__name skill-manager__name--hidden' : 'skill-manager__name';
-
-    const hideBtn = s.dirName ? `
-      <div class="split-btn">
-        <button class="split-btn__item ${isHiddenSession ? 'split-btn__item--active' : ''}" data-hide-session="${escapeAttr(s.dirName)}" data-tooltip="Nur in dieser Session ausblenden">👁 Session</button>
-        <button class="split-btn__item ${isHiddenGlobal ? 'split-btn__item--active' : ''}" data-hide-global="${escapeAttr(s.dirName)}" data-tooltip="Global ausblenden">🌍 Global</button>
-      </div>` : '';
-
-    const disableBtn = s.dirName ? `
-      <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" data-toggle-disabled="${escapeAttr(s.dirName)}" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren'}">
-        ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'}
-      </button>` : '';
-
-    const deleteBtn = s.source === 'user' && s.dirName ? `
-      <button class="skill-manager__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-tooltip="Skill löschen">🗑️</button>` : '';
-
-    html += `<div class="skill-manager__row">
-      <span class="${nameClass}">${escapeHtml(s.icon || '🎯')} ${escapeHtml(s.name)}</span>
-      ${hideBtn}${disableBtn}${deleteBtn}
-    </div>`;
-  }
-  html += '</div>';
-
-  // Project Skills section
-  if (projectSkills.length > 0) {
-    html += '<div class="skill-manager__section">';
-    html += '<div class="skill-manager__section-title">Projekt-Skills</div>';
-    for (const s of projectSkills) {
-      const isHiddenSession = s.dirName && hiddenSkillsSession.has(s.dirName);
-      const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
-      const nameClass = isHiddenSession ? 'skill-manager__name skill-manager__name--hidden' : 'skill-manager__name';
-
-      const hideBtn = s.dirName ? `
-        <button class="skill-manager__toggle-btn ${isHiddenSession ? 'skill-manager__toggle-btn--active' : ''}" data-hide-session="${escapeAttr(s.dirName)}" data-tooltip="In dieser Session ausblenden">
-          ${isHiddenSession ? '👁\u0336 Ausgeblendet' : '👁 Sichtbar'}
-        </button>` : '';
-
-      const disableBtn = s.dirName ? `
-        <button class="skill-manager__toggle-btn ${isCLIDisabled ? 'skill-manager__toggle-btn--disabled' : ''}" data-toggle-disabled="${escapeAttr(s.dirName)}" data-tooltip="${isCLIDisabled ? 'Skill aktivieren' : 'Skill deaktivieren — wirkt global für alle Projekte mit diesem Skill-Namen'}">
-          ${isCLIDisabled ? '⊘ Deakt.' : '✓ Aktiv'} ${!isCLIDisabled ? '' : ''}
-        </button>
-        ${isCLIDisabled ? '<span class="skill-manager__warning">⚠️ Wirkt global</span>' : ''}` : '';
-
-      const deleteBtn = s.dirName && s.projectCwd ? `
-        <button class="skill-manager__delete" data-dir-name="${escapeAttr(s.dirName)}" data-name="${escapeAttr(s.name)}" data-project-cwd="${escapeAttr(s.projectCwd)}" data-tooltip="Skill löschen">🗑️</button>` : '';
-
-      html += `<div class="skill-manager__row">
-        <span class="${nameClass}">${escapeHtml(s.icon || '🧪')} ${escapeHtml(s.name)}</span>
-        ${hideBtn}${disableBtn}${deleteBtn}
-      </div>`;
-    }
-    html += '</div>';
-  }
-
-  body.innerHTML = html;
-}
 
 // ── Skills & Agents pro Tab ──────────────────────────────────
 // Welche Skills/Agents existieren, hängt von BEIDEM ab: Provider und Projekt.
@@ -4459,21 +4305,13 @@ function renderAgents() {
   container.innerHTML = agents.map(a => {
     const isActive = activeAgents.has(a.id);
     const isProject = a.source === 'project';
-    // Provider-scoped agents (~/.agent-desktop/<provider>/agents) have no
-    // delete button here — agents:delete only knows Copilot's own
-    // ~/.copilot/agents folder and would delete the wrong file.
-    const deleteBtn = a.fileSlug && !isProject && a.source !== 'provider'
-      ? `<button class="agent-card__delete" data-file-slug="${escapeAttr(a.fileSlug)}" data-name="${escapeAttr(a.name)}" data-tooltip="Agent löschen" aria-label="Agent löschen">🗑️</button>`
-      : '';
-    const projectBadge = '';
     return `
       <div class="agent-card ${isActive ? 'agent-card--active' : ''} ${isProject ? 'agent-card--project' : ''}"
            data-agent-id="${escapeAttr(a.id)}" data-tooltip="${escapeAttr(a.description)}">
         <span class="agent-card__icon">${escapeHtml(a.icon || '🤖')}</span>
         <div class="agent-card__info">
-          <div class="agent-card__name">${escapeHtml(a.name)}${projectBadge}</div>
+          <div class="agent-card__name">${escapeHtml(a.name)}</div>
         </div>
-        ${deleteBtn}
         <div class="agent-card__toggle"></div>
       </div>
     `;
@@ -4491,82 +4329,6 @@ function toggleAgent(agentId) {
   renderAgents();
 }
 
-// ── Skill/Agent Delete Confirmation ──────────────────────────
-/**
- * Show an inline confirmation dialog to delete a skill.
- * @param {string} dirName - Skill directory name on disk.
- * @param {string} skillName - Human-readable skill name for display.
- * @param {string|null} [cwd] - CWD for project skills; null for user skills.
- */
-function confirmDeleteSkill(dirName, skillName, cwd = null) {
-  document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
-
-  const overlay = document.createElement('div');
-  overlay.className = 'sidebar-confirm';
-  overlay.innerHTML = `
-    <div class="sidebar-confirm__box">
-      <p class="sidebar-confirm__text">Skill <strong>${escapeHtml(skillName)}</strong> löschen?</p>
-      <div class="sidebar-confirm__actions">
-        <button class="action-btn action-btn--danger" id="confirmDeleteYes">Löschen</button>
-        <button class="action-btn" id="confirmDeleteNo">Abbrechen</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
-    overlay.remove();
-    try {
-      const result = cwd
-        ? await copilot.skills.deleteProject(cwd, dirName)
-        : await copilot.skills.delete(dirName);
-      
-      if (result.success) {
-        console.log(`[skills] Gelöscht: ${dirName} (cwd: ${cwd ? 'project' : 'user'})`);
-        await reloadSkills();
-        renderSkillManager();
-      } else {
-        console.error('[skills] Löschen fehlgeschlagen:', result.error);
-        alert(`Fehler beim Löschen: ${result.error}`);
-      }
-    } catch (e) {
-      console.error('[skills] Löschen Exception:', e);
-      alert(`Fehler: ${e.message}`);
-    }
-  });
-  document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());
-}
-
-/**
- * Show an inline confirmation dialog to delete a user-created agent.
- * @param {string} fileSlug - Agent file slug on disk.
- * @param {string} agentName - Human-readable agent name for display.
- */
-function confirmDeleteAgent(fileSlug, agentName) {
-  document.querySelectorAll('.sidebar-confirm').forEach(el => el.remove());
-
-  const overlay = document.createElement('div');
-  overlay.className = 'sidebar-confirm';
-  overlay.innerHTML = `
-    <div class="sidebar-confirm__box">
-      <p class="sidebar-confirm__text">Agent <strong>${escapeHtml(agentName)}</strong> löschen?</p>
-      <div class="sidebar-confirm__actions">
-        <button class="action-btn action-btn--danger" id="confirmDeleteYes">Löschen</button>
-        <button class="action-btn" id="confirmDeleteNo">Abbrechen</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  document.getElementById('confirmDeleteYes').addEventListener('click', async () => {
-    overlay.remove();
-    const result = await copilot.agents.delete(fileSlug);
-    if (result.success) {
-      await reloadAgents();
-    } else {
-      console.error('[agents] Löschen fehlgeschlagen:', result.error);
-    }
-  });
-  document.getElementById('confirmDeleteNo').addEventListener('click', () => overlay.remove());
-}
 
 // ── Plugins ─────────────────────────────────────────────────
 /**
@@ -5162,19 +4924,18 @@ const SECTION_MENUS = {
     },
   },
   skills: {
+    // Kein "Verwalten" mehr: Skills werden dort gepflegt, wo sie liegen — in
+    // den Ordnern des jeweiligen Providers. Ein app-eigenes Verstecken/
+    // Deaktivieren stand dem im Weg, weil es providerübergreifend wirkte und
+    // seinen Zustand in Copilots settings.json schrieb.
     buildHtml: () => `
       <div class="section-menu__item" data-action="reload">↻ Skills neu laden</div>
-      <div class="section-menu__item" data-action="manage">⚙️ Skills verwalten</div>
     `,
     wire(menu, close) {
       menu.querySelector('[data-action="reload"]').addEventListener('click', async (e) => {
         e.currentTarget.innerHTML = '<span class="btn-spinner"></span> Wird geladen…';
         await reloadSkills();
         close();
-      });
-      menu.querySelector('[data-action="manage"]').addEventListener('click', () => {
-        close();
-        openSkillManager();
       });
     },
   },
@@ -6952,23 +6713,11 @@ function initListActionDelegation() {
   };
 
   on('skillList', (e) => {
-    const del = e.target.closest('.skill-card__delete');
-    if (del) {
-      e.stopPropagation();
-      confirmDeleteSkill(del.dataset.dirName, del.dataset.name);
-      return;
-    }
     const card = e.target.closest('.skill-card');
     if (card?.dataset.skillId) toggleSkill(card.dataset.skillId);
   });
 
   on('agentList', (e) => {
-    const del = e.target.closest('.agent-card__delete');
-    if (del) {
-      e.stopPropagation();
-      confirmDeleteAgent(del.dataset.fileSlug, del.dataset.name);
-      return;
-    }
     const card = e.target.closest('.agent-card');
     if (card?.dataset.agentId) toggleAgent(card.dataset.agentId);
   });
@@ -6984,17 +6733,6 @@ function initListActionDelegation() {
     if (byId) { resumeSessionById(byId.dataset.resumeById); return; }
     const main = e.target.closest('[data-resume-session]');
     if (main) resumeSession(main.dataset.resumeSession);
-  });
-
-  on('skillManagerBody', (e) => {
-    const hideSession = e.target.closest('[data-hide-session]');
-    if (hideSession) { toggleHideSession(hideSession.dataset.hideSession); return; }
-    const hideGlobal = e.target.closest('[data-hide-global]');
-    if (hideGlobal) { toggleHideGlobal(hideGlobal.dataset.hideGlobal); return; }
-    const toggleDisabled = e.target.closest('[data-toggle-disabled]');
-    if (toggleDisabled) { toggleSkillDisabled(toggleDisabled.dataset.toggleDisabled); return; }
-    const del = e.target.closest('.skill-manager__delete');
-    if (del) confirmDeleteSkill(del.dataset.dirName, del.dataset.name, del.dataset.projectCwd);
   });
 
   on('pluginList', (e) => {
@@ -7045,7 +6783,6 @@ function initListActionDelegation() {
       // closeLightbox() checks the event target itself: it only closes on a
       // click on the backdrop or the close button, not on the image.
       case 'lightbox-backdrop': closeLightbox(e); break;
-      case 'close-skill-manager': closeSkillManager(); break;
     }
   });
 }

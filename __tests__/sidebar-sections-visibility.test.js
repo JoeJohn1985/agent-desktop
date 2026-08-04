@@ -60,9 +60,6 @@ function createMockDocument() {
 let skills = [];
 let agents = [];
 let mcpServers = [];
-let hiddenSkillsGlobal = new Set();
-let hiddenSkillsSession = new Set();
-let disabledSkills = new Set();
 let activeSkills = new Set();
 let activeAgents = new Set();
 
@@ -70,9 +67,6 @@ function resetState() {
   skills = [];
   agents = [];
   mcpServers = [];
-  hiddenSkillsGlobal = new Set();
-  hiddenSkillsSession = new Set();
-  disabledSkills = new Set();
   activeSkills = new Set();
   activeAgents = new Set();
 }
@@ -81,27 +75,25 @@ function resetState() {
 // No count-badge handling here anymore — the sidebar section badges were
 // removed in favor of per-section ⋮ menus (see openSectionMenu in app.js).
 
+// Die Liste enthält per Konstruktion nur Skills, die der Provider dieses Tabs
+// wirklich liest — es wird hier nichts mehr gefiltert (siehe renderSkills in
+// app.js und src/context-paths.js).
 function renderSkills() {
   const container = mockDoc.getElementById('skillList');
   const section = container.closest('.sidebar__section');
-  const visibleSkills = skills.filter(s => {
-    if (!s.dirName) return true;
-    return !hiddenSkillsGlobal.has(s.dirName) && !hiddenSkillsSession.has(s.dirName) && !disabledSkills.has(s.dirName);
-  });
 
-  if (visibleSkills.length === 0) {
+  if (skills.length === 0) {
     if (section) section.style.display = 'none';
     return;
   }
 
   if (section) section.style.display = 'block';
-  container.innerHTML = visibleSkills.map(s => {
+  container.innerHTML = skills.map(s => {
     const isActive = activeSkills.has(s.id);
-    const isCLIDisabled = s.dirName && disabledSkills.has(s.dirName);
     const isProject = s.source === 'project';
     return `
-      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isCLIDisabled ? 'skill-card--cli-disabled' : ''} ${isProject ? 'skill-card--project' : ''}"
-           onclick="toggleSkill('${escapeAttr(s.id)}')" data-tooltip="${escapeAttr(s.description)}">
+      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isProject ? 'skill-card--project' : ''}"
+           data-skill-id="${escapeAttr(s.id)}" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${s.icon}</span>
         <div class="skill-card__info">
           <div class="skill-card__name">${escapeHtml(s.name)}</div>
@@ -193,27 +185,20 @@ describe('Sidebar Sections Visibility', () => {
       expect(section.style.display).toBe('block');
     });
 
-    test('versteckt skills-section wenn alle Skills ausgeblendet sind', () => {
+    test('zeigt jeden gelieferten Skill — es wird nichts mehr ausgefiltert', () => {
+      // Die Liste kommt providerspezifisch aus dem Main-Prozess; alles darin
+      // ist verfügbar, also darf die Sidebar nichts davon unterschlagen.
       skills = [
-        { id: 'skill1', name: 'Test Skill', dirName: 'test-skill', description: 'A test skill', icon: '🧪', source: 'user' },
+        { id: 'skill1', name: 'Test Skill 1', dirName: 'test-skill-1', description: 'A test skill', icon: '🧪', source: 'global' },
+        { id: 'skill2', name: 'Test Skill 2', dirName: 'test-skill-2', description: 'Another skill', icon: '🧪', source: 'project' },
       ];
-      hiddenSkillsGlobal.add('test-skill');
-      const section = mockDoc.getElementById('skillsSection');
-      section.style.display = 'block'; // Reset
-      renderSkills();
-      expect(section.style.display).toBe('none');
-    });
-
-    test('zeigt skills-section wenn nur manche Skills ausgeblendet sind', () => {
-      skills = [
-        { id: 'skill1', name: 'Test Skill 1', dirName: 'test-skill-1', description: 'A test skill', icon: '🧪', source: 'user' },
-        { id: 'skill2', name: 'Test Skill 2', dirName: 'test-skill-2', description: 'Another skill', icon: '🧪', source: 'user' },
-      ];
-      hiddenSkillsGlobal.add('test-skill-1');
       const section = mockDoc.getElementById('skillsSection');
       section.style.display = 'none'; // Reset
       renderSkills();
       expect(section.style.display).toBe('block');
+      const container = mockDoc.getElementById('skillList');
+      expect(container.innerHTML).toContain('Test Skill 1');
+      expect(container.innerHTML).toContain('Test Skill 2');
     });
   });
 
