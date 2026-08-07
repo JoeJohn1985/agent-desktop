@@ -24,6 +24,7 @@ const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills, migrateApiSessions } = require('./src/data-dir');
 const { skillDirs, agentDirs, needsContextInjection } = require('./src/context-paths');
+const { validateContextTarget, buildSkillsList, buildAgentsList, buildContextPaths } = require('./src/context-list');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 
 app.name = 'agent-desktop';
@@ -1060,23 +1061,6 @@ ipcMain.handle('preferences:write', async (_event, prefs) => {
   return writePreferences(prefs);
 });
 
-/** Every provider id the renderer may ask about. Anything else is rejected
- *  before it reaches a path join — see the validation note below. */
-const ALL_PROVIDERS = ['copilot', 'claude-code', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
-
-/**
- * Validates an IPC-supplied (provider, cwd) pair. `provider` ends up in a
- * filesystem path, so it must come from the fixed allow-list rather than be
- * trusted; `cwd` is only ever used as a base for path.join and is required to
- * be absolute so a relative value can't resolve against the process cwd.
- * @returns {{provider: string, cwd: string|null}|null} null if invalid.
- */
-function validateContextTarget(provider, cwd) {
-  if (!ALL_PROVIDERS.includes(provider)) return null;
-  const safeCwd = (typeof cwd === 'string' && cwd && path.isAbsolute(cwd)) ? cwd : null;
-  return { provider, cwd: safeCwd };
-}
-
 /**
  * @ipc context:listSkills — Every skill the given provider can actually see in
  * the given project, in one call. Replaces the old skills:list /
@@ -1084,7 +1068,8 @@ function validateContextTarget(provider, cwd) {
  * three sources and guess which apply to which provider, which is exactly how
  * the sidebar ended up listing skills a provider couldn't use (and hiding ones
  * it could). Paths come from context-paths.js — the same resolver the prompt
- * injection uses, so UI and model can't disagree.
+ * injection uses, so UI and model can't disagree. The actual list-building
+ * logic lives in src/context-list.js so it can be unit tested directly.
  * @param {string} provider
  * @param {string|null} cwd - Active project directory.
  * @returns {Promise<Array<Object>>} Skills with source 'builtin' | 'global' | 'project'
@@ -1092,29 +1077,15 @@ function validateContextTarget(provider, cwd) {
 ipcMain.handle('context:listSkills', async (_event, provider, cwd) => {
   const target = validateContextTarget(provider, cwd);
   if (!target) return [];
-
-  const dirs = skillDirs(target.provider, target.cwd, { skillsDirOverride: readFolderConfig().skillsDir });
-  const out = [];
-
-  // Copilot additionally ships builtin skills inside its CLI package, and needs
-  // marketplace plugin skills mirrored into its user folder first (see
-  // scanBuiltinCopilotSkills / syncMarketplaceSkills for why).
-  if (target.provider === 'copilot') {
-    out.push(...await scanBuiltinCopilotSkills());
-    try { syncMarketplaceSkills({ userSkillsDir: dirs.global[0] }); } catch (_) { /* best effort */ }
-  }
-
-  for (const dir of dirs.global) {
-    out.push(...await _scanSkillDirectory(dir, 'global', userSkillIcon, yaml.parse));
-  }
-  for (const dir of dirs.project) {
-    out.push(...await _scanSkillDirectory(dir, 'project', userSkillIcon, yaml.parse));
-  }
-
-  // First occurrence wins (builtin < global < project is the scan order, so a
-  // project skill never silently shadows a global one of the same name).
-  const seen = new Set();
-  return out.filter(s => !seen.has(s.dirName) && seen.add(s.dirName));
+  return buildSkillsList(target, {
+    skillDirs,
+    skillsDirOverride: readFolderConfig().skillsDir,
+    scanBuiltinCopilotSkills,
+    syncMarketplaceSkills,
+    scanSkillDirectory: _scanSkillDirectory,
+    userSkillIcon,
+    yamlParse: yaml.parse,
+  });
 });
 
 /**
@@ -1126,18 +1097,12 @@ ipcMain.handle('context:listSkills', async (_event, provider, cwd) => {
 ipcMain.handle('context:listAgents', async (_event, provider, cwd) => {
   const target = validateContextTarget(provider, cwd);
   if (!target) return [];
-
-  const dirs = agentDirs(target.provider, target.cwd, { agentsDirOverride: readFolderConfig().agentsDir });
-  const out = [];
-  for (const dir of dirs.global) {
-    out.push(...(await scanAgentsDirectory(dir, yaml.parse)).map(a => ({ ...a, source: 'global' })));
-  }
-  for (const dir of dirs.project) {
-    out.push(...(await scanAgentsDirectory(dir, yaml.parse)).map(a => ({ ...a, source: 'project' })));
-  }
-
-  const seen = new Set();
-  return out.filter(a => !seen.has(a.fileSlug) && seen.add(a.fileSlug));
+  return buildAgentsList(target, {
+    agentDirs,
+    agentsDirOverride: readFolderConfig().agentsDir,
+    scanAgentsDirectory,
+    yamlParse: yaml.parse,
+  });
 });
 
 /**
@@ -1150,10 +1115,12 @@ ipcMain.handle('context:paths', async (_event, provider, cwd) => {
   const target = validateContextTarget(provider, cwd);
   if (!target) return { skills: { global: [], project: [] }, agents: { global: [], project: [] } };
   const cfg = readFolderConfig();
-  return {
-    skills: skillDirs(target.provider, target.cwd, { skillsDirOverride: cfg.skillsDir }),
-    agents: agentDirs(target.provider, target.cwd, { agentsDirOverride: cfg.agentsDir }),
-  };
+  return buildContextPaths(target, {
+    skillDirs,
+    agentDirs,
+    skillsDirOverride: cfg.skillsDir,
+    agentsDirOverride: cfg.agentsDir,
+  });
 });
 
 /**

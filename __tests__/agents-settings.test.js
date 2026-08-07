@@ -209,6 +209,10 @@ describe('IPC-Handler Integrität für Agents-Settings', () => {
   test('context:listAgents IPC-Handler ist registriert', () => {
     // Löste agents:list/agents:listProvider/agents:listProject ab: Agents
     // hängen an Provider UND Projekt, daher ein einziger Handler mit beidem.
+    // Die eigentliche Logik (Pfadauflösung, agentsDir-Override, Dedup) ist
+    // nach src/context-list.js extrahiert und dort mit echten
+    // Verhaltenstests abgedeckt (__tests__/context-list.test.js) — hier wird
+    // nur noch geprüft, dass main.js den Handler überhaupt registriert.
     expect(mainJsContent).toMatch(/ipcMain\.handle\(['"]context:listAgents['"]/);
   });
 
@@ -216,15 +220,6 @@ describe('IPC-Handler Integrität für Agents-Settings', () => {
     expect(mainJsContent).toMatch(/agentsDir/);
     // Verify the specific pattern: agentsDir: config.agentsDir || ...
     expect(mainJsContent).toMatch(/agentsDir:\s*config\.agentsDir\s*\|\|/);
-  });
-
-  test('context:listAgents reicht den konfigurierten agentsDir durch', () => {
-    // Die Pfadauflösung liegt jetzt in src/context-paths.js; main.js gibt nur
-    // noch den konfigurierbaren Copilot-Ordner als Override hinein.
-    const handler = mainJsContent.match(/ipcMain\.handle\('context:listAgents'[\s\S]*?^\}\);/m);
-    expect(handler).not.toBeNull();
-    expect(handler[0]).toContain('agentDirs(');
-    expect(handler[0]).toMatch(/agentsDirOverride:\s*readFolderConfig\(\)\.agentsDir/);
   });
 
   test('context-paths.js kennt den Copilot-Default ~/.copilot/agents', () => {

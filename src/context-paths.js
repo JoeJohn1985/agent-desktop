@@ -24,6 +24,17 @@ const PROJECT_DIR_NAME = '.agent-desktop';
 const UNSUPPORTED_PROVIDERS = new Set(['gemini']);
 
 /**
+ * Provider ids reaching the generic (non-copilot/claude-code) branch below get
+ * interpolated directly into `path.join(DATA_DIR, provider, ...)`. Callers are
+ * expected to validate against a known-provider allow-list first (see
+ * validateContextTarget in context-list.js) — this regex is defense in depth
+ * so this module doesn't rely solely on that: something like `..\\..\\evil`
+ * would otherwise resolve outside DATA_DIR entirely, since path.join happily
+ * collapses `..` segments rather than rejecting them.
+ */
+const SAFE_PROVIDER_ID = /^[a-z0-9-]+$/;
+
+/**
  * Directories a provider reads SKILLS from, in priority order.
  *
  * - copilot: its CLI's own layout. `skillsDirOverride` mirrors the configurable
@@ -57,6 +68,7 @@ function skillDirs(provider, cwd, opts = {}) {
     };
   }
 
+  if (!SAFE_PROVIDER_ID.test(provider)) return { global: [], project: [] };
   return {
     global: [path.join(DATA_DIR, provider, 'skills')],
     project: cwd ? [path.join(cwd, PROJECT_DIR_NAME, 'skills')] : [],
@@ -88,6 +100,7 @@ function agentDirs(provider, cwd, opts = {}) {
     };
   }
 
+  if (!SAFE_PROVIDER_ID.test(provider)) return { global: [], project: [] };
   return {
     global: [path.join(DATA_DIR, provider, 'agents')],
     project: cwd ? [path.join(cwd, PROJECT_DIR_NAME, 'agents')] : [],

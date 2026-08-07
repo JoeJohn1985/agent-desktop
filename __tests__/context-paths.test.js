@@ -14,6 +14,7 @@
 const os = require('os');
 const path = require('path');
 const { skillDirs, agentDirs, needsContextInjection, PROJECT_DIR_NAME } = require('../src/context-paths');
+const { DATA_DIR } = require('../src/data-dir');
 
 const CWD = path.join('C:', 'projekte', 'meinprojekt');
 const HOME = os.homedir();
@@ -83,11 +84,32 @@ describe('skillDirs', () => {
     }
   });
 
-  test('ein unbekannter Provider erzeugt keinen Pfad außerhalb der Datenordner', () => {
-    // Sollte trotz Allow-List im Aufrufer nicht ins Elternverzeichnis zeigen.
+  test('ein Provider-Name mit Traversal-Segmenten erzeugt gar keinen Pfad (Defense in Depth)', () => {
+    // Der Aufrufer validiert provider bereits gegen eine Allow-Liste
+    // (validateContextTarget in context-list.js) — dieser Test prüft, dass
+    // skillDirs() sich nicht blind darauf verlässt. Echte Containment-Prüfung,
+    // nicht nur "kein '..' mehr im normalisierten String": path.normalize()
+    // löst '..'-Segmente ja gerade auf, ein Pfad kann also außerhalb der Basis
+    // landen, ohne dass ein literales '..' im Ergebnis übrig bleibt.
+    const dirs = skillDirs('..\\..\\evil', CWD);
+    expect(dirs).toEqual({ global: [], project: [] });
+  });
+
+  test('ein Provider-Name mit Traversal-Segmenten bleibt nachweislich innerhalb von DATA_DIR', () => {
+    // Fasst dieselbe Erwartung als generische Containment-Prüfung, damit sie
+    // auch dann noch etwas beweist, falls skillDirs() sich künftig ändert
+    // (z.B. doch mal einen Fallback-Pfad statt [] zurückgeben würde).
+    const base = path.resolve(DATA_DIR);
     const dirs = skillDirs('..\\..\\evil', CWD);
     for (const dir of [...dirs.global, ...dirs.project]) {
-      expect(path.normalize(dir)).not.toMatch(/\.\.[\\/]/);
+      const resolved = path.resolve(dir);
+      expect(resolved === base || resolved.startsWith(base + path.sep)).toBe(true);
+    }
+  });
+
+  test('lehnt Provider-Namen mit Slashes/Punkten generell ab, nicht nur das eine Beispiel', () => {
+    for (const evil of ['../evil', '..', 'a/b', 'a\\b', 'foo.bar', '']) {
+      expect(skillDirs(evil, CWD)).toEqual({ global: [], project: [] });
     }
   });
 });
@@ -122,6 +144,12 @@ describe('agentDirs', () => {
     for (const p of ['copilot', 'claude-code', ...API_PROVIDERS]) {
       expect(skillDirs(p, CWD).global[0]).not.toBe(agentDirs(p, CWD).global[0]);
       expect(skillDirs(p, CWD).project[0]).not.toBe(agentDirs(p, CWD).project[0]);
+    }
+  });
+
+  test('lehnt Provider-Namen mit Traversal-Segmenten ab (Defense in Depth, wie skillDirs)', () => {
+    for (const evil of ['..\\..\\evil', '../evil', 'a/b', '']) {
+      expect(agentDirs(evil, CWD)).toEqual({ global: [], project: [] });
     }
   });
 });

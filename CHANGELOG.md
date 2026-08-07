@@ -1,6 +1,33 @@
 # Changelog
 
-## [1.13.0] - 2026-08-04
+## [1.13.1] - 2026-08-07
+
+### Changed
+- Extracted the inline logic behind `context:listSkills`/`context:listAgents`/
+  `context:paths` (previously three `ipcMain.handle()` bodies in `main.js`)
+  into `src/context-list.js`. The only prior test coverage was a regex
+  checking that certain strings appeared in `main.js`'s source — it couldn't
+  catch a behavioral regression. The extracted `validateContextTarget`,
+  `dedupeFirstWins`, `buildSkillsList`, `buildAgentsList`, and
+  `buildContextPaths` are now covered by real, dependency-injected tests in
+  `__tests__/context-list.test.js`.
+- `context-paths.js`'s `skillDirs`/`agentDirs` now validate the provider id
+  against a `[a-z0-9-]+` pattern before joining it into a path, instead of
+  relying entirely on the caller's allow-list. Not currently exploitable
+  (`validateContextTarget` already blocks unknown providers upstream), but
+  the module itself wasn't self-defending — and the existing test claiming
+  to prove that (`context-paths.test.js`) only checked that no literal `..`
+  remained in the *normalized* output, which `path.join` guarantees anyway
+  regardless of whether the resolved path actually escaped the data
+  directory. Both the guard and the test are fixed now.
+- `loadContextForTab()` (renderer) no longer risks a slower, superseded
+  request overwriting a faster, newer one when switching tabs quickly — a
+  generation counter discards responses that arrive after a more recent
+  request for a different tab/project has already started.
+
+Found via a self-review of the previous two releases' skill-management
+rework (quality + security audit), not a user-facing bug.
+
 
 ### Removed
 - **The Skill Manager (hide/disable/its dedicated overlay) is gone.** It never

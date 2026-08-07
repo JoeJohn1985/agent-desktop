@@ -4216,32 +4216,46 @@ function renderMcpServers() {
 
 /** Letzter geladener Kontext, als Schlüssel — verhindert unnötige Rescans. */
 let _lastContextKey = null;
+/** Zählt jeden Ladeversuch hoch — verhindert, dass eine langsame, überholte
+ *  Antwort eine schnellere, neuere überschreibt (siehe unten). */
+let _contextRequestGen = 0;
 
 /**
  * Lädt Skills und Agents für einen Tab und rendert die Sidebar neu.
  * Beim Wechsel zwischen zwei Tabs mit gleichem Provider UND gleichem Projekt
  * passiert nichts (gleiche Liste) — das ist der häufigste Fall.
+ *
+ * Wird unawaited aufgerufen (Tab-Wechsel soll nicht auf das Netzwerk warten),
+ * daher der Generation-Counter: Wechselt der Nutzer schnell zurück zu Tab A,
+ * während Tab B's Anfrage noch läuft, darf B's später eintreffende, aber für
+ * den jetzt wieder aktiven Tab A überholte Antwort nicht mehr die globalen
+ * skills/agents überschreiben.
  * @param {string} provider
  * @param {string|null} cwd
  * @param {{force?: boolean}} [opts] - force: Guard übergehen (Reload-Button).
  * @returns {Promise<void>}
  */
 async function loadContextForTab(provider, cwd, opts = {}) {
-  const key = `${provider} ${cwd || ''}`;
+  const key = `${provider} ${cwd || ''}`;
   if (!opts.force && key === _lastContextKey) return;
   _lastContextKey = key;
+  const requestGen = ++_contextRequestGen;
 
+  let newSkills = [];
+  let newAgents = [];
   try {
-    [skills, agents] = await Promise.all([
+    [newSkills, newAgents] = await Promise.all([
       copilot.context.listSkills(provider, cwd || null).then(r => r || []),
       copilot.context.listAgents(provider, cwd || null).then(r => r || []),
     ]);
   } catch (e) {
     console.warn('[context] Skills/Agents konnten nicht geladen werden:', e.message);
-    skills = [];
-    agents = [];
   }
 
+  if (requestGen !== _contextRequestGen) return; // von einer neueren Anfrage überholt — verwerfen
+
+  skills = newSkills;
+  agents = newAgents;
   renderSkills();
   renderAgents();
 }
