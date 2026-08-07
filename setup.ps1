@@ -68,14 +68,38 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Dependencies installiert."
 
-# ── 3. Desktop-Verknüpfung erstellen ─────────────────────────
-Write-Step "Desktop-Verknüpfung erstellen..."
+# ── 3. Electron-Binary prüfen ────────────────────────────────
+# `npm install` installiert bei electron nur den JS-Wrapper — das eigentliche
+# ~100+ MB große Binary lädt ein Postinstall-Skript separat von GitHub
+# Releases herunter. Dieser Download schlägt in Firmennetzwerken (Firewall/
+# Proxy blockiert GitHub) öfter mal fehl, ohne dass npm install das immer als
+# Fehler-Exitcode zurückmeldet — deshalb hier ein expliziter Check statt dem
+# Exitcode von Schritt 2 blind zu vertrauen.
+Write-Step "Electron-Binary prüfen..."
 
 $electronExe = Join-Path $appRoot "node_modules\electron\dist\electron.exe"
 if (-not (Test-Path $electronExe)) {
-    Write-Fail "electron.exe nicht gefunden unter: $electronExe"
-    exit 1
+    Write-Host "  Electron-Binary fehlt — Download ist vermutlich fehlgeschlagen (z.B. Firewall/Proxy blockiert GitHub Releases)." -ForegroundColor DarkYellow
+    Write-Host "  Versuche gezielten Nach-Download..." -ForegroundColor White
+    npm install electron --force 2>&1 | Out-Null
+
+    if (-not (Test-Path $electronExe)) {
+        Write-Fail "electron.exe weiterhin nicht gefunden unter: $electronExe"
+        Write-Host "  Mögliche Ursachen und Lösungen:" -ForegroundColor White
+        Write-Host "    - Firewall/Proxy blockiert den Download von github.com/electron/electron/releases." -ForegroundColor White
+        Write-Host "      Falls im Unternehmensnetzwerk ein Spiegel-Server für Electron-Binaries existiert," -ForegroundColor White
+        Write-Host "      vor erneutem Ausführen setzen: `$env:ELECTRON_MIRROR = 'https://...'" -ForegroundColor White
+        Write-Host "    - Hinter einem Proxy: `$env:ELECTRON_GET_USE_PROXY = '1'" -ForegroundColor White
+        Write-Host "    - Danach erneut versuchen: npm install electron --force" -ForegroundColor White
+        exit 1
+    }
+    Write-OK "Electron-Binary beim zweiten Versuch erfolgreich geladen."
+} else {
+    Write-OK "Electron-Binary vorhanden."
 }
+
+# ── 4. Desktop-Verknüpfung erstellen ─────────────────────────
+Write-Step "Desktop-Verknüpfung erstellen..."
 
 $iconPath = Join-Path $appRoot "assets\icon.ico"
 $desktopPath = [Environment]::GetFolderPath("Desktop")

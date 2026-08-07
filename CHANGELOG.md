@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.13.2] - 2026-08-07
+
+### Fixed
+- The "+" new-tab provider dropdown opened right-aligned to its button, so it
+  always grew leftward over the chat content — easy to miss, and backwards
+  when there was clearly room to the right. Now left-aligned (grows toward
+  where the eye already is after clicking "+"), falling back to right-aligned
+  only if that would overflow the window edge (mirrors the existing
+  `clampMenuToViewportLeft` used elsewhere, via a new `clampMenuToViewportRight`).
+- `setup.ps1` trusted `npm install`'s exit code to mean Electron's binary was
+  actually downloaded. It isn't the same thing: `npm install` only installs
+  Electron's JS wrapper — a postinstall script then separately downloads a
+  ~100+ MB binary from GitHub Releases, and that download can fail (e.g. a
+  corporate firewall/proxy blocking GitHub) without `npm install` itself
+  reporting a non-zero exit code. The script now explicitly checks for
+  `electron.exe` after install, retries with `npm install electron --force`
+  once, and — if that still doesn't produce the binary — prints an actionable
+  explanation instead of just "not found" (including the `ELECTRON_MIRROR` /
+  `ELECTRON_GET_USE_PROXY` environment variables relevant on restricted
+  networks).
+
 ## [1.13.1] - 2026-08-07
 
 ### Changed

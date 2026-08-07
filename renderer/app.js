@@ -3572,6 +3572,19 @@ function clampMenuToViewportLeft(menu) {
 }
 
 /**
+ * Mirror of clampMenuToViewportLeft() for menus that default to growing
+ * rightward (anchored via `left`) — pulls them back onto the viewport if
+ * they'd overflow the right edge instead.
+ * @param {HTMLElement} menu
+ */
+function clampMenuToViewportRight(menu) {
+  if (menu.getBoundingClientRect().right > window.innerWidth - 8) {
+    menu.style.left = 'auto';
+    menu.style.right = '8px';
+  }
+}
+
+/**
  * Opens the per-card ⋮ menu for a saved session (rename / change folder /
  * delete) — fixed-positioned so it's never clipped by the scrollable
  * session list, closes on outside click. Only one menu (of any kind) is
@@ -5262,9 +5275,12 @@ async function openAddTabProviderMenu(btn) {
   // bottom/animation rules conflict with fixed anchoring under the "+".
   dropdown.className = 'provider-add-dropdown';
   const rect = btn.getBoundingClientRect();
-  // Right-align to the button so it doesn't overflow the window edge.
   dropdown.style.top = `${rect.bottom + 4}px`;
-  dropdown.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  // Left-align to the button by default (grows rightward, under where the
+  // eye already is after clicking "+") — clamped back onto the viewport
+  // below, once the dropdown is in the DOM and its real width is known, in
+  // case the button sits close enough to the right edge that it'd overflow.
+  dropdown.style.left = `${rect.left}px`;
 
   let closeHandler = null;
   const close = () => {
@@ -5288,6 +5304,7 @@ async function openAddTabProviderMenu(btn) {
   });
 
   document.body.appendChild(dropdown);
+  clampMenuToViewportRight(dropdown);
   closeHandler = (ev) => { if (!dropdown.contains(ev.target) && ev.target !== btn) close(); };
   setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
 }
