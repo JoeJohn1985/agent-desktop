@@ -1300,6 +1300,29 @@ mark.chat-search-highlight--active {
   margin: 2px 0 4px;
   flex-wrap: wrap;
 }
+/* Sent time — a ::after pseudo-element, deliberately not a real child node:
+   .stream-response's innerHTML gets fully reassigned on every streamed delta
+   (see assistant.message_delta), which would wipe out a real DOM element on
+   every re-render. A ::after reads its content from the data-time attribute
+   instead, so it survives untouched. Absent for restored history bubbles
+   (no data-time set — see renderSimpleHistory/renderApiHistory), so nothing
+   renders rather than showing a misleading "just now". */
+.stream-input[data-time]::after {
+  content: attr(data-time);
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  text-align: right;
+  color: rgba(255,255,255,0.7);
+}
+.stream-response[data-time]::after {
+  content: attr(data-time);
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .stream-input__skill-tag {
   display: inline-block;
   padding: 2px 8px;

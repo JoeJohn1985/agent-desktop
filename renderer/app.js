@@ -1398,7 +1398,13 @@ function sendMessage() {
   // Marks the start of a new "turn" for pruneOldMessages() — everything
   // inserted after this until the next .stream-input belongs to this turn's
   // age, so only turn-starts need a timestamp.
-  inputEl.dataset.ts = String(Date.now());
+  const sentAt = Date.now();
+  inputEl.dataset.ts = String(sentAt);
+  // Separate from dataset.ts above: that one is reused (and rewritten to
+  // "now") for restored history to drive pruning — this one is the actual
+  // send time, shown to the user, and must NOT be set for history bubbles
+  // where we don't know the real original time (see renderSimpleHistory).
+  inputEl.dataset.time = formatMessageTime(sentAt);
   tab.streamEl.insertBefore(inputEl, tab.statusEl);
 
   // Build skill instructions prefix for this tab's active skills
@@ -1712,6 +1718,10 @@ function initCopilotIPC() {
         if (!tab._responseEl) {
           tab._responseEl = document.createElement('div');
           tab._responseEl.className = 'stream-response markdown-body';
+          // dataset.time survives the repeated innerHTML reassignments below
+          // (markdown re-render on every delta) — it's an attribute, not a
+          // child node, so it isn't touched by them.
+          tab._responseEl.dataset.time = formatMessageTime(Date.now());
           tab.streamEl.insertBefore(tab._responseEl, tab.statusEl);
           tab._responseRaw = '';
         }
@@ -7305,6 +7315,7 @@ async function renderCategoryStep(body, btnNext) {
         const skillInputEl = document.createElement('div');
         skillInputEl.className = 'stream-input';
         skillInputEl.textContent = 'Skills für "' + role + '" generieren…';
+        skillInputEl.dataset.time = formatMessageTime(Date.now());
         skillTab.streamEl.insertBefore(skillInputEl, skillTab.statusEl);
         skillTab.statusEl.textContent = '● Thinking…';
         skillTab.statusEl.style.display = 'block';
@@ -7327,6 +7338,7 @@ async function renderCategoryStep(body, btnNext) {
           const agentInputEl = document.createElement('div');
           agentInputEl.className = 'stream-input';
           agentInputEl.textContent = 'Agents für fehlende Team-Positionen generieren…';
+          agentInputEl.dataset.time = formatMessageTime(Date.now());
           agentTab.streamEl.insertBefore(agentInputEl, agentTab.statusEl);
           agentTab.statusEl.textContent = '● Thinking…';
           agentTab.statusEl.style.display = 'block';

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.14.0] - 2026-08-09
+
+### Added
+- Chat messages now show the time they were sent/received, in small muted
+  text below each bubble. Only for messages sent or received during the
+  current session — the app never persisted a real per-message timestamp
+  (only an internal "when did this enter the DOM" value used purely for
+  auto-pruning old messages), so restored chat history after a restart shows
+  no time rather than a misleading "just now" for messages that could be
+  days old.
+
 ## [1.13.2] - 2026-08-07
 
 ### Fixed

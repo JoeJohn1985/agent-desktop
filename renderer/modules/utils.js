@@ -20,7 +20,7 @@ const SESSION_REFRESH_DELAY_MS = 400;
 // its own comment on why it's IIFE-wrapped) and are pulled in here as bare
 // names so the rest of the renderer can keep calling them unprefixed.
 const {
-  truncatePath, escapeHtml, escapeAttr, escapeAttrJs,
+  truncatePath, escapeHtml, escapeAttr, escapeAttrJs, formatMessageTime,
   toolIcon, toolDisplayName, formatToolArgs, toolArgFullText, formatToolResultPreview,
   buildAgentPrefix, formatSubscriptionUsage, mergeRateLimitWindows, parseUsageWindows, pickSavedMode,
   TOOL_ARGS_MAX_LENGTH, TOOL_PREVIEW_MAX_LENGTH,

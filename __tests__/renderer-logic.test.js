@@ -4,6 +4,7 @@ const {
   shortenPath,
   truncatePath,
   formatDate,
+  formatMessageTime,
   escapeHtml,
   escapeAttr,
   contextColor,
@@ -158,6 +159,35 @@ describe('formatDate', () => {
     const result = formatDate(iso, ref);
     // Should be in dd.mm.yy format
     expect(result).toMatch(/\d{2}\.\d{2}\.\d{2}/);
+  });
+});
+
+// ── formatMessageTime ────────────────────────────────────────
+describe('formatMessageTime', () => {
+  // Local-time Date constructor throughout (not ISO/UTC strings) — toLocaleTimeString
+  // reads the runner's local timezone, so an explicit local time keeps the
+  // expected output independent of which TZ the test happens to run in.
+
+  it('formats a Date as HH:MM (de-DE, 24h)', () => {
+    expect(formatMessageTime(new Date(2026, 4, 4, 14, 32))).toBe('14:32');
+  });
+
+  it('pads single-digit hours/minutes with a leading zero', () => {
+    expect(formatMessageTime(new Date(2026, 4, 4, 9, 5))).toBe('09:05');
+  });
+
+  it('accepts an epoch-ms number', () => {
+    const d = new Date(2026, 4, 4, 23, 1);
+    expect(formatMessageTime(d.getTime())).toBe('23:01');
+  });
+
+  it('accepts a Date instance directly', () => {
+    expect(formatMessageTime(new Date(2026, 4, 4, 0, 0))).toBe('00:00');
+  });
+
+  it('returns an empty string for an invalid input instead of "Invalid Date"', () => {
+    expect(formatMessageTime('nicht-ein-datum')).toBe('');
+    expect(formatMessageTime(undefined)).toBe('');
   });
 });
 

@@ -56,6 +56,20 @@ function formatDate(iso, now) {
 }
 
 /**
+ * Formats a timestamp as a plain clock time (e.g. "14:32") for display next
+ * to a chat message. Deliberately not relative like formatDate() — a message
+ * bubble's time shouldn't visibly change ("vor 1 Min." → "vor 2 Min.") while
+ * you're still looking at it.
+ * @param {number|string|Date} ts - Epoch ms, ISO string, or Date.
+ * @returns {string}
+ */
+function formatMessageTime(ts) {
+  const d = ts instanceof Date ? ts : new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
  * Escapes HTML-special characters in a string (no DOM needed).
  */
 function escapeHtml(s) {
@@ -909,6 +923,7 @@ const _api = {
   shortenPath,
   truncatePath,
   formatDate,
+  formatMessageTime,
   escapeHtml,
   escapeAttr,
   escapeAttrJs,
