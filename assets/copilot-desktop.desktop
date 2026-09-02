@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=Copilot Desktop
-Comment=Desktop App for GitHub Copilot CLI
-Exec=electron /home/JStadler/dev/github-copilot-desktop
-Icon=/home/JStadler/dev/github-copilot-desktop/assets/icon.png
-Terminal=false
-Type=Application
-Categories=Development;IDE;
-StartupWMClass=copilot-desktop
