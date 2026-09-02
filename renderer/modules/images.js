@@ -6,7 +6,7 @@ let currentImages = [];
 
 async function loadImages() {
   try {
-    currentImages = await copilot.images.list() || [];
+    currentImages = await desktop.images.list() || [];
   } catch (e) {
     console.warn('[images] Laden fehlgeschlagen:', e.message);
     currentImages = [];
@@ -71,7 +71,7 @@ function renderImages() {
 async function extractVideoFrames(video) {
   showNotification('🎬 Frames werden extrahiert…', 'info');
   try {
-    const result = await copilot.videos.extractFrames(video.path, { interval: 1, maxFrames: 30 });
+    const result = await desktop.videos.extractFrames(video.path, { interval: 1, maxFrames: 30 });
     if (!result.success) {
       showNotification(`❌ ${result.error}`, 'error');
       return;
@@ -133,7 +133,7 @@ function closeLightbox(e) {
 
 async function deleteImage(filePath) {
   try {
-    await copilot.images.delete(filePath);
+    await desktop.images.delete(filePath);
   } catch (e) {
     console.warn('[images] Löschen fehlgeschlagen:', e.message);
     showNotification('Bild konnte nicht gelöscht werden', 'error');
@@ -143,5 +143,5 @@ async function deleteImage(filePath) {
 }
 
 function openImagesFolder() {
-  copilot.images.openFolder();
+  desktop.images.openFolder();
 }

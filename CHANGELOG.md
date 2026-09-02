@@ -1,6 +1,38 @@
 # Changelog
 
-## [1.14.0] - 2026-08-09
+## [1.15.0] - 2026-08-09
+
+### Changed
+- Renamed the last Copilot-only naming left over from before the app went
+  multi-provider — none of it changed behavior, purely internal naming that
+  no longer matched what the code actually does:
+  - The entire preload IPC bridge, `window.copilot` → `window.desktop`. Every
+    provider (Claude Code, Anthropic, OpenAI, GLM, Ollama, …) has gone
+    through this bridge for a long time; keeping the original name implied
+    it was still Copilot-specific.
+  - ~15 IPC channels renamed `copilot:*` → `agent:*` (`copilot:send` →
+    `agent:send`, `copilot:status` → `agent:status`, etc.), kept in lockstep
+    across `main.js`, `preload.js`, `src/acp-client.js`, and
+    `src/providers/api-agent-client.js` — these channels already carried
+    every provider's traffic, not just Copilot's.
+  - `sendCopilotPrompt` → `sendAgentPrompt` (main.js) and `initCopilotIPC` →
+    `initAgentIPC` (renderer): both are the generic per-provider dispatch/
+    event-wiring functions, not Copilot-specific despite the old name.
+  - `COPILOT_BIN`/`COPILOT_CWD`, `readCopilotConfig`, and
+    `scanBuiltinCopilotSkills` were deliberately left unchanged — those are
+    genuinely Copilot-only (the real CLI binary path, Copilot's own native
+    settings file, skills bundled inside Copilot's own CLI package).
+
+No functional change. Verified via a full cross-check that every renamed IPC
+channel string still matches exactly between its `main.js` registration and
+its `preload.js`/`src/*.js` call sites, plus the full test suite (1624/1624
+passing) and lint (0 errors).
+
+### Known issue found (not fixed)
+- `agent:openLogDir` (main.js) is registered but never called from the
+  renderer — a pre-existing dead handler, unrelated to this rename, noticed
+  while cross-checking channel names.
+
 
 ### Added
 - Chat messages now show the time they were sent/received, in small muted

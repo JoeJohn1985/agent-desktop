@@ -16,7 +16,7 @@ const os = require('os');
 
 /**
  * Berechnet die instruction candidates mit Deduplizierung.
- * Entspricht dem Code in main.js ipcMain.handle('copilot:getInstructions').
+ * Entspricht dem Code in main.js ipcMain.handle('agent:getInstructions').
  */
 function getInstructionCandidates(cwd, configuredPath, homedir) {
   const candidates = [

@@ -28,6 +28,8 @@ class AcpClient extends EventEmitter {
   #copilotBin;
   #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
   #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
+  #extraEnv = {};     // env vars added to the child (e.g. CLAUDE_CODE_EXECUTABLE)
+  #initializeTimeoutMs = INITIALIZE_TIMEOUT_MS; // overridable — a cold npx install can outrun the default
   #shell = false;     // spawn via a shell — needed on Windows for .cmd/.bat (npx)
   #localCommandStdout = false; // adapter returns slash output on stderr (Claude Code)
 
@@ -48,7 +50,7 @@ class AcpClient extends EventEmitter {
   #availableModes = []; // modes.availableModes from the last session/new|load result
 
   // ── Prompt State ─────────────────────────────────────────────
-  #promptDone = false; // true once copilot:done has been sent for the current prompt
+  #promptDone = false; // true once agent:done has been sent for the current prompt
   #suppressReplay = false; // true while session/load replays history (don't re-render to UI)
   #cancelRequested = false; // true while a session/cancel is pending for the current prompt
   #contextQueryCollector = null; // when set, agent_message_chunks are collected here instead of UI
@@ -78,6 +80,13 @@ class AcpClient extends EventEmitter {
    * @param {string[]} [options.stripEnv] - Env vars to remove from the child
    *   process (e.g. ['ANTHROPIC_API_KEY'] so Claude Code bills the subscription,
    *   not the API).
+   * @param {Object} [options.env] - Extra env vars to set on the child process
+   *   (e.g. { CLAUDE_CODE_EXECUTABLE: '<path>' } so the Claude Code adapter
+   *   doesn't rely on its own optional native-binary download).
+   * @param {number} [options.initializeTimeoutMs] - Overrides how long start()
+   *   waits for the `initialize` response. Useful when probing a not-yet-cached
+   *   npx package version, whose first install can take much longer than a
+   *   normal (already-cached) start.
    * @param {string} [options.model] - Model override
    * @param {string[]} [options.deniedTools] - Tools to deny
    * @param {string[]} [options.addDirs] - Additional allowed directories
@@ -91,6 +100,8 @@ class AcpClient extends EventEmitter {
     this.#copilotBin = options.command || options.copilotBin || 'copilot';
     this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
     this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
+    this.#extraEnv = options.env && typeof options.env === 'object' ? options.env : {};
+    this.#initializeTimeoutMs = Number.isFinite(options.initializeTimeoutMs) ? options.initializeTimeoutMs : INITIALIZE_TIMEOUT_MS;
     this.#shell = options.shell === true;
     this.#localCommandStdout = options.localCommandStdout === true;
     this.#options = options;
@@ -137,7 +148,7 @@ class AcpClient extends EventEmitter {
     // Build the child env, removing any keys the backend must not see. Critical
     // for Claude Code: an inherited ANTHROPIC_API_KEY would switch billing from
     // the subscription to pay-per-token API usage.
-    const env = { ...process.env, NO_COLOR: '1' };
+    const env = { ...process.env, NO_COLOR: '1', ...this.#extraEnv };
     for (const key of this.#stripEnv) delete env[key];
 
     const proc = spawn(this.#copilotBin, args, {
@@ -496,19 +507,19 @@ class AcpClient extends EventEmitter {
       // A cancelled turn returns stopReason "cancelled" → report code -1 to the UI.
       const cancelled = this.#cancelRequested || result?.stopReason === 'cancelled';
       this.#cancelRequested = false;
-      // If agent_turn_end already arrived, copilot:done was already sent.
+      // If agent_turn_end already arrived, agent:done was already sent.
       // Otherwise send it now (session/prompt response = end of turn).
       if (!this.#promptDone) {
         this.#promptDone = true;
-        this.#sendToRenderer('copilot:done', this.#tabId, cancelled ? -1 : 0);
+        this.#sendToRenderer('agent:done', this.#tabId, cancelled ? -1 : 0);
       }
       return result;
     } catch (err) {
       this.#state = this.#process ? 'ready' : 'dead';
-      // If cancel() already sent copilot:done(-1), don't also send an error-done.
+      // If cancel() already sent agent:done(-1), don't also send an error-done.
       if (!this.#promptDone) {
         this.#promptDone = true;
-        this.#sendToRenderer('copilot:done', this.#tabId, 1);
+        this.#sendToRenderer('agent:done', this.#tabId, 1);
       }
       throw err;
     }
@@ -518,14 +529,14 @@ class AcpClient extends EventEmitter {
    * Cancels the current prompt via the ACP `session/cancel` notification.
    * This aborts the running turn without killing the process, so the session
    * (and its conversation context) stays alive. The in-flight session/prompt
-   * request resolves with stopReason "cancelled", which emits copilot:done(-1).
+   * request resolves with stopReason "cancelled", which emits agent:done(-1).
    */
   async cancel() {
     if (this.#state !== 'busy' || !this.#process || !this.#sessionId) {
       // Nothing in flight — emit a done(-1) so the UI unlocks anyway.
       if (!this.#promptDone) {
         this.#promptDone = true;
-        this.#sendToRenderer('copilot:done', this.#tabId, -1);
+        this.#sendToRenderer('agent:done', this.#tabId, -1);
       }
       return;
     }
@@ -591,7 +602,7 @@ class AcpClient extends EventEmitter {
     const result = await this.#sendRequest('initialize', {
       protocolVersion: 1,
       capabilities: {},
-    }, INITIALIZE_TIMEOUT_MS);
+    }, this.#initializeTimeoutMs);
     this.#state = 'ready';
     return result;
   }
@@ -671,7 +682,13 @@ class AcpClient extends EventEmitter {
         clearTimeout(pending.timer);
         this.#pendingRequests.delete(msg.id);
         if (msg.error) {
-          pending.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+          // Some adapters (e.g. Claude Code) put the actual cause in error.data
+          // and leave error.message as a generic "Internal error" — surface it.
+          const detail = msg.error.data?.details || msg.error.data?.message;
+          const text = msg.error.message
+            ? (detail ? `${msg.error.message}: ${detail}` : msg.error.message)
+            : JSON.stringify(msg.error);
+          pending.reject(new Error(text));
         } else {
           pending.resolve(msg.result);
         }
@@ -913,7 +930,7 @@ class AcpClient extends EventEmitter {
         // Signal completion if session/prompt hasn't already done so.
         if (!this.#promptDone) {
           this.#promptDone = true;
-          this.#sendToRenderer('copilot:done', this.#tabId, this.#cancelRequested ? -1 : 0);
+          this.#sendToRenderer('agent:done', this.#tabId, this.#cancelRequested ? -1 : 0);
         }
         break;
       }
@@ -1093,7 +1110,7 @@ class AcpClient extends EventEmitter {
   // ── Private: Emit to Renderer ────────────────────────────────
 
   #emitToRenderer(event) {
-    this.#sendToRenderer('copilot:event', this.#tabId, event);
+    this.#sendToRenderer('agent:event', this.#tabId, event);
   }
 
   // ── Private: Process Lifecycle ───────────────────────────────
@@ -1196,6 +1213,7 @@ class AcpClient extends EventEmitter {
    */
   updateOptions(options) {
     Object.assign(this.#options, options);
+    if (options.env && typeof options.env === 'object') this.#extraEnv = options.env;
   }
 
   /**

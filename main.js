@@ -252,12 +252,17 @@ function createWindow() {
  * @param {string} cwd
  */
 function claudeCodeClientOptions(cwd) {
-  return {
+  const opts = {
     cwd,
     command: 'npx',
     // Current adapter (@zed-industries/claude-code-acp is deprecated). -y installs
-    // it non-interactively on first run.
-    baseArgs: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    // it non-interactively on first run. Pinned to an exact version (see
+    // claude-adapter-update.js) instead of "latest" — an unpinned npx run
+    // reinstalls fresh on every session open, which is how we once hit a
+    // build where the adapter's own optional native-binary dependency
+    // silently failed to download. Check/apply an update via the "ACP-Adapter"
+    // row in Settings → Provider → Claude Code.
+    baseArgs: ['-y', `${claudeAdapterUpdate.PACKAGE_NAME}@${getClaudeAdapterVersion()}`],
     // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
     shell: true,
     // The adapter returns slash-command output (/context) on stderr wrapped in
@@ -269,9 +274,50 @@ function claudeCodeClientOptions(cwd) {
     useConfigOptions: true,
     mcpServers: [],
   };
+  // The adapter's own @anthropic-ai/claude-agent-sdk dependency ships the real
+  // `claude` CLI as an optional native binary that npx sometimes fails to pull
+  // in (→ session/new fails with "Claude native binary not found for
+  // win32-x64"). Point it at whatever `claude` is already installed on PATH so
+  // it doesn't need its own copy.
+  if (_claudeExecutablePath) opts.env = { CLAUDE_CODE_EXECUTABLE: _claudeExecutablePath };
+  return opts;
 }
 
-async function sendCopilotPrompt(tabId, prompt, options = {}) {
+// Cached path to the user's installed `claude` binary (resolved lazily, once).
+// undefined = not yet looked up, '' = looked up and not found.
+let _claudeExecutablePath;
+
+const claudeAdapterUpdate = require('./src/claude-adapter-update');
+
+/** The pinned adapter version to launch (user override from Settings, else the built-in default). */
+function getClaudeAdapterVersion() {
+  return readPreferences().claudeCodeAdapterVersion || claudeAdapterUpdate.DEFAULT_VERSION;
+}
+
+/** Resolves the absolute path of the `claude` executable on PATH (cached). */
+function resolveClaudeExecutable() {
+  if (_claudeExecutablePath !== undefined) return Promise.resolve(_claudeExecutablePath);
+  return new Promise((resolve) => {
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    try {
+      const proc = spawn(finder, ['claude'], { shell: true, windowsHide: true });
+      let out = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.on('error', () => { _claudeExecutablePath = ''; resolve(''); });
+      proc.on('close', () => {
+        const first = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean) || '';
+        _claudeExecutablePath = first;
+        resolve(first);
+      });
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } if (_claudeExecutablePath === undefined) { _claudeExecutablePath = ''; resolve(''); } }, 4000);
+    } catch (_) {
+      _claudeExecutablePath = '';
+      resolve('');
+    }
+  });
+}
+
+async function sendAgentPrompt(tabId, prompt, options = {}) {
   const cwd = options.cwd || COPILOT_CWD;
   // The explicit ProviderID from the renderer is authoritative; fall back to
   // deriving it from the model only for legacy callers.
@@ -296,6 +342,7 @@ async function sendCopilotPrompt(tabId, prompt, options = {}) {
   // ── ACP path (Copilot / Claude Code) ─────────────────────────
   let clientOptions;
   if (provider === 'claude-code') {
+    await resolveClaudeExecutable();
     clientOptions = {
       ...claudeCodeClientOptions(cwd),
       // No app-side auto-approve override here: Claude Code's own permission
@@ -472,7 +519,7 @@ async function sendApiPrompt(tabId, prompt, options) {
 // ── IPC Handlers ─────────────────────────────────────────────
 
 /**
- * @ipc copilot:send — Sends a prompt to Copilot CLI via ACP protocol.
+ * @ipc agent:send — Sends a prompt to Copilot CLI via ACP protocol.
  * @param {Electron.IpcMainInvokeEvent} _event
  * @param {number} tabId - Tab identifier
  * @param {string} prompt - User prompt
@@ -480,38 +527,38 @@ async function sendApiPrompt(tabId, prompt, options) {
  * @returns {Promise<number|{success: false, error: string}>} Tab ID or error
  */
 // Copilot Chat
-ipcMain.handle('copilot:send', async (_event, tabId, prompt, options) => {
+ipcMain.handle('agent:send', async (_event, tabId, prompt, options) => {
   if (typeof tabId !== 'number' || typeof prompt !== 'string') {
     return { success: false, error: 'Ungültige Argumente' };
   }
   try {
-    await sendCopilotPrompt(tabId, prompt, options || {});
+    await sendAgentPrompt(tabId, prompt, options || {});
     return tabId;
   } catch (err) {
-    console.error('[copilot:send] Error:', err.message);
+    console.error('[agent:send] Error:', err.message);
     return { success: false, error: err.message };
   }
 });
 
-/** @ipc copilot:silentCommand — Runs a slash command silently and returns the text response. */
-ipcMain.handle('copilot:silentCommand', async (_event, tabId, command, timeoutMs) => {
+/** @ipc agent:silentCommand — Runs a slash command silently and returns the text response. */
+ipcMain.handle('agent:silentCommand', async (_event, tabId, command, timeoutMs) => {
   const client = backends.get(tabId);
   if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
   try {
     const text = await client.silentCommand(command, timeoutMs);
     return { success: true, text };
   } catch (err) {
-    console.error(`[copilot:silentCommand] ${command}:`, err?.message || String(err));
+    console.error(`[agent:silentCommand] ${command}:`, err?.message || String(err));
     return { success: false, error: err?.message || String(err) };
   }
 });
 
 /**
- * @ipc copilot:setApproval — Switch a tab between manual approval and allow-all.
+ * @ipc agent:setApproval — Switch a tab between manual approval and allow-all.
  * Copilot needs a transparent process restart (--allow-all is a spawn flag);
  * Claude Code applies live (backend reads autoApprovePermissions per request).
  */
-ipcMain.handle('copilot:setApproval', async (_event, tabId, manualApproval) => {
+ipcMain.handle('agent:setApproval', async (_event, tabId, manualApproval) => {
   const client = backends.get(tabId);
   if (!client) return { success: false, error: 'Kein aktiver Client' };
   const opts = { allowAll: !manualApproval, autoApprovePermissions: !manualApproval };
@@ -549,8 +596,59 @@ ipcMain.handle('claudecode:status', async () => {
   });
 });
 
-/** @ipc copilot:respondPermission — Answers an agent permission request (ACP). */
-ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId) => {
+/**
+ * @ipc claudecode:checkAdapterUpdate — Checks npm for a newer version of the
+ * pinned Claude Code ACP adapter package.
+ * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>}
+ */
+ipcMain.handle('claudecode:checkAdapterUpdate', async () => {
+  return claudeAdapterUpdate.checkForAdapterUpdate(getClaudeAdapterVersion());
+});
+
+/**
+ * @ipc claudecode:applyAdapterUpdate — Pins the adapter to `version`: spawns
+ * it once via npx to prove the version installs and answers ACP `initialize`
+ * (a generous timeout covers npx's first-time download of that version),
+ * then persists the pin and tears down any live Claude Code tabs so their
+ * next prompt starts fresh on the new version.
+ * @param {string} version
+ * @returns {Promise<{ok:boolean, newVersion?:string, error?:string}>}
+ */
+ipcMain.handle('claudecode:applyAdapterUpdate', async (_event, version) => {
+  if (!version || typeof version !== 'string') return { ok: false, error: 'Keine Version angegeben' };
+  const probe = new AcpClient(-1, () => {}, {
+    command: 'npx',
+    baseArgs: ['-y', `${claudeAdapterUpdate.PACKAGE_NAME}@${version}`],
+    shell: true,
+    initializeTimeoutMs: 120_000, // first install of an uncached version can be slow
+  });
+  try {
+    await probe.start();
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  } finally {
+    try { await probe.destroy(); } catch (_) { /* ignore */ }
+  }
+
+  const prefs = readPreferences();
+  prefs.claudeCodeAdapterVersion = version;
+  if (!writePreferences(prefs)) return { ok: false, error: 'Einstellung konnte nicht gespeichert werden' };
+
+  // Existing Claude Code tabs keep running the old (already-spawned) process
+  // until it's next torn down — force that now so the pin takes effect
+  // immediately instead of only for brand-new tabs.
+  for (const [tabId, client] of backends) {
+    if (client.__provider === 'claude-code') {
+      try { await client.destroy(); } catch (_) { /* ignore */ }
+      backends.delete(tabId);
+    }
+  }
+
+  return { ok: true, newVersion: version };
+});
+
+/** @ipc agent:respondPermission — Answers an agent permission request (ACP). */
+ipcMain.handle('agent:respondPermission', (_event, tabId, requestId, optionId) => {
   const client = backends.get(tabId);
   if (client && typeof client.respondPermission === 'function') {
     client.respondPermission(requestId, optionId);
@@ -558,9 +656,9 @@ ipcMain.handle('copilot:respondPermission', (_event, tabId, requestId, optionId)
   return { success: true };
 });
 
-/** @ipc copilot:resetBackend — Destroys a tab's backend so the next prompt starts fresh
+/** @ipc agent:resetBackend — Destroys a tab's backend so the next prompt starts fresh
  *  (e.g. Claude Code changing folder → a new session in the new cwd). */
-ipcMain.handle('copilot:resetBackend', async (_event, tabId) => {
+ipcMain.handle('agent:resetBackend', async (_event, tabId) => {
   const client = backends.get(tabId);
   if (client) {
     try { await client.destroy(); } catch (_) { /* ignore */ }
@@ -569,8 +667,8 @@ ipcMain.handle('copilot:resetBackend', async (_event, tabId) => {
   return { success: true };
 });
 
-/** @ipc copilot:newTab — Allocates and returns the next tab ID. @returns {number} */
-ipcMain.handle('copilot:newTab', () => {
+/** @ipc agent:newTab — Allocates and returns the next tab ID. @returns {number} */
+ipcMain.handle('agent:newTab', () => {
   return nextTabId++;
 });
 
@@ -639,18 +737,18 @@ ipcMain.handle('providers:loadSessionHistory', (_event, sessionId) => {
   }
 });
 
-/** @ipc copilot:getCwd @returns {string} Current working directory */
-ipcMain.handle('copilot:getCwd', () => {
+/** @ipc agent:getCwd @returns {string} Current working directory */
+ipcMain.handle('agent:getCwd', () => {
   return COPILOT_CWD;
 });
 
-/** @ipc copilot:openCwd — Opens CWD in the system file explorer. */
-ipcMain.handle('copilot:openCwd', () => {
+/** @ipc agent:openCwd — Opens CWD in the system file explorer. */
+ipcMain.handle('agent:openCwd', () => {
   shell.openPath(COPILOT_CWD);
 });
 
-/** @ipc copilot:openLogDir — Opens the log directory in the file explorer. */
-ipcMain.handle('copilot:openLogDir', () => {
+/** @ipc agent:openLogDir — Opens the log directory in the file explorer. */
+ipcMain.handle('agent:openLogDir', () => {
   shell.openPath(getLogDir());
 });
 
@@ -671,14 +769,14 @@ async function getCliVersion() {
   return _cliVersionCache;
 }
 
-/** @ipc copilot:getVersions — Returns app and CLI version strings. @returns {Promise<{app: string, cli: string}>} */
-ipcMain.handle('copilot:getVersions', async () => {
+/** @ipc agent:getVersions — Returns app and CLI version strings. @returns {Promise<{app: string, cli: string}>} */
+ipcMain.handle('agent:getVersions', async () => {
   const appVersion = require('./package.json').version;
   let cliVersion = '?';
   try {
     cliVersion = await getCliVersion();
   } catch (e) {
-    console.warn('[copilot:getVersions] Fehler:', e.message || e);
+    console.warn('[agent:getVersions] Fehler:', e.message || e);
   }
   return { app: appVersion, cli: cliVersion };
 });
@@ -737,11 +835,11 @@ ipcMain.handle('updates:apply', async () => {
 });
 
 /**
- * @ipc copilot:getInstructions — Discovers all copilot-instructions.md files
+ * @ipc agent:getInstructions — Discovers all copilot-instructions.md files
  * from configured paths, CWD, and home directory.
  * @returns {Array<{path: string, name: string}>} Found instruction files
  */
-ipcMain.handle('copilot:getInstructions', () => {
+ipcMain.handle('agent:getInstructions', () => {
   const cwd = COPILOT_CWD;
   const config = readFolderConfig();
   const configuredPath = config.instructionsFile || path.join(os.homedir(), '.copilot', 'copilot-instructions.md');
@@ -759,14 +857,14 @@ ipcMain.handle('copilot:getInstructions', () => {
         found.push({ path: rel.startsWith('..') ? p : rel, name: path.basename(p) });
       }
     } catch (e) {
-      console.warn('[copilot:getInstructions] Fehler:', e.message || e);
+      console.warn('[agent:getInstructions] Fehler:', e.message || e);
     }
   }
   return found;
 });
 
-/** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
-ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
+/** @ipc agent:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
+ipcMain.handle('agent:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
   const client = backends.get(tabId);
   if (!client) return { success: false, error: 'Kein aktiver Client' };
   // Direct-API backends read the deny list live per tool call — no restart needed.
@@ -781,20 +879,20 @@ ipcMain.handle('copilot:restartWithDeniedTools', async (_event, tabId, deniedToo
     client.updateOptions({ deniedTools });
     await client.start();
     await client.loadSession(sessionId);
-    console.log(`[copilot:restartWithDeniedTools] tab ${tabId} restarted with ${deniedTools.length} denied tools`);
+    console.log(`[agent:restartWithDeniedTools] tab ${tabId} restarted with ${deniedTools.length} denied tools`);
     return { success: true };
   } catch (err) {
-    console.error('[copilot:restartWithDeniedTools]', err?.message || String(err));
+    console.error('[agent:restartWithDeniedTools]', err?.message || String(err));
     return { success: false, error: err?.message || String(err) };
   }
 });
 
-/** @ipc copilot:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
-ipcMain.on('copilot:stop', (_event, tabId) => {
+/** @ipc agent:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
+ipcMain.on('agent:stop', (_event, tabId) => {
   const client = backends.get(tabId);
   if (client) {
     client.cancel().catch(err => {
-      console.warn(`[copilot:stop] cancel error for tab ${tabId}:`, err.message);
+      console.warn(`[agent:stop] cancel error for tab ${tabId}:`, err.message);
     });
   }
 });
@@ -1867,11 +1965,11 @@ ipcMain.handle('auth:check', async () => {
 });
 
 /**
- * @ipc copilot:status — Combined Copilot provider status for the settings UI:
+ * @ipc agent:status — Combined Copilot provider status for the settings UI:
  * whether the CLI is installed (+version) and whether a user is logged in.
  * @returns {Promise<{cliInstalled: boolean, version: string|null, authenticated: boolean, user: string|null}>}
  */
-ipcMain.handle('copilot:status', async () => {
+ipcMain.handle('agent:status', async () => {
   let cliInstalled = false;
   let version = null;
   try {

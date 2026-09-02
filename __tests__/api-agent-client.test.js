@@ -64,9 +64,9 @@ function makeSend() {
   const calls = [];
   const fn = jest.fn((channel, tabId, payload) => calls.push({ channel, tabId, payload }));
   fn.calls = calls;
-  fn.events = () => calls.filter(c => c.channel === 'copilot:event').map(c => c.payload);
+  fn.events = () => calls.filter(c => c.channel === 'agent:event').map(c => c.payload);
   fn.types = () => fn.events().map(e => e.type);
-  fn.done = () => calls.filter(c => c.channel === 'copilot:done');
+  fn.done = () => calls.filter(c => c.channel === 'agent:done');
   return fn;
 }
 
@@ -144,7 +144,7 @@ describe('newSession', () => {
     expect(b.sessionId).toBe(id);
     const evt = send.events().find(e => e.type === 'result');
     expect(evt).toEqual({ type: 'result', sessionId: id });
-    expect(send.calls[0].channel).toBe('copilot:event');
+    expect(send.calls[0].channel).toBe('agent:event');
     expect(send.calls[0].tabId).toBe(7);
   });
 
@@ -348,7 +348,7 @@ describe('prompt: Renderer-Ereignisse', () => {
     await b.prompt('hi');
     expect(send.types()).toEqual(['assistant.turn_start', 'assistant.message_delta', 'assistant.turn_end']);
     expect(send.events()[1]).toEqual({ type: 'assistant.message_delta', data: { deltaContent: 'Hallo Welt' } });
-    expect(send.done()).toEqual([{ channel: 'copilot:done', tabId: 7, payload: 0 }]);
+    expect(send.done()).toEqual([{ channel: 'agent:done', tabId: 7, payload: 0 }]);
   });
 
   test('reicht Reasoning-Deltas als eigenes Ereignis durch', async () => {
@@ -358,12 +358,12 @@ describe('prompt: Renderer-Ereignisse', () => {
     expect(send.events()).toContainEqual({ type: 'assistant.reasoning_delta', data: { deltaContent: 'denk denk' } });
   });
 
-  test('alle Ereignisse laufen über copilot:event mit der richtigen tabId', async () => {
+  test('alle Ereignisse laufen über agent:event mit der richtigen tabId', async () => {
     const { b, send } = makeBackend();
     b.turns = [{ text: 'x' }];
     await b.prompt('hi');
     for (const c of send.calls) {
-      expect(['copilot:event', 'copilot:done']).toContain(c.channel);
+      expect(['agent:event', 'agent:done']).toContain(c.channel);
       expect(c.tabId).toBe(7);
     }
   });

@@ -284,7 +284,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'assistant.message_delta',
@@ -433,7 +433,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'session.restore_failed',
@@ -546,7 +546,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'assistant.message_delta',
@@ -582,7 +582,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'assistant.message_delta',
@@ -599,7 +599,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'assistant.reasoning_delta',
@@ -624,7 +624,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'tool.execution_start',
@@ -650,7 +650,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'tool.execution_complete',
@@ -678,7 +678,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'tool.execution_update',
@@ -689,7 +689,7 @@ describe('AcpClient', () => {
         })
       );
       expect(mockSendToRenderer).not.toHaveBeenCalledWith(
-        'copilot:event', 'tab-1', expect.objectContaining({ type: 'tool.execution_complete' }),
+        'agent:event', 'tab-1', expect.objectContaining({ type: 'tool.execution_complete' }),
       );
     });
 
@@ -716,7 +716,7 @@ describe('AcpClient', () => {
       await flushPromises();
 
       expect(mockSendToRenderer).toHaveBeenCalledWith(
-        'copilot:event',
+        'agent:event',
         'tab-1',
         expect.objectContaining({
           type: 'tool.execution_complete',
@@ -914,7 +914,7 @@ describe('AcpClient', () => {
       await promptP;
     });
 
-    it('cancel() meldet copilot:done(-1) wenn der Prompt als cancelled auflöst', async () => {
+    it('cancel() meldet agent:done(-1) wenn der Prompt als cancelled auflöst', async () => {
       const promptP = client.prompt('hallo');
       await flushPromises();
 
@@ -926,16 +926,16 @@ describe('AcpClient', () => {
       await flushPromises();
       await promptP;
 
-      expect(mockSendToRenderer).toHaveBeenCalledWith('copilot:done', 'tab-1', -1);
+      expect(mockSendToRenderer).toHaveBeenCalledWith('agent:done', 'tab-1', -1);
     });
 
-    it('cancel() ohne laufenden Prompt meldet trotzdem copilot:done(-1)', async () => {
+    it('cancel() ohne laufenden Prompt meldet trotzdem agent:done(-1)', async () => {
       // Kein Prompt in-flight → state ist "ready".
       await client.cancel();
       await flushPromises();
 
       expect(proc.kill).not.toHaveBeenCalled();
-      expect(mockSendToRenderer).toHaveBeenCalledWith('copilot:done', 'tab-1', -1);
+      expect(mockSendToRenderer).toHaveBeenCalledWith('agent:done', 'tab-1', -1);
     });
   });
 

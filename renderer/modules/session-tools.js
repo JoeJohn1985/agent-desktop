@@ -12,7 +12,7 @@ function restartWithUpdatedDeniedTools() {
   if (!tab || !tab.sessionId || tab.isProcessing) return;
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
   const merged = [...new Set([...getDeniedTools(getTabProvider(tab)), ...sessionDenied])];
-  window.copilot.chat.restartWithDeniedTools(activeTabId, merged).then(result => {
+  window.desktop.chat.restartWithDeniedTools(activeTabId, merged).then(result => {
     if (!result.success) console.warn('[session-tools] restart failed:', result.error);
   }).catch(err => {
     console.warn('[session-tools] restart error:', err.message);

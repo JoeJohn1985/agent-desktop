@@ -357,7 +357,7 @@ describe('Inactivity Monitor — forceUnlockTab', () => {
     expect(monitor._setTabStatusCalls).toHaveLength(1);
   });
 
-  test('stoppt Backend-Prozess (copilot.chat.stop)', () => {
+  test('stoppt Backend-Prozess (desktop.chat.stop)', () => {
     monitor.createTab('t1', { isProcessing: true });
     monitor.forceUnlockTab('t1', true);
     expect(monitor._stopCalls).toEqual(['t1']);

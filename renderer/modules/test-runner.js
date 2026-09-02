@@ -26,7 +26,7 @@ async function runTests() {
   body.innerHTML = '<div class="test-runner__loading">Tests werden ausgeführt…</div>';
 
   try {
-    const result = await copilot.tests.run();
+    const result = await desktop.tests.run();
     renderTestResults(result, body);
   } catch (e) {
     body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
@@ -38,7 +38,7 @@ async function runCoverage() {
   body.innerHTML = '<div class="test-runner__loading">Coverage wird berechnet…</div>';
 
   try {
-    const result = await copilot.tests.coverage();
+    const result = await desktop.tests.coverage();
     renderCoverageResults(result, body);
   } catch (e) {
     body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;
@@ -50,7 +50,7 @@ async function runE2E() {
   body.innerHTML = '<div class="test-runner__loading">🎭 Playwright E2E Tests werden ausgeführt…</div>';
 
   try {
-    const result = await copilot.tests.e2e();
+    const result = await desktop.tests.e2e();
     renderTestResults(result, body);
   } catch (e) {
     body.innerHTML = `<div class="test-runner-popup__empty" style="color:#f38ba8;">Fehler: ${escapeHtml(e.message)}</div>`;

@@ -18,7 +18,7 @@ function _rendererLog(level, args) {
   if (typeof addDevConsoleEntry === 'function') {
     addDevConsoleEntry({ level, message: '[renderer] ' + msg, timestamp: Date.now() });
   }
-  try { window.copilot.log.write(level, '[renderer] ' + msg); } catch (_) { /* bridge not ready */ }
+  try { window.desktop.log.write(level, '[renderer] ' + msg); } catch (_) { /* bridge not ready */ }
 }
 
 console.log = (...args) => { _rendererOrigLog(...args); _rendererLog('info', args); };
@@ -245,7 +245,7 @@ let _prefs = {};
  */
 async function loadPreferences() {
   try {
-    _prefs = await copilot.preferences.read() || {};
+    _prefs = await desktop.preferences.read() || {};
   } catch (e) {
     console.warn('[prefs] Laden fehlgeschlagen:', e.message);
     _prefs = {};
@@ -268,7 +268,7 @@ let _prefsSaveTimer = null;
 /** Persists the in-memory prefs to disk now (used by the debounce + unload flush). */
 function _flushPrefs() {
   if (_prefsSaveTimer) { clearTimeout(_prefsSaveTimer); _prefsSaveTimer = null; }
-  copilot.preferences.write(_prefs).catch(e => {
+  desktop.preferences.write(_prefs).catch(e => {
     console.warn('[prefs] Speichern fehlgeschlagen:', e.message);
   });
 }
@@ -752,7 +752,7 @@ async function createTab(label, initialModel, provider) {
   const tabProvider = provider
     || (initialModel ? window.RendererLogic.getModelProvider(initialModel) : null)
     || getDefaultProvider();
-  const tabId = await copilot.chat.newTab();
+  const tabId = await desktop.chat.newTab();
 
   // Create stream output element
   const streamEl = document.createElement('div');
@@ -945,7 +945,7 @@ function closeTab(tabId) {
   if (!tab) return;
 
   stopInactivityMonitor(tabId);
-  try { copilot.chat.stop(tabId); } catch (_) {}
+  try { desktop.chat.stop(tabId); } catch (_) {}
   tab.streamEl.remove();
 
   tabs.delete(tabId);
@@ -1150,7 +1150,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
       } else {
         // No session yet — create one
         try {
-          const newId = await copilot.sessions.create(newName);
+          const newId = await desktop.sessions.create(newName);
           if (newId) {
             tab.sessionId = newId;
             activeSessionId = newId;
@@ -1269,7 +1269,7 @@ function forceUnlockTab(tabId, isAutomatic) {
   const tab = tabs.get(tabId);
   if (!tab || !tab.isProcessing) return;
 
-  try { copilot.chat.stop(tabId); } catch (_) {}
+  try { desktop.chat.stop(tabId); } catch (_) {}
   tab.isProcessing = false;
   tab._responseEl = null;
   tab._thinkingEl = null;
@@ -1481,7 +1481,7 @@ function sendMessage() {
   // completion must be priced at THIS model — not tab.selectedModel, which the
   // user may switch (for the next prompt) before /usage is read.
   tab._billingModel = tab.selectedModel || DEFAULT_MODEL_ID;
-  copilot.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
+  desktop.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
     allowedTools: [],
@@ -1521,8 +1521,8 @@ function sendMessage() {
 }
 
 /**
- * Handle the result of copilot.chat.send. On success the backend streams events
- * and emits copilot:done; on failure no events arrive, so we must unstick the
+ * Handle the result of desktop.chat.send. On success the backend streams events
+ * and emits agent:done; on failure no events arrive, so we must unstick the
  * tab's "processing" state here and surface the error (with an auth action when
  * the failure is an authentication problem).
  * @param {number} tabId
@@ -1570,7 +1570,7 @@ function showAuthRequiredBanner(tab) {
   restartBtn.addEventListener('click', () => {
     restartBtn.disabled = true;
     restartBtn.textContent = 'Wird neu gestartet…';
-    copilot.window.relaunch().catch((e) => {
+    desktop.window.relaunch().catch((e) => {
       showNotification('Neustart fehlgeschlagen: ' + (e?.message || e), 'error');
       restartBtn.disabled = false;
       restartBtn.textContent = 'App neu starten';
@@ -1584,7 +1584,7 @@ function showAuthRequiredBanner(tab) {
     btn.disabled = true;
     btn.textContent = 'Login geöffnet…';
     try {
-      const r = await copilot.auth.login();
+      const r = await desktop.auth.login();
       showNotification(
         r && r.pendingInTerminal
           ? 'Login im Terminal abschließen, danach „App neu starten" klicken.'
@@ -1653,8 +1653,8 @@ function appendStreamError(tab, message) {
  * Handles reasoning deltas, streaming message text, tool execution,
  * session setup events, errors, and process completion.
  */
-function initCopilotIPC() {
-  copilot.chat.onEvent((tabId, event) => {
+function initAgentIPC() {
+  desktop.chat.onEvent((tabId, event) => {
     const tab = tabs.get(tabId);
     if (!tab) return;
 
@@ -2133,7 +2133,7 @@ function initCopilotIPC() {
     }
   });
 
-  copilot.chat.onDone((tabId, code) => {
+  desktop.chat.onDone((tabId, code) => {
     const tab = tabs.get(tabId);
     if (!tab) return;
 
@@ -2506,7 +2506,7 @@ function initCopilotModels() {
 async function refreshProviderModels(provider) {
   if (provider === 'copilot') return; // Copilot models arrive via ACP, not here.
   try {
-    const res = await copilot.providers.listModels(provider);
+    const res = await desktop.providers.listModels(provider);
     if (res && res.ok && Array.isArray(res.models) && res.models.length) {
       applyDynamicModels(provider, res.models);
     }
@@ -2517,7 +2517,7 @@ async function refreshProviderModels(provider) {
 async function refreshAllProviderModels() {
   const KEYLESS = new Set(['ollama']);
   let status = null;
-  try { status = await copilot.providers.status(); } catch (_) { /* ignore */ }
+  try { status = await desktop.providers.status(); } catch (_) { /* ignore */ }
   const keyed = (status && status.keyed) || {};
   for (const p of ['anthropic', 'gemini', 'openai', 'glm', 'ollama']) {
     if (KEYLESS.has(p) || keyed[p]) refreshProviderModels(p);
@@ -2715,7 +2715,7 @@ let _providerStatus = { available: false, keyed: {} };
 
 async function refreshProviderStatus() {
   try {
-    _providerStatus = await window.copilot.providers.status();
+    _providerStatus = await window.desktop.providers.status();
   } catch (e) {
     console.warn('[providers] status fehlgeschlagen:', e?.message);
   }
@@ -2847,7 +2847,7 @@ async function toggleApproval(tabId) {
   updateApprovalBtn(id);
   if (tab.sessionId) {
     // Copilot restarts transparently (spawn flag); Claude Code applies live.
-    try { await copilot.chat.setApproval(id, tab.manualApproval); } catch (_) { /* ignore */ }
+    try { await desktop.chat.setApproval(id, tab.manualApproval); } catch (_) { /* ignore */ }
   }
 }
 
@@ -3042,7 +3042,7 @@ async function runContextAction(actionId) {
 
   try {
     if (actionId === 'show') {
-      const result = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
+      const result = await window.desktop.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
       if (result.success) {
         updateContextButton(result.text);
         showContextPanel(result.text);
@@ -3050,21 +3050,21 @@ async function runContextAction(actionId) {
         showNotification('Kontext-Abfrage fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
       }
     } else if (actionId === 'compact') {
-      const result = await window.copilot.chat.silentCommand(activeTabId, '/compact');
+      const result = await window.desktop.chat.silentCommand(activeTabId, '/compact');
       if (!result.success) {
         showNotification('Compact fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
       } else {
         // /compact response may contain context info; also query explicitly
-        const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
+        const ctx = await window.desktop.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
         if (ctx.success) updateContextButton(ctx.text);
         showNotification('Kontext komprimiert.', 'success');
       }
     } else if (actionId === 'clear') {
-      const result = await window.copilot.chat.silentCommand(activeTabId, '/clear', FAST_COMMAND_TIMEOUT_MS);
+      const result = await window.desktop.chat.silentCommand(activeTabId, '/clear', FAST_COMMAND_TIMEOUT_MS);
       if (!result.success) {
         showNotification('Clear fehlgeschlagen: ' + (result.error || 'unbekannter Fehler'), 'error');
       } else {
-        const ctx = await window.copilot.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
+        const ctx = await window.desktop.chat.silentCommand(activeTabId, '/context', FAST_COMMAND_TIMEOUT_MS);
         if (ctx.success) updateContextButton(ctx.text);
         showNotification('Kontext gelöscht.', 'success');
       }
@@ -3179,7 +3179,7 @@ const {
  */
 async function initDynamicPricing() {
   try {
-    const map = await window.copilot.pricing.getMap();
+    const map = await window.desktop.pricing.getMap();
     if (map && Object.keys(map).length) {
       setDynamicPricing(map);
       // Recompute the visible cost display now that more prices are known.
@@ -3203,7 +3203,7 @@ function formatUsd(v) {
 
 async function refreshUsageDisplay(tabId) {
   try {
-    const result = await window.copilot.chat.silentCommand(tabId, '/usage');
+    const result = await window.desktop.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
@@ -3252,7 +3252,7 @@ async function refreshUsageDisplay(tabId) {
  */
 async function refreshSubscriptionUsage(tabId) {
   try {
-    const result = await window.copilot.chat.silentCommand(tabId, '/usage');
+    const result = await window.desktop.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
     const tab = tabs.get(tabId);
     if (!tab) return;
@@ -3270,7 +3270,7 @@ async function refreshSubscriptionUsage(tabId) {
  */
 async function refreshContextDisplay(tabId) {
   try {
-    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    const res = await window.desktop.chat.silentCommand(tabId, '/context');
     if (res.success) setTabContext(tabId, res.text);
   } catch (e) {
     console.warn('[context] refreshContextDisplay fehlgeschlagen:', e?.message);
@@ -3288,15 +3288,15 @@ const AUTO_COMPACT_PERCENT = 80;
  */
 async function refreshApiContext(tabId) {
   try {
-    const res = await window.copilot.chat.silentCommand(tabId, '/context');
+    const res = await window.desktop.chat.silentCommand(tabId, '/context');
     if (!res.success) return;
     setTabContext(tabId, res.text);
 
     const pct = parseContextPercent(res.text);
     if (pct != null && pct >= AUTO_COMPACT_PERCENT) {
       showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
-      await window.copilot.chat.silentCommand(tabId, '/compact');
-      const after = await window.copilot.chat.silentCommand(tabId, '/context');
+      await window.desktop.chat.silentCommand(tabId, '/compact');
+      const after = await window.desktop.chat.silentCommand(tabId, '/context');
       if (after.success) setTabContext(tabId, after.text);
     }
   } catch (e) {
@@ -3414,7 +3414,7 @@ function showNextPermission() {
 function answerPermission(optionId) {
   if (!_permissionActive) return;
   const { tabId, requestId } = _permissionActive;
-  try { copilot.chat.respondPermission(tabId, requestId, optionId || null); } catch (_) { /* ignore */ }
+  try { desktop.chat.respondPermission(tabId, requestId, optionId || null); } catch (_) { /* ignore */ }
   showNextPermission();
 }
 
@@ -3704,7 +3704,7 @@ function startSessionRename(sessionId, card) {
  * @param {string} sessionId
  */
 async function pickSessionCwd(sessionId) {
-  const selected = await copilot.folders.browse();
+  const selected = await desktop.folders.browse();
   if (!selected) return;
 
   // If the session is open in a tab, route through changeTabCwd (Claude Code
@@ -3734,7 +3734,7 @@ async function changeTabCwd(tabId, tab, newCwd) {
     const name = tab._sessionName || getSessionName(oldId) || null;
     // Drop our named reference to the old session — this tab now starts anew.
     deleteNamedSessionEntry(oldId);
-    try { await copilot.chat.resetBackend(tabId); } catch (_) { /* ignore */ }
+    try { await desktop.chat.resetBackend(tabId); } catch (_) { /* ignore */ }
     tab.sessionId = null;
     tab.cwd = newCwd;
     tab._renameOnNextSession = name; // re-apply the name to the new session
@@ -3893,11 +3893,11 @@ async function displaySessionContext(tab, sessionId, tabId) {
       // insertHistoryGroups/restorePrunedHistory). A long-lived session used
       // to render its entire history into the DOM immediately on resume,
       // which was the single biggest contributor to tab-switch jank.
-      renderSimpleHistory(await copilot.sessions.readAllMessages(sessionId), insertBefore, tab);
+      renderSimpleHistory(await desktop.sessions.readAllMessages(sessionId), insertBefore, tab);
     } else if (provider === 'claude-code') {
-      renderSimpleHistory(await copilot.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore, tab);
+      renderSimpleHistory(await desktop.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore, tab);
     } else {
-      const { messages, geminiMode } = await window.copilot.providers.loadSessionHistory(sessionId);
+      const { messages, geminiMode } = await window.desktop.providers.loadSessionHistory(sessionId);
       renderApiHistory(messages, insertBefore, tab);
       // Restore Gemini's search/files mode so a resumed session doesn't
       // silently fall back to the default (fresh tabs start with no mode set).
@@ -4074,7 +4074,7 @@ function confirmDeleteSession(sessionId, title) {
  */
 async function executeDeleteSession() {
   if (!pendingDeleteId) return;
-  await copilot.sessions.delete(pendingDeleteId);
+  await desktop.sessions.delete(pendingDeleteId);
   removeSessionName(pendingDeleteId);
   pendingDeleteId = null;
   document.getElementById('deleteOverlay').classList.remove('overlay--visible');
@@ -4169,7 +4169,7 @@ function mergeMcpByName(...lists) {
 async function refreshMcpStatus() {
   let probed;
   try {
-    probed = await copilot.mcp.probe();
+    probed = await desktop.mcp.probe();
   } catch (e) {
     console.warn('[mcp] Status-Probe fehlgeschlagen:', e.message);
     return;
@@ -4268,8 +4268,8 @@ async function loadContextForTab(provider, cwd, opts = {}) {
   let newAgents = [];
   try {
     [newSkills, newAgents] = await Promise.all([
-      copilot.context.listSkills(provider, cwd || null).then(r => r || []),
-      copilot.context.listAgents(provider, cwd || null).then(r => r || []),
+      desktop.context.listSkills(provider, cwd || null).then(r => r || []),
+      desktop.context.listAgents(provider, cwd || null).then(r => r || []),
     ]);
   } catch (e) {
     console.warn('[context] Skills/Agents konnten nicht geladen werden:', e.message);
@@ -4306,7 +4306,7 @@ async function loadProjectMcpServers(cwd) {
 
   if (cwd) {
     try {
-      const projectMcpList = await copilot.mcp.listProject(cwd) || [];
+      const projectMcpList = await desktop.mcp.listProject(cwd) || [];
       for (const pm of projectMcpList) {
         const existing = mcpServers.find(s => s.name === pm.name);
         if (existing) {
@@ -4376,7 +4376,7 @@ function toggleAgent(agentId) {
 async function loadPlugins() {
   console.log('[plugins] Lade Plugin-Liste und Marketplaces…');
   try {
-    const result = await copilot.plugins.list();
+    const result = await desktop.plugins.list();
     installedPlugins = (result && result.success) ? result.plugins : [];
     console.log(`[plugins] Installierte Plugins: ${installedPlugins.length}`, installedPlugins.map(p => p.name));
   } catch (e) {
@@ -4386,7 +4386,7 @@ async function loadPlugins() {
 
   let mpList = [];
   try {
-    const listResult = await copilot.plugins.listMarketplaces();
+    const listResult = await desktop.plugins.listMarketplaces();
     mpList = (listResult && listResult.success) ? listResult.marketplaces : [];
     console.log('[plugins] Marketplaces:', mpList.map(m => m.name));
   } catch (e) {
@@ -4394,7 +4394,7 @@ async function loadPlugins() {
   }
 
   const results = await Promise.allSettled(
-    mpList.map(mp => copilot.plugins.browseMarketplace(mp.name))
+    mpList.map(mp => desktop.plugins.browseMarketplace(mp.name))
   );
 
   marketplaces = results.map((r, i) => {
@@ -4607,7 +4607,7 @@ window.installPlugin = async function(target) {
     if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
   }
   try {
-    const result = await copilot.plugins.install(target);
+    const result = await desktop.plugins.install(target);
     if (result && result.success) {
       showNotification('Plugin installiert', 'success');
     } else {
@@ -4627,7 +4627,7 @@ window.uninstallPlugin = async function(name) {
     if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
   }
   try {
-    const result = await copilot.plugins.uninstall(name);
+    const result = await desktop.plugins.uninstall(name);
     if (result && result.success) {
       showNotification('Plugin deinstalliert', 'success');
     } else {
@@ -4647,7 +4647,7 @@ window.updatePlugin = async function(name) {
     if (actions) actions.innerHTML = '<span class="plugin-btn plugin-btn--loading">⏳</span>';
   }
   try {
-    const result = await copilot.plugins.update(name);
+    const result = await desktop.plugins.update(name);
     if (result && result.success) {
       showNotification('Plugin aktualisiert', 'success');
     } else {
@@ -4702,7 +4702,7 @@ function showAddPluginDialog() {
       input.disabled = true;
       addBtn.innerHTML = '<span class="plugin-spinner"></span> Wird hinzugefügt…';
       try {
-        const result = await copilot.plugins.addMarketplace(value);
+        const result = await desktop.plugins.addMarketplace(value);
         dialog.remove();
         if (result && result.success) {
           showNotification('Marketplace hinzugefügt', 'success');
@@ -4761,7 +4761,7 @@ window.removeMarketplace = async function(name) {
   }
 
   try {
-    const result = await copilot.plugins.removeMarketplace(name);
+    const result = await desktop.plugins.removeMarketplace(name);
     console.log('[plugins] removeMarketplace result:', result);
     if (result && result.success) {
       showNotification('Marketplace entfernt', 'success');
@@ -5087,12 +5087,12 @@ function formatDate(iso) {
  */
 async function initStatusbar() {
   try {
-    const folders = await copilot.folders.read();
+    const folders = await desktop.folders.read();
     userHomeDir = folders.homeDir || '';
   } catch (e) { console.warn('[app] Home-Verzeichnis nicht geladen:', e.message); }
 
   try {
-    const cwd = await copilot.chat.getCwd();
+    const cwd = await desktop.chat.getCwd();
     if (cwd && !tabs.get(activeTabId)?.cwd) {
       const tab = tabs.get(activeTabId);
       if (tab) tab.cwd = cwd;
@@ -5100,7 +5100,7 @@ async function initStatusbar() {
   } catch (e) { console.warn('[app] CWD nicht geladen:', e.message); }
 
   try {
-    const ver = await copilot.chat.getVersions();
+    const ver = await desktop.chat.getVersions();
     const el = document.getElementById('sbVersion');
     if (el) {
       el.textContent = `🏷️ v${ver.app}`;
@@ -5122,7 +5122,7 @@ async function initDataLoad() {
   activeAgents = new Set(savedActiveAgents);
 
   try {
-    globalMcpServers = await copilot.mcp.list() || [];
+    globalMcpServers = await desktop.mcp.list() || [];
   } catch (e) {
     console.warn('[mcp] Laden fehlgeschlagen:', e.message);
     globalMcpServers = [];
@@ -5134,7 +5134,7 @@ async function initDataLoad() {
 
   await loadSessions();
   await loadImages();
-  copilot.images.onChanged(() => loadImages());
+  desktop.images.onChanged(() => loadImages());
 
   loadPlugins().catch(e => console.warn('[plugins] Hintergrundladen fehlgeschlagen:', e.message));
 }
@@ -5324,10 +5324,10 @@ async function openAddTabProviderMenu(btn) {
  * toggle, export, scroll-to-bottom, and window resize handling.
  */
 function initWindowControls() {
-  document.getElementById('btnWindowMinimize').addEventListener('click', () => copilot.window.minimize());
-  document.getElementById('btnWindowMaximize').addEventListener('click', () => copilot.window.maximize());
-  document.getElementById('btnWindowClose').addEventListener('click', () => copilot.window.close());
-  document.getElementById('btnOpenDevTools')?.addEventListener('click', () => copilot.window.openDevTools());
+  document.getElementById('btnWindowMinimize').addEventListener('click', () => desktop.window.minimize());
+  document.getElementById('btnWindowMaximize').addEventListener('click', () => desktop.window.maximize());
+  document.getElementById('btnWindowClose').addEventListener('click', () => desktop.window.close());
+  document.getElementById('btnOpenDevTools')?.addEventListener('click', () => desktop.window.openDevTools());
 
   document.getElementById('btnScrollBottom').addEventListener('click', () => {
     const tab = tabs.get(activeTabId);
@@ -5371,7 +5371,7 @@ async function syncTodosToChat() {
   const prompt = `Hier sind meine nächsten Todos. Bitte arbeite sie der Reihe nach ab:\n\n${todoList}`;
   try {
     for (const todo of openTodos) {
-      await copilot.todos.update(tab.cwd, todo.id, { status: 'done' });
+      await desktop.todos.update(tab.cwd, todo.id, { status: 'done' });
     }
     await loadTodos(tab.cwd);
   } catch (err) {
@@ -5485,7 +5485,7 @@ function initSettings() {
 
   // Folder settings
   async function loadFolderSettings() {
-    const folders = await copilot.folders.read();
+    const folders = await desktop.folders.read();
     _cachedFolders = folders;
     document.getElementById('settFolderCwd').value = folders.cwd || '';
     document.getElementById('settFolderSessions').value = folders.sessionsDir || '';
@@ -5502,7 +5502,7 @@ function initSettings() {
   // All of these still require an app restart to actually take effect
   // (main-process globals are only read once at startup), hence the toast.
   async function autoSaveFolderField(key, value) {
-    const result = await copilot.folders.save({ [key]: value });
+    const result = await desktop.folders.save({ [key]: value });
     if (result.success) {
       showNotification('Gespeichert — Neustart erforderlich, damit es wirkt', 'success');
     } else {
@@ -5519,7 +5519,7 @@ function initSettings() {
   ];
   folderFields.forEach(({ btn, input, key }) => {
     document.getElementById(btn).addEventListener('click', async () => {
-      const folder = await copilot.folders.browse();
+      const folder = await desktop.folders.browse();
       if (!folder) return;
       document.getElementById(input).value = folder;
       await autoSaveFolderField(key, folder);
@@ -5528,7 +5528,7 @@ function initSettings() {
 
   // Instructions file browse (file dialog, not folder) — auto-saves too.
   document.getElementById('btnBrowseInstructions').addEventListener('click', async () => {
-    const file = await copilot.folders.browseFile([{ name: 'Markdown', extensions: ['md'] }]);
+    const file = await desktop.folders.browseFile([{ name: 'Markdown', extensions: ['md'] }]);
     if (!file) return;
     document.getElementById('settFolderInstructions').value = file;
     await autoSaveFolderField('instructionsFile', file);
@@ -5536,7 +5536,7 @@ function initSettings() {
 
   // Instructions editor
   document.getElementById('btnEditInstructions').addEventListener('click', async () => {
-    const result = await copilot.instructions.read();
+    const result = await desktop.instructions.read();
     if (!result.success) {
       showNotification(`Fehler: ${result.error}`, 'error');
       return;
@@ -5547,7 +5547,7 @@ function initSettings() {
   // Resets ALL folder config (App + Copilot tab fields) back to defaults —
   // the one action that intentionally does NOT merge, so it gets its own IPC.
   document.getElementById('btnFoldersReset').addEventListener('click', async () => {
-    const result = await copilot.folders.reset();
+    const result = await desktop.folders.reset();
     if (result.success) {
       await loadFolderSettings();
       showNotification('Auf Standard zurückgesetzt — bitte App neu starten', 'success');
@@ -5565,7 +5565,7 @@ function initSettings() {
 
   // Dev tools: Onboarding toggle
   async function loadDevOnboardingState() {
-    const { onboardingComplete } = await copilot.dev.getOnboardingState();
+    const { onboardingComplete } = await desktop.dev.getOnboardingState();
     const statusEl = document.getElementById('devOnboardingStatus');
     const btnEl = document.getElementById('btnDevOnboardingToggle');
     if (onboardingComplete) {
@@ -5580,8 +5580,8 @@ function initSettings() {
   }
 
   document.getElementById('btnDevOnboardingToggle').addEventListener('click', async () => {
-    const { onboardingComplete } = await copilot.dev.getOnboardingState();
-    const result = await copilot.dev.setOnboardingComplete(!onboardingComplete);
+    const { onboardingComplete } = await desktop.dev.getOnboardingState();
+    const result = await desktop.dev.setOnboardingComplete(!onboardingComplete);
     if (result.success) {
       await loadDevOnboardingState();
       showNotification(
@@ -5609,11 +5609,11 @@ function initSettings() {
  * @param {string} filePath
  * @param {Object} [opts]
  * @param {string} [opts.title='📝 Copilot Instructions']
- * @param {(content: string) => Promise<{success: boolean, error?: string}>} [opts.writeFn] - Defaults to copilot.instructions.write.
+ * @param {(content: string) => Promise<{success: boolean, error?: string}>} [opts.writeFn] - Defaults to desktop.instructions.write.
  */
 function openInstructionsEditor(content, filePath, opts = {}) {
   const title = opts.title || '📝 Copilot Instructions';
-  const writeFn = opts.writeFn || ((c) => copilot.instructions.write(c));
+  const writeFn = opts.writeFn || ((c) => desktop.instructions.write(c));
 
   // Create modal overlay
   const overlay = document.createElement('div');
@@ -5783,7 +5783,7 @@ const PROVIDER_SETTINGS = [
 async function getConnectedProviders() {
   const result = [{ id: 'copilot', label: PROVIDER_LABELS.copilot || 'Copilot' }];
   let cc = { installed: false };
-  try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+  try { cc = await window.desktop.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
   if (cc.installed) result.push({ id: 'claude-code', label: SETTINGS_TAB_LABELS['claude-code'] || PROVIDER_LABELS['claude-code'] || 'Claude Code' });
 
   await refreshProviderStatus();
@@ -5905,14 +5905,14 @@ async function wireProviderConfigPanel(providerId, panel) {
 
   if (providerId === 'claude-code') {
     panel.querySelector('#btnEditInstructionsClaudeCode')?.addEventListener('click', async () => {
-      const result = await copilot.instructions.readClaudeCode();
+      const result = await desktop.instructions.readClaudeCode();
       if (!result.success) {
         showNotification(`Fehler: ${result.error}`, 'error');
         return;
       }
       openInstructionsEditor(result.content, result.path, {
         title: '📝 Claude Code Instructions',
-        writeFn: (content) => copilot.instructions.writeClaudeCode(content),
+        writeFn: (content) => desktop.instructions.writeClaudeCode(content),
       });
     });
   }
@@ -5920,7 +5920,7 @@ async function wireProviderConfigPanel(providerId, panel) {
   const folderInputs = panel.querySelectorAll('[data-provider-folder-input]');
   if (!folderInputs.length) return;
   let paths = {};
-  try { paths = await window.copilot.folders.providerPaths(providerId) || {}; } catch (_) { /* old build */ }
+  try { paths = await window.desktop.folders.providerPaths(providerId) || {}; } catch (_) { /* old build */ }
   folderInputs.forEach((input) => {
     const key = input.dataset.providerFolderInput.split(':')[1];
     input.value = paths[key] || '';
@@ -5928,7 +5928,7 @@ async function wireProviderConfigPanel(providerId, panel) {
   panel.querySelectorAll('[data-provider-folder-open]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.providerFolderOpen.split(':')[1];
-      if (paths[key]) window.copilot.folders.openPath(paths[key]);
+      if (paths[key]) window.desktop.folders.openPath(paths[key]);
     });
   });
 }
@@ -6012,7 +6012,7 @@ async function renderProvidersSettings() {
       row.querySelector('.providers-row__save').addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
         const key = input.value.trim();
         if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
-        const res = await window.copilot.providers.setKey(p.id, key);
+        const res = await window.desktop.providers.setKey(p.id, key);
         if (res.success) {
           input.value = '';
           showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
@@ -6023,7 +6023,7 @@ async function renderProvidersSettings() {
         }
       }));
       row.querySelector('.providers-row__delete').addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
-        await window.copilot.providers.deleteKey(p.id);
+        await window.desktop.providers.deleteKey(p.id);
         showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
         renderProvidersSettings();
       }));
@@ -6077,7 +6077,7 @@ async function renderCopilotProviderRow(list, p) {
   // non-interactively, so we point the user to `claude` for it.
   if (p.id === 'claude-code') {
     let cc = { installed: false };
-    try { cc = await window.copilot.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+    try { cc = await window.desktop.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
     if (cc.installed) {
       statusEl.textContent = '● „claude"-CLI installiert' + (cc.version ? ` (v${cc.version})` : '');
       statusEl.classList.add('is-set');
@@ -6095,11 +6095,13 @@ async function renderCopilotProviderRow(list, p) {
     recheck.textContent = 'Status prüfen';
     recheck.addEventListener('click', () => renderProvidersSettings());
     controls.appendChild(recheck);
+
+    renderClaudeAdapterUpdateRow(controls);
     return;
   }
 
   let status = { cliInstalled: false, authenticated: false, user: null };
-  try { status = await window.copilot.auth.status(); } catch (_) { /* old build / offline */ }
+  try { status = await window.desktop.auth.status(); } catch (_) { /* old build / offline */ }
 
   const addBtn = (label, primary, onClick) => {
     const b = document.createElement('button');
@@ -6118,14 +6120,89 @@ async function renderCopilotProviderRow(list, p) {
   } else if (status.authenticated) {
     statusEl.textContent = '● eingeloggt' + (status.user ? ' als ' + status.user : '');
     statusEl.classList.add('is-set');
-    addBtn('Neu anmelden', false, () => window.copilot.auth.login());
+    addBtn('Neu anmelden', false, () => window.desktop.auth.login());
   } else {
     statusEl.textContent = '○ CLI installiert, nicht eingeloggt';
     addBtn('Anmelden', true, async () => {
-      await window.copilot.auth.login();
+      await window.desktop.auth.login();
       showNotification('Login im Terminal abschließen, danach „Status prüfen".', 'info');
     });
     addBtn('Status prüfen', false, () => renderProvidersSettings());
+  }
+}
+
+/**
+ * Renders the "ACP-Adapter" row inside the Claude Code provider settings:
+ * shows the pinned @agentclientprotocol/claude-agent-acp version and lets the
+ * user check npm for a newer one and apply it (see main.js
+ * claudecode:checkAdapterUpdate / claudecode:applyAdapterUpdate). The adapter
+ * is pinned rather than always "latest" so a session-open never triggers a
+ * surprise reinstall — updates only happen when the user asks for one here.
+ * @param {HTMLElement} controls
+ */
+function renderClaudeAdapterUpdateRow(controls) {
+  const wrap = document.createElement('div');
+  wrap.className = 'providers-row__adapter';
+  wrap.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+  wrap.innerHTML = `
+    <span class="providers-row__hint" id="claudeAdapterStatus">ACP-Adapter: wird geprüft…</span>
+    <button class="action-btn" id="btnCheckAdapterUpdate">Nach Adapter-Update suchen</button>`;
+  controls.appendChild(wrap);
+
+  const statusEl = wrap.querySelector('#claudeAdapterStatus');
+  const checkBtn = wrap.querySelector('#btnCheckAdapterUpdate');
+
+  const runCheck = async () => {
+    checkBtn.disabled = true;
+    const prevLabel = checkBtn.textContent;
+    checkBtn.textContent = 'Suche…';
+    wrap.querySelector('.providers-row__adapter-apply')?.remove();
+    try {
+      const res = await window.desktop.chat.checkAdapterUpdate();
+      if (!res.ok) {
+        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} (Update-Prüfung fehlgeschlagen: ${res.error || 'unbekannter Fehler'})`;
+      } else if (res.updateAvailable) {
+        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} — neue Version v${res.latestVersion} verfügbar`;
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'action-btn action-btn--primary providers-row__adapter-apply';
+        applyBtn.textContent = `Auf v${res.latestVersion} aktualisieren`;
+        applyBtn.addEventListener('click', () => applyClaudeAdapterUpdate(applyBtn, statusEl, res.latestVersion));
+        wrap.appendChild(applyBtn);
+      } else {
+        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} (aktuell)`;
+      }
+    } catch (e) {
+      statusEl.textContent = 'ACP-Adapter: Update-Prüfung fehlgeschlagen: ' + (e?.message || e);
+    } finally {
+      checkBtn.disabled = false;
+      checkBtn.textContent = prevLabel;
+    }
+  };
+
+  checkBtn.addEventListener('click', runCheck);
+  runCheck(); // show current/latest right away, same as the CLI status above
+}
+
+/** Applies a pinned Claude Code adapter version update (button handler for renderClaudeAdapterUpdateRow). */
+async function applyClaudeAdapterUpdate(applyBtn, statusEl, targetVersion) {
+  applyBtn.disabled = true;
+  const prevLabel = applyBtn.textContent;
+  applyBtn.textContent = 'Aktualisiere… (kann bei Erstinstallation etwas dauern)';
+  try {
+    const res = await window.desktop.chat.applyAdapterUpdate(targetVersion);
+    if (res.ok) {
+      showNotification(`ACP-Adapter aktualisiert auf v${res.newVersion}.`, 'success');
+      statusEl.textContent = `ACP-Adapter: v${res.newVersion} (aktuell)`;
+      applyBtn.remove();
+    } else {
+      showNotification('Adapter-Update fehlgeschlagen: ' + (res.error || 'unbekannter Fehler'), 'error');
+      applyBtn.disabled = false;
+      applyBtn.textContent = prevLabel;
+    }
+  } catch (e) {
+    showNotification('Adapter-Update fehlgeschlagen: ' + (e?.message || e), 'error');
+    applyBtn.disabled = false;
+    applyBtn.textContent = prevLabel;
   }
 }
 
@@ -6170,8 +6247,8 @@ function initDevConsole() {
     });
   });
 
-  if (copilot.devConsole) {
-    copilot.devConsole.onLog((entry) => addDevConsoleEntry(entry));
+  if (desktop.devConsole) {
+    desktop.devConsole.onLog((entry) => addDevConsoleEntry(entry));
   }
   // Renderer logs already flow into addDevConsoleEntry via the single console
   // override at the top of this file — no replay or re-override needed here.
@@ -6515,7 +6592,7 @@ function initKeyboardShortcuts() {
       } else if (activeTabId != null) {
         const tab = tabs.get(activeTabId);
         if (tab && tab.isProcessing) {
-          try { copilot.chat.stop(activeTabId); } catch (_) {}
+          try { desktop.chat.stop(activeTabId); } catch (_) {}
         }
       }
     }
@@ -6581,10 +6658,10 @@ function initDragDrop() {
 
     for (const file of files) {
       let filePath;
-      try { filePath = copilot.files.getPath(file); } catch (err) { console.warn('[files] getPath fehlgeschlagen:', err.message); continue; }
+      try { filePath = desktop.files.getPath(file); } catch (err) { console.warn('[files] getPath fehlgeschlagen:', err.message); continue; }
       if (!filePath) continue;
 
-      const result = await copilot.files.processDropped(filePath);
+      const result = await desktop.files.processDropped(filePath);
       switch (result.type) {
         case 'path':
           parts.push(`@${result.path}`);
@@ -6639,7 +6716,7 @@ async function checkForUpdates({ silent = true } = {}) {
   const statusEl = document.getElementById('updateCheckStatus');
   if (!silent && statusEl) statusEl.textContent = 'Suche…';
   try {
-    const res = await copilot.updates.check();
+    const res = await desktop.updates.check();
     if (res.updateAvailable) {
       // On silent (background) checks, don't re-show a banner the user already
       // dismissed for this exact version; the settings button (silent=false)
@@ -6704,7 +6781,7 @@ async function applyUpdate(bar) {
   _updateBusy = true;
   if (btn) { btn.disabled = true; btn.textContent = 'Wird aktualisiert…'; }
   try {
-    const res = await copilot.updates.apply();
+    const res = await desktop.updates.apply();
     if (res.ok) {
       if (btn) btn.textContent = 'Neustart…';
       showNotification('Update geladen' + (res.depsInstalled ? ' (inkl. Abhängigkeiten)' : '') + ' — App startet neu.', 'success');
@@ -6730,6 +6807,86 @@ function initUpdateChecker() {
   // periodically while the app stays open.
   setTimeout(() => checkForUpdates({ silent: true }), 3000);
   setInterval(() => checkForUpdates({ silent: true }), UPDATE_CHECK_INTERVAL_MS);
+}
+
+// ── Claude Code ACP Adapter Update (auto-check + banner) ─────
+// Same idea as the self-updater above, but for the pinned
+// @agentclientprotocol/claude-agent-acp npm package (see claudeCodeClientOptions
+// in main.js): checked silently in the background; a banner with an
+// "Aktualisieren" button appears only when a newer version is actually found,
+// instead of requiring a trip into Settings.
+
+let _claudeAdapterUpdateBusy = false;
+/** Version the user dismissed — suppresses re-nagging for the same version. */
+let _dismissedClaudeAdapterVersion = null;
+const CLAUDE_ADAPTER_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** Silently checks npm for a newer adapter version and shows a banner if one is found. */
+async function checkClaudeAdapterUpdate() {
+  if (_claudeAdapterUpdateBusy) return;
+  if (!window.copilot?.chat?.checkAdapterUpdate) return;
+  // Only relevant if the Claude Code CLI (and thus the adapter) is actually used.
+  try {
+    const cc = await window.desktop.chat.claudeCodeStatus();
+    if (!cc.installed) return;
+  } catch (_) { return; }
+  _claudeAdapterUpdateBusy = true;
+  try {
+    const res = await window.desktop.chat.checkAdapterUpdate();
+    if (res.ok && res.updateAvailable && res.latestVersion !== _dismissedClaudeAdapterVersion) {
+      showClaudeAdapterUpdateBanner(res.currentVersion, res.latestVersion);
+    }
+  } catch (_) {
+    // Silent background check — no error UI, matches self-update's silent mode.
+  } finally {
+    _claudeAdapterUpdateBusy = false;
+  }
+}
+
+/** Shows the "Claude Code adapter update available" banner (idempotent). */
+function showClaudeAdapterUpdateBanner(currentVersion, latestVersion) {
+  document.getElementById('claudeAdapterUpdateBanner')?.remove();
+  const bar = document.createElement('div');
+  bar.id = 'claudeAdapterUpdateBanner';
+  bar.className = 'update-banner';
+  // Stack below the app self-update banner if that one is showing too.
+  const other = document.getElementById('updateBanner');
+  if (other) bar.style.top = (other.offsetTop + other.offsetHeight + 8) + 'px';
+  bar.innerHTML = `
+    <span class="update-banner__text">🔄 Claude-Code-Adapter <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
+    <button class="update-banner__btn" id="btnApplyClaudeAdapterUpdate">Aktualisieren</button>
+    <button class="update-banner__close" id="btnDismissClaudeAdapterUpdate" aria-label="Schließen">✕</button>`;
+  document.body.appendChild(bar);
+  document.getElementById('btnDismissClaudeAdapterUpdate').addEventListener('click', () => {
+    _dismissedClaudeAdapterVersion = latestVersion; // don't re-nag on background checks
+    bar.remove();
+  });
+  document.getElementById('btnApplyClaudeAdapterUpdate').addEventListener('click', () => applyClaudeAdapterUpdateFromBanner(bar, latestVersion));
+}
+
+/** "Aktualisieren" button handler on the banner: applies + verifies the pinned version. */
+async function applyClaudeAdapterUpdateFromBanner(bar, targetVersion) {
+  const btn = document.getElementById('btnApplyClaudeAdapterUpdate');
+  if (btn) { btn.disabled = true; btn.textContent = 'Aktualisiere…'; }
+  try {
+    const res = await window.desktop.chat.applyAdapterUpdate(targetVersion);
+    if (res.ok) {
+      showNotification(`Claude-Code-Adapter aktualisiert auf v${res.newVersion}.`, 'success');
+      bar.remove();
+    } else {
+      showNotification('Adapter-Update fehlgeschlagen: ' + (res.error || 'unbekannter Fehler'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Aktualisieren'; }
+    }
+  } catch (e) {
+    showNotification('Adapter-Update fehlgeschlagen: ' + (e?.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Aktualisieren'; }
+  }
+}
+
+/** Silent check shortly after startup, then periodically while the app stays open. */
+function initClaudeAdapterUpdateChecker() {
+  setTimeout(() => checkClaudeAdapterUpdate(), 5000); // after the self-update check's 3s
+  setInterval(() => checkClaudeAdapterUpdate(), CLAUDE_ADAPTER_CHECK_INTERVAL_MS);
 }
 
 /**
@@ -6890,7 +7047,7 @@ const ONBOARDING_TOTAL_STEPS = 4;
 async function initOnboarding() {
   let isFirstRun;
   try {
-    isFirstRun = await copilot.onboarding.isFirstRun();
+    isFirstRun = await desktop.onboarding.isFirstRun();
   } catch (e) {
     console.warn('[onboarding] Check fehlgeschlagen:', e.message);
     return;
@@ -6956,7 +7113,7 @@ async function renderCwdStep(body, btnNext) {
     </div>`;
 
   try {
-    const currentCwd = await copilot.chat.getCwd();
+    const currentCwd = await desktop.chat.getCwd();
     const statusEl = document.getElementById('onboarding-cwd-status');
     if (!statusEl) return;
 
@@ -6970,10 +7127,10 @@ async function renderCwdStep(body, btnNext) {
     }
 
     document.getElementById('btnOnboardingBrowseCwd').addEventListener('click', async () => {
-      const selectedPath = await copilot.folders.browse();
+      const selectedPath = await desktop.folders.browse();
       if (selectedPath) {
         document.getElementById('onboarding-cwd-input').value = selectedPath;
-        await copilot.folders.save({ cwd: selectedPath });
+        await desktop.folders.save({ cwd: selectedPath });
         btnNext.disabled = false;
       }
     });
@@ -7046,7 +7203,7 @@ async function renderProviderDetail(container, provider) {
   if (provider === 'copilot') {
     container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Prüfe Copilot-Status…</div>';
     let status = { cliInstalled: false, authenticated: false, user: null };
-    try { status = await window.copilot.auth.status(); } catch (_) { /* ignore */ }
+    try { status = await window.desktop.auth.status(); } catch (_) { /* ignore */ }
     if (!status.cliInstalled) {
       container.innerHTML = '<div class="onboarding-login__status onboarding-login__status--warn">⚠️ Copilot-CLI nicht gefunden. Installiere die „copilot"-CLI oder wähle einen API-Provider. Du kannst trotzdem fortfahren.</div>';
     } else if (status.authenticated) {
@@ -7073,7 +7230,7 @@ async function renderProviderDetail(container, provider) {
     document.getElementById('btnOnboardingSaveKey').addEventListener('click', async () => {
       const key = document.getElementById('onboardingProviderKey').value.trim();
       if (!key) { showNotification('Bitte einen API-Key eingeben.', 'warning'); return; }
-      const res = await window.copilot.providers.setKey(provider, key);
+      const res = await window.desktop.providers.setKey(provider, key);
       if (res.success) {
         await refreshProviderStatus();
         showNotification(`${label}-Key gespeichert.`, 'success');
@@ -7097,7 +7254,7 @@ async function handleOnboardingLogin() {
   container.innerHTML = '<div class="onboarding-login__status"><span class="onboarding-login__spinner"></span> Login-Fenster wird geöffnet… Bitte im neuen Fenster einloggen.</div>';
 
   try {
-    const result = await copilot.auth.login();
+    const result = await desktop.auth.login();
     if (result.success) {
       container.innerHTML = `<div class="onboarding-login__status onboarding-login__status--warn">ℹ️ Login-Fenster geöffnet. Melde dich dort an und klicke dann <button class="action-btn action-btn--primary onboarding-login__btn" id="btnOnboardingRecheck">Erneut prüfen</button></div>`;
       document.getElementById('btnOnboardingRecheck').addEventListener('click', () => renderProviderDetail(container, 'copilot'));
@@ -7129,7 +7286,7 @@ async function renderFolderStep(body, btnNext) {
     </div>`;
 
   try {
-    const status = await copilot.setup.getFolderStatus();
+    const status = await desktop.setup.getFolderStatus();
     renderFolderList(status, btnNext);
   } catch (e) {
     const list = document.getElementById('onboarding-folder-list');
@@ -7179,8 +7336,8 @@ async function handleCreateFolders(createBtn, btnNext) {
   createBtn.innerHTML = '<span class="onboarding-login__spinner"></span> Erstelle…';
 
   try {
-    await copilot.setup.createFolders();
-    const status = await copilot.setup.getFolderStatus();
+    await desktop.setup.createFolders();
+    const status = await desktop.setup.getFolderStatus();
     renderFolderList(status, btnNext);
   } catch (e) {
     createBtn.disabled = false;
@@ -7300,7 +7457,7 @@ async function renderCategoryStep(body, btnNext) {
     statusContainer.innerHTML = '';
 
     try {
-      const { skillPrompt, agentPrompt } = await copilot.setup.startPersonalizedSessions({ role, missingRoles });
+      const { skillPrompt, agentPrompt } = await desktop.setup.startPersonalizedSessions({ role, missingRoles });
 
       // Close onboarding immediately
       await finishOnboarding();
@@ -7319,7 +7476,7 @@ async function renderCategoryStep(body, btnNext) {
         skillTab.streamEl.insertBefore(skillInputEl, skillTab.statusEl);
         skillTab.statusEl.textContent = '● Thinking…';
         skillTab.statusEl.style.display = 'block';
-        copilot.chat.send(skillTabId, skillPrompt, {
+        desktop.chat.send(skillTabId, skillPrompt, {
           autoApprove: true,
           allowedTools: [],
           deniedTools: [],
@@ -7342,7 +7499,7 @@ async function renderCategoryStep(body, btnNext) {
           agentTab.streamEl.insertBefore(agentInputEl, agentTab.statusEl);
           agentTab.statusEl.textContent = '● Thinking…';
           agentTab.statusEl.style.display = 'block';
-          copilot.chat.send(agentTabId, agentPrompt, {
+          desktop.chat.send(agentTabId, agentPrompt, {
             autoApprove: true,
             allowedTools: [],
             deniedTools: [],
@@ -7450,7 +7607,7 @@ function nextOnboardingStep() {
  * @returns {Promise<void>}
  */
 async function showTutorialPopup() {
-  const flags = await copilot.tutorial.getFlags();
+  const flags = await desktop.tutorial.getFlags();
   if (flags.tutorialSkillsShown) return;
 
   const skillsHeader = document.querySelector('.sidebar__section[data-icon="🛠️"] .sidebar__header');
@@ -7478,7 +7635,7 @@ async function showTutorialPopup() {
   popup.style.top = (rect.top + rect.height / 2 - popup.offsetHeight / 2) + 'px';
   popup.style.left = (rect.right + 12) + 'px';
 
-  await copilot.tutorial.setFlag('tutorialSkillsShown', true);
+  await desktop.tutorial.setFlag('tutorialSkillsShown', true);
 
   let closed = false;
   const close = () => {
@@ -7511,7 +7668,7 @@ async function showTutorialPopup() {
  * @returns {Promise<void>}
  */
 async function showTutorialRenamePopup() {
-  const flags = await copilot.tutorial.getFlags();
+  const flags = await desktop.tutorial.getFlags();
   if (flags.tutorialRenameShown) return;
 
   // Don't advertise renaming-to-save on providers that can't persist sessions.
@@ -7543,7 +7700,7 @@ async function showTutorialRenamePopup() {
   popup.style.left = (rect.left + rect.width / 2 - popup.offsetWidth / 2) + 'px';
   popup.style.top = (rect.bottom + 10) + 'px';
 
-  await copilot.tutorial.setFlag('tutorialRenameShown', true);
+  await desktop.tutorial.setFlag('tutorialRenameShown', true);
 
   let closed = false;
   const close = () => {
@@ -7573,7 +7730,7 @@ async function showTutorialRenamePopup() {
  */
 async function finishOnboarding() {
   try {
-    await copilot.onboarding.complete();
+    await desktop.onboarding.complete();
   } catch (e) {
     console.warn('[onboarding] Complete fehlgeschlagen:', e.message);
   }
@@ -7608,7 +7765,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initCopilotModels(); // seed the persisted model lists before tabs/dropdowns render
     refreshAllProviderModels(); // discover direct-API provider models in the background
     applyTheme(getCurrentTheme());
-    initCopilotIPC();
+    initAgentIPC();
     initResize();
 
     await initStatusbar();
@@ -7649,6 +7806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initOnboarding();
     refreshProviderStatus();
     initUpdateChecker();
+    initClaudeAdapterUpdateChecker();
     initDynamicPricing();
     initSubscriptionUsageTicker();
   } finally {

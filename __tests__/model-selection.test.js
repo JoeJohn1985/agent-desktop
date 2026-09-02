@@ -127,7 +127,7 @@ class ModelSelectionStateMachine {
   // ── sendMessage (Zeile 1059-1068 in app.js) ────────────────
 
   /**
-   * Simuliert sendMessage(): Baut die Options für copilot.chat.send() auf.
+   * Simuliert sendMessage(): Baut die Options für desktop.chat.send() auf.
    * Spiegelt: model: tab.selectedModel || undefined
    * @param {string} text
    */

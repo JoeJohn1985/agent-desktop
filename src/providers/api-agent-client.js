@@ -184,15 +184,15 @@ class ApiAgentClient {
       this.#emit({ type: 'assistant.turn_end', data: {} });
       this.#persist();
       this.#state = 'ready';
-      this.#sendToRenderer('copilot:done', this.#tabId, 0);
+      this.#sendToRenderer('agent:done', this.#tabId, 0);
     } catch (err) {
       this.#state = 'ready';
       const cancelled = signal.aborted || err?.name === 'AbortError' || err?.message === 'Cancelled';
       if (cancelled) {
-        this.#sendToRenderer('copilot:done', this.#tabId, -1);
+        this.#sendToRenderer('agent:done', this.#tabId, -1);
       } else {
         this.#emit({ type: 'error', data: { message: err?.message || String(err) } });
-        this.#sendToRenderer('copilot:done', this.#tabId, 1);
+        this.#sendToRenderer('agent:done', this.#tabId, 1);
       }
     }
   }
@@ -248,7 +248,7 @@ class ApiAgentClient {
   // ── Internal helpers ───────────────────────────────────────────
 
   #emit(event) {
-    this.#sendToRenderer('copilot:event', this.#tabId, event);
+    this.#sendToRenderer('agent:event', this.#tabId, event);
   }
 
   #addUsage(u) {

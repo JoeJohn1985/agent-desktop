@@ -6,7 +6,7 @@
  * Contracts:
  * - saveSessionCwd(sessionId, cwd): speichert cwd in namedSessions[sessionId].cwd
  * - getSessionCwd(sessionId): liest namedSessions[sessionId]?.cwd oder null
- * - sendMessage übergibt tab.cwd als options.cwd an copilot.chat.send
+ * - sendMessage übergibt tab.cwd als options.cwd an desktop.chat.send
  * - spawnCopilot nutzt options.cwd als cwd für den Prozess (Fallback: COPILOT_CWD)
  * - Session-Restore: tab.cwd wird aus namedSessions[sessionId].cwd geladen
  */
@@ -95,8 +95,8 @@ describe('Session CWD — sendMessage übergibt cwd an IPC', () => {
   // Diese Tests simulieren den Renderer-Kontext:
   // sendMessage() liest tab.cwd und gibt es als options.cwd weiter
 
-  test('copilot.chat.send bekommt options.cwd wenn tab.cwd gesetzt', () => {
-    // Simulated copilot.chat.send mock
+  test('desktop.chat.send bekommt options.cwd wenn tab.cwd gesetzt', () => {
+    // Simulated desktop.chat.send mock
     const sendMock = jest.fn();
 
     // Simulate what sendMessage does with cwd:
@@ -112,7 +112,7 @@ describe('Session CWD — sendMessage übergibt cwd an IPC', () => {
     }));
   });
 
-  test('copilot.chat.send bekommt options.cwd als undefined wenn tab.cwd nicht gesetzt', () => {
+  test('desktop.chat.send bekommt options.cwd als undefined wenn tab.cwd nicht gesetzt', () => {
     const sendMock = jest.fn();
 
     const tab = { sessionId: 'abc' }; // kein cwd
@@ -127,7 +127,7 @@ describe('Session CWD — sendMessage übergibt cwd an IPC', () => {
     }));
   });
 
-  test('copilot.chat.send bekommt options.cwd als undefined wenn tab.cwd null', () => {
+  test('desktop.chat.send bekommt options.cwd als undefined wenn tab.cwd null', () => {
     const sendMock = jest.fn();
 
     const tab = { sessionId: 'abc', cwd: null };

@@ -63,59 +63,65 @@ contextBridge.exposeInMainWorld('markdown', {
 });
 
 /**
- * IPC bridge: Exposes the `copilot.*` namespace to the renderer process
+ * IPC bridge: Exposes the `desktop.*` namespace to the renderer process
  * via Electron's contextBridge. All methods delegate to ipcRenderer.invoke
- * (request/response) or ipcRenderer.send (fire-and-forget).
+ * (request/response) or ipcRenderer.send (fire-and-forget). Named `desktop`,
+ * not `copilot`: the app started Copilot-only, but this bridge has carried
+ * every provider (Claude Code, Anthropic, OpenAI, …) for a long time now.
  *
- * @namespace copilot
+ * @namespace desktop
  */
-contextBridge.exposeInMainWorld('copilot', {
+contextBridge.exposeInMainWorld('desktop', {
 
   // ── Chat (JSONL-based communication) ──────────────────────
 
   /**
    * Chat API — spawns Copilot CLI processes and streams JSONL events.
    *
-   * @namespace copilot.chat
+   * @namespace desktop.chat
    */
   chat: {
-    /** @ipc copilot:newTab — Allocates a new tab ID. @returns {Promise<number>} */
-    newTab: () => ipcRenderer.invoke('copilot:newTab'),
+    /** @ipc agent:newTab — Allocates a new tab ID. @returns {Promise<number>} */
+    newTab: () => ipcRenderer.invoke('agent:newTab'),
     /**
      * Sends a prompt to the Copilot CLI for the given tab.
-     * @ipc copilot:send
+     * @ipc agent:send
      * @param {number} tabId - Target tab identifier
      * @param {string} prompt - User prompt text
      * @param {Object} [options] - Spawn options (model, sessionId, deniedTools, etc.)
      * @returns {Promise<number>} The tab ID
      */
-    send: (tabId, prompt, options) => ipcRenderer.invoke('copilot:send', tabId, prompt, options),
+    send: (tabId, prompt, options) => ipcRenderer.invoke('agent:send', tabId, prompt, options),
     /**
      * Kills the running Copilot process for a tab.
-     * @ipc copilot:stop
+     * @ipc agent:stop
      * @param {number} tabId
      */
-    stop: (tabId) => ipcRenderer.send('copilot:stop', tabId),
-    /** @ipc copilot:restartWithDeniedTools — Restarts the ACP process with new denied tools, reloads session. */
-    restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('copilot:restartWithDeniedTools', tabId, deniedTools),
-    /** @ipc copilot:silentCommand — Runs a slash command silently, returns {success, text}. */
-    silentCommand: (tabId, command, timeoutMs) => ipcRenderer.invoke('copilot:silentCommand', tabId, command, timeoutMs),
-    /** @ipc copilot:respondPermission — Answers an ACP permission request. */
-    respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('copilot:respondPermission', tabId, requestId, optionId),
-    /** @ipc copilot:resetBackend — Destroys a tab's backend (fresh session on next prompt). */
-    resetBackend: (tabId) => ipcRenderer.invoke('copilot:resetBackend', tabId),
+    stop: (tabId) => ipcRenderer.send('agent:stop', tabId),
+    /** @ipc agent:restartWithDeniedTools — Restarts the ACP process with new denied tools, reloads session. */
+    restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('agent:restartWithDeniedTools', tabId, deniedTools),
+    /** @ipc agent:silentCommand — Runs a slash command silently, returns {success, text}. */
+    silentCommand: (tabId, command, timeoutMs) => ipcRenderer.invoke('agent:silentCommand', tabId, command, timeoutMs),
+    /** @ipc agent:respondPermission — Answers an ACP permission request. */
+    respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('agent:respondPermission', tabId, requestId, optionId),
+    /** @ipc agent:resetBackend — Destroys a tab's backend (fresh session on next prompt). */
+    resetBackend: (tabId) => ipcRenderer.invoke('agent:resetBackend', tabId),
     /** @ipc claudecode:status — {installed, version} for the Claude Code CLI. */
     claudeCodeStatus: () => ipcRenderer.invoke('claudecode:status'),
-    /** @ipc copilot:setApproval — Toggle a tab between manual approval and allow-all. */
-    setApproval: (tabId, manualApproval) => ipcRenderer.invoke('copilot:setApproval', tabId, manualApproval),
-    /** @ipc copilot:getCwd @returns {Promise<string>} Current working directory */
-    getCwd: () => ipcRenderer.invoke('copilot:getCwd'),
-    /** @ipc copilot:openCwd — Opens the CWD in the system file explorer. @returns {Promise<void>} */
-    openCwd: () => ipcRenderer.invoke('copilot:openCwd'),
-    /** @ipc copilot:getVersions @returns {Promise<{app: string, cli: string}>} App and CLI versions */
-    getVersions: () => ipcRenderer.invoke('copilot:getVersions'),
-    /** @ipc copilot:getInstructions @returns {Promise<Array<{path: string, name: string}>>} Found instruction files */
-    getInstructions: () => ipcRenderer.invoke('copilot:getInstructions'),
+    /** @ipc claudecode:checkAdapterUpdate @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>} */
+    checkAdapterUpdate: () => ipcRenderer.invoke('claudecode:checkAdapterUpdate'),
+    /** @ipc claudecode:applyAdapterUpdate — Pins & verifies the given adapter version. @returns {Promise<{ok:boolean, newVersion?:string, error?:string}>} */
+    applyAdapterUpdate: (version) => ipcRenderer.invoke('claudecode:applyAdapterUpdate', version),
+    /** @ipc agent:setApproval — Toggle a tab between manual approval and allow-all. */
+    setApproval: (tabId, manualApproval) => ipcRenderer.invoke('agent:setApproval', tabId, manualApproval),
+    /** @ipc agent:getCwd @returns {Promise<string>} Current working directory */
+    getCwd: () => ipcRenderer.invoke('agent:getCwd'),
+    /** @ipc agent:openCwd — Opens the CWD in the system file explorer. @returns {Promise<void>} */
+    openCwd: () => ipcRenderer.invoke('agent:openCwd'),
+    /** @ipc agent:getVersions @returns {Promise<{app: string, cli: string}>} App and CLI versions */
+    getVersions: () => ipcRenderer.invoke('agent:getVersions'),
+    /** @ipc agent:getInstructions @returns {Promise<Array<{path: string, name: string}>>} Found instruction files */
+    getInstructions: () => ipcRenderer.invoke('agent:getInstructions'),
     /**
      * Subscribes to JSONL events streamed from the Copilot CLI.
      * @param {(tabId: number, event: Object) => void} cb - Event callback
@@ -123,8 +129,8 @@ contextBridge.exposeInMainWorld('copilot', {
      */
     onEvent: (cb) => {
       const handler = (_e, tabId, event) => cb(tabId, event);
-      ipcRenderer.on('copilot:event', handler);
-      return () => ipcRenderer.removeListener('copilot:event', handler);
+      ipcRenderer.on('agent:event', handler);
+      return () => ipcRenderer.removeListener('agent:event', handler);
     },
     /**
      * Subscribes to process-done events (Copilot CLI exited).
@@ -133,8 +139,8 @@ contextBridge.exposeInMainWorld('copilot', {
      */
     onDone: (cb) => {
       const handler = (_e, tabId, code) => cb(tabId, code);
-      ipcRenderer.on('copilot:done', handler);
-      return () => ipcRenderer.removeListener('copilot:done', handler);
+      ipcRenderer.on('agent:done', handler);
+      return () => ipcRenderer.removeListener('agent:done', handler);
     },
   },
 
@@ -143,7 +149,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Session management — read checkpoints, plans, and messages from session state.
    *
-   * @namespace copilot.sessions
+   * @namespace desktop.sessions
    */
   sessions: {
     /** @ipc sessions:readCheckpoints @param {string} id - Session ID @returns {Promise<Array>} */
@@ -167,7 +173,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Per-session todo list management.
    *
-   * @namespace copilot.todos
+   * @namespace desktop.todos
    */
   todos: {
     /** @ipc todos:list @param {string} cwd Project directory @returns {Promise<Array<Object>>} */
@@ -204,7 +210,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Image file management (list, open, delete) in the project images directory.
    *
-   * @namespace copilot.images
+   * @namespace desktop.images
    */
   images: {
     /** @ipc images:list @returns {Promise<Array<Object>>} */
@@ -229,7 +235,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Video utilities — frame extraction for video files.
    *
-   * @namespace copilot.videos
+   * @namespace desktop.videos
    */
   videos: {
     /**
@@ -247,7 +253,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Persistent file-based user preferences (theme, language, etc.).
    *
-   * @namespace copilot.preferences
+   * @namespace desktop.preferences
    */
   preferences: {
     /** @ipc preferences:read @returns {Promise<Object>} Current preferences merged with defaults */
@@ -262,7 +268,7 @@ contextBridge.exposeInMainWorld('copilot', {
    * Encrypted provider API key management. Keys are stored via the OS keychain
    * in the main process and are never returned to the renderer.
    *
-   * @namespace copilot.providers
+   * @namespace desktop.providers
    */
   providers: {
     /** @ipc providers:status @returns {Promise<{available: boolean, keyed: Object<string,boolean>}>} */
@@ -282,7 +288,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Folder configuration — read/save project paths, browse for directories/files.
    *
-   * @namespace copilot.folders
+   * @namespace desktop.folders
    */
   folders: {
     /** @ipc folders:read @returns {Promise<Object>} All configured folder paths */
@@ -320,7 +326,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Read/write the copilot-instructions.md file.
    *
-   * @namespace copilot.instructions
+   * @namespace desktop.instructions
    */
   instructions: {
     /** @ipc instructions:read @returns {Promise<{success: boolean, content: string, path: string}>} */
@@ -341,7 +347,7 @@ contextBridge.exposeInMainWorld('copilot', {
    * provider-agnostic answer: each provider reads different folders (see
    * src/context-paths.js).
    *
-   * @namespace copilot.context
+   * @namespace desktop.context
    */
   context: {
     /** @ipc context:listSkills @param {string} provider @param {string|null} cwd @returns {Promise<Array<Object>>} */
@@ -358,7 +364,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * MCP server management — list project-configured MCP servers.
    *
-   * @namespace copilot.mcp
+   * @namespace desktop.mcp
    */
   mcp: {
     /** @ipc mcp:list @returns {Promise<Array<Object>>} All configured MCP servers (copilot mcp list --json) */
@@ -374,7 +380,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Test runner — execute unit tests, e2e tests and coverage reports.
    *
-   * @namespace copilot.tests
+   * @namespace desktop.tests
    */
   tests: {
     /** @ipc tests:run @returns {Promise<Object>} Test run result */
@@ -390,7 +396,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Plugin management — install, uninstall, update plugins and manage marketplaces.
    *
-   * @namespace copilot.plugins
+   * @namespace desktop.plugins
    */
   plugins: {
     /** @ipc plugin:list @returns {Promise<Array<Object>>} Installed plugins */
@@ -416,7 +422,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Dev console log stream — receives main-process console output in the renderer.
    *
-   * @namespace copilot.devConsole
+   * @namespace desktop.devConsole
    */
   devConsole: {
     /**
@@ -437,7 +443,7 @@ contextBridge.exposeInMainWorld('copilot', {
    * Renderer-to-file logging bridge. Messages are forwarded to the main process
    * file logger via fire-and-forget IPC.
    *
-   * @namespace copilot.log
+   * @namespace desktop.log
    */
   log: {
     /**
@@ -453,7 +459,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * First-run setup — creates default folders, starter agents and personalized configs.
    *
-   * @namespace copilot.setup
+   * @namespace desktop.setup
    */
   setup: {
     /** @ipc setup:getFolderStatus @returns {Promise<Object>} Existence status of each setup folder */
@@ -485,7 +491,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Onboarding state — tracks whether the user has completed the first-run wizard.
    *
-   * @namespace copilot.onboarding
+   * @namespace desktop.onboarding
    */
   onboarding: {
     /** @ipc onboarding:isFirstRun @returns {Promise<boolean>} True if onboarding not yet completed */
@@ -499,7 +505,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Tutorial flag management — tracks which tutorial hints have been shown.
    *
-   * @namespace copilot.tutorial
+   * @namespace desktop.tutorial
    */
   tutorial: {
     /** @ipc tutorial:getFlags @returns {Promise<{tutorialSkillsShown: boolean, tutorialRenameShown: boolean}>} */
@@ -518,7 +524,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Developer tools — inspect and manipulate onboarding state for debugging.
    *
-   * @namespace copilot.dev
+   * @namespace desktop.dev
    */
   dev: {
     /** @ipc dev:getOnboardingState @returns {Promise<{onboardingComplete: boolean}>} */
@@ -537,21 +543,21 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Authentication — checks login status and triggers Copilot CLI login flow.
    *
-   * @namespace copilot.auth
+   * @namespace desktop.auth
    */
   auth: {
     /** @ipc auth:check @returns {Promise<{success: boolean, authenticated: boolean, user: string|null, host?: string}>} */
     check: () => ipcRenderer.invoke('auth:check'),
     /** @ipc auth:login — Opens a new terminal window for `copilot login`. @returns {Promise<{success: boolean, pendingInTerminal: boolean}>} */
     login: () => ipcRenderer.invoke('auth:login'),
-    /** @ipc copilot:status — Copilot CLI install + login status. @returns {Promise<{cliInstalled:boolean, version:string|null, authenticated:boolean, user:string|null}>} */
-    status: () => ipcRenderer.invoke('copilot:status'),
+    /** @ipc agent:status — Copilot CLI install + login status. @returns {Promise<{cliInstalled:boolean, version:string|null, authenticated:boolean, user:string|null}>} */
+    status: () => ipcRenderer.invoke('agent:status'),
   },
 
   /**
    * Self-update (git-based): check for newer release tags and apply via git pull.
    *
-   * @namespace copilot.updates
+   * @namespace desktop.updates
    */
   updates: {
     /** @ipc updates:check @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, reason?:string, error?:string}>} */
@@ -563,7 +569,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Public pricing fallback source (LiteLLM) for models without a hardcoded price.
    *
-   * @namespace copilot.pricing
+   * @namespace desktop.pricing
    */
   pricing: {
     /** @ipc pricing:getMap @returns {Promise<Object<string,{input:number,cache:number,output:number}>>} normalized model key → USD/1M */
@@ -575,7 +581,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * Frameless window controls (minimize, maximize/restore, close).
    *
-   * @namespace copilot.window
+   * @namespace desktop.window
    */
   window: {
     /** @ipc window:minimize */
@@ -595,7 +601,7 @@ contextBridge.exposeInMainWorld('copilot', {
   /**
    * File utilities — resolve dropped file paths and process file content.
    *
-   * @namespace copilot.files
+   * @namespace desktop.files
    */
   files: {
     /**

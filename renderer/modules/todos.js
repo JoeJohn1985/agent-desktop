@@ -26,7 +26,7 @@ async function loadTodos(cwd) {
     return;
   }
   try {
-    currentTodos = await copilot.todos.list(cwd) || [];
+    currentTodos = await desktop.todos.list(cwd) || [];
   } catch (e) {
     console.warn('[todos] Laden fehlgeschlagen:', e.message);
     currentTodos = [];
@@ -113,7 +113,7 @@ function initTodoDragDrop(container) {
       const byId = new Map(currentTodos.map(t => [t.id, t]));
       currentTodos = orderedIds.map(id => byId.get(id)).filter(Boolean);
       if (todosCwd) {
-        copilot.todos.reorder(todosCwd, orderedIds);
+        desktop.todos.reorder(todosCwd, orderedIds);
       }
     });
 
@@ -153,7 +153,7 @@ async function addTodo() {
   if (!text || !todosCwd) return;
 
   try {
-    currentTodos = await copilot.todos.add(todosCwd, { text }) || currentTodos;
+    currentTodos = await desktop.todos.add(todosCwd, { text }) || currentTodos;
   } catch (e) {
     console.warn('[todos] Hinzufügen fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht hinzugefügt werden', 'error');
@@ -174,7 +174,7 @@ async function toggleTodo(todoId) {
   if (!todo || !todosCwd) return;
   const newStatus = todo.status === 'done' ? 'open' : 'done';
   try {
-    currentTodos = await copilot.todos.update(todosCwd, todoId, { status: newStatus }) || currentTodos;
+    currentTodos = await desktop.todos.update(todosCwd, todoId, { status: newStatus }) || currentTodos;
   } catch (e) {
     console.warn('[todos] Aktualisieren fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht aktualisiert werden', 'error');
@@ -192,7 +192,7 @@ async function toggleTodo(todoId) {
 async function deleteTodo(todoId) {
   if (!todosCwd) return;
   try {
-    currentTodos = await copilot.todos.delete(todosCwd, todoId) || currentTodos;
+    currentTodos = await desktop.todos.delete(todosCwd, todoId) || currentTodos;
   } catch (e) {
     console.warn('[todos] Löschen fehlgeschlagen:', e.message);
     showNotification('Todo konnte nicht gelöscht werden', 'error');
