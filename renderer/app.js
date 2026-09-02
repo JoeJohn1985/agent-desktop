@@ -1994,7 +1994,7 @@ function initAgentIPC() {
         break;
       }
 
-      case 'copilot.models_available': {
+      case 'agent.models_available': {
         // The ACP backend reported which models this account can use → assign them
         // to THIS tab's provider (Copilot or Claude Code) rather than assuming
         // Copilot, so each ACP provider gets its own discovered model list.
@@ -6095,8 +6095,6 @@ async function renderCopilotProviderRow(list, p) {
     recheck.textContent = 'Status prüfen';
     recheck.addEventListener('click', () => renderProvidersSettings());
     controls.appendChild(recheck);
-
-    renderClaudeAdapterUpdateRow(controls);
     return;
   }
 
@@ -6128,81 +6126,6 @@ async function renderCopilotProviderRow(list, p) {
       showNotification('Login im Terminal abschließen, danach „Status prüfen".', 'info');
     });
     addBtn('Status prüfen', false, () => renderProvidersSettings());
-  }
-}
-
-/**
- * Renders the "ACP-Adapter" row inside the Claude Code provider settings:
- * shows the pinned @agentclientprotocol/claude-agent-acp version and lets the
- * user check npm for a newer one and apply it (see main.js
- * claudecode:checkAdapterUpdate / claudecode:applyAdapterUpdate). The adapter
- * is pinned rather than always "latest" so a session-open never triggers a
- * surprise reinstall — updates only happen when the user asks for one here.
- * @param {HTMLElement} controls
- */
-function renderClaudeAdapterUpdateRow(controls) {
-  const wrap = document.createElement('div');
-  wrap.className = 'providers-row__adapter';
-  wrap.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
-  wrap.innerHTML = `
-    <span class="providers-row__hint" id="claudeAdapterStatus">ACP-Adapter: wird geprüft…</span>
-    <button class="action-btn" id="btnCheckAdapterUpdate">Nach Adapter-Update suchen</button>`;
-  controls.appendChild(wrap);
-
-  const statusEl = wrap.querySelector('#claudeAdapterStatus');
-  const checkBtn = wrap.querySelector('#btnCheckAdapterUpdate');
-
-  const runCheck = async () => {
-    checkBtn.disabled = true;
-    const prevLabel = checkBtn.textContent;
-    checkBtn.textContent = 'Suche…';
-    wrap.querySelector('.providers-row__adapter-apply')?.remove();
-    try {
-      const res = await window.desktop.chat.checkAdapterUpdate();
-      if (!res.ok) {
-        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} (Update-Prüfung fehlgeschlagen: ${res.error || 'unbekannter Fehler'})`;
-      } else if (res.updateAvailable) {
-        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} — neue Version v${res.latestVersion} verfügbar`;
-        const applyBtn = document.createElement('button');
-        applyBtn.className = 'action-btn action-btn--primary providers-row__adapter-apply';
-        applyBtn.textContent = `Auf v${res.latestVersion} aktualisieren`;
-        applyBtn.addEventListener('click', () => applyClaudeAdapterUpdate(applyBtn, statusEl, res.latestVersion));
-        wrap.appendChild(applyBtn);
-      } else {
-        statusEl.textContent = `ACP-Adapter: v${res.currentVersion} (aktuell)`;
-      }
-    } catch (e) {
-      statusEl.textContent = 'ACP-Adapter: Update-Prüfung fehlgeschlagen: ' + (e?.message || e);
-    } finally {
-      checkBtn.disabled = false;
-      checkBtn.textContent = prevLabel;
-    }
-  };
-
-  checkBtn.addEventListener('click', runCheck);
-  runCheck(); // show current/latest right away, same as the CLI status above
-}
-
-/** Applies a pinned Claude Code adapter version update (button handler for renderClaudeAdapterUpdateRow). */
-async function applyClaudeAdapterUpdate(applyBtn, statusEl, targetVersion) {
-  applyBtn.disabled = true;
-  const prevLabel = applyBtn.textContent;
-  applyBtn.textContent = 'Aktualisiere… (kann bei Erstinstallation etwas dauern)';
-  try {
-    const res = await window.desktop.chat.applyAdapterUpdate(targetVersion);
-    if (res.ok) {
-      showNotification(`ACP-Adapter aktualisiert auf v${res.newVersion}.`, 'success');
-      statusEl.textContent = `ACP-Adapter: v${res.newVersion} (aktuell)`;
-      applyBtn.remove();
-    } else {
-      showNotification('Adapter-Update fehlgeschlagen: ' + (res.error || 'unbekannter Fehler'), 'error');
-      applyBtn.disabled = false;
-      applyBtn.textContent = prevLabel;
-    }
-  } catch (e) {
-    showNotification('Adapter-Update fehlgeschlagen: ' + (e?.message || e), 'error');
-    applyBtn.disabled = false;
-    applyBtn.textContent = prevLabel;
   }
 }
 
@@ -6711,7 +6634,7 @@ const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
  */
 async function checkForUpdates({ silent = true } = {}) {
   if (_updateBusy) return;
-  if (!window.copilot?.updates) return;
+  if (!window.desktop?.updates) return;
   _updateBusy = true;
   const statusEl = document.getElementById('updateCheckStatus');
   if (!silent && statusEl) statusEl.textContent = 'Suche…';
@@ -6824,7 +6747,7 @@ const CLAUDE_ADAPTER_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** Silently checks npm for a newer adapter version and shows a banner if one is found. */
 async function checkClaudeAdapterUpdate() {
   if (_claudeAdapterUpdateBusy) return;
-  if (!window.copilot?.chat?.checkAdapterUpdate) return;
+  if (!window.desktop?.chat?.checkAdapterUpdate) return;
   // Only relevant if the Claude Code CLI (and thus the adapter) is actually used.
   try {
     const cc = await window.desktop.chat.claudeCodeStatus();

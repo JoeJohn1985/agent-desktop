@@ -598,7 +598,9 @@ ipcMain.handle('claudecode:status', async () => {
 
 /**
  * @ipc claudecode:checkAdapterUpdate — Checks npm for a newer version of the
- * pinned Claude Code ACP adapter package.
+ * pinned Claude Code ACP adapter package. Used by the silent background
+ * check that shows a banner when an update is actually available (renderer)
+ * — the manual "check now" Settings button was removed as redundant.
  * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>}
  */
 ipcMain.handle('claudecode:checkAdapterUpdate', async () => {

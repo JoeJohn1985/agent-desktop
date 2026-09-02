@@ -1103,7 +1103,7 @@ class AcpClient extends EventEmitter {
     }
 
     if (models.length) {
-      this.#emitToRenderer({ type: 'copilot.models_available', data: { models, currentModelId } });
+      this.#emitToRenderer({ type: 'agent.models_available', data: { models, currentModelId } });
     }
   }
 
