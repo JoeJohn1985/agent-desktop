@@ -20,8 +20,15 @@ const { DATA_DIR } = require('./data-dir');
 /** Project-level folder for everything the app itself manages, per project. */
 const PROJECT_DIR_NAME = '.agent-desktop';
 
-/** Providers with no skills/agents support at all (see PROVIDER_CAPABILITIES). */
-const UNSUPPORTED_PROVIDERS = new Set(['gemini']);
+/**
+ * Providers the app lists no skills/agents for (see PROVIDER_CAPABILITIES).
+ * - gemini: no support at all.
+ * - claude-code-ssh: supported by the agent, but its folders live on the
+ *   remote host — scanning them would need SSH, not fs. Returning nothing is
+ *   correct here rather than misleading: listing the LOCAL machine's skills
+ *   would show files the remote agent can't actually see.
+ */
+const UNSUPPORTED_PROVIDERS = new Set(['gemini', 'claude-code-ssh']);
 
 /**
  * Provider ids reaching the generic (non-copilot/claude-code) branch below get

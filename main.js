@@ -249,9 +249,40 @@ function createWindow() {
 /**
  * Base AcpClient options for the Claude Code adapter (shared by the prompt path
  * and the session-list/resume path). Model/mode/approval are layered on top.
- * @param {string} cwd
+ *
+ * With `sshHost` set, the exact same adapter is launched on a remote machine
+ * over SSH instead of locally. The point isn't remote compute — it's WHERE the
+ * session file ends up: Claude Code stores transcripts next to the process that
+ * runs it, so running it on e.g. a home server means that machine holds the
+ * session and any terminal there can `claude --resume <id>` into the very same
+ * conversation later. Nothing else about the protocol changes; ACP is spoken
+ * over the SSH pipe exactly as it is over a local pipe.
+ *
+ * @param {string} cwd - Working directory. Remote path when sshHost is set.
+ * @param {{sshHost?: string}} [opts]
  */
-function claudeCodeClientOptions(cwd) {
+function claudeCodeClientOptions(cwd, { sshHost } = {}) {
+  const adapterSpec = `${claudeAdapterUpdate.PACKAGE_NAME}@${getClaudeAdapterVersion()}`;
+  if (sshHost) {
+    return {
+      cwd,
+      command: 'ssh',
+      // -T: no TTY. The adapter speaks newline-delimited JSON-RPC over stdio,
+      // and a TTY would inject terminal control sequences into that stream.
+      // The remote cwd is applied with `cd` because SSH always starts in the
+      // remote home directory; both it and the adapter spec are shell-quoted
+      // since SSH concatenates its arguments into one remote shell command.
+      baseArgs: ['-T', sshHost, sshRemote.buildAdapterCommand(cwd, adapterSpec)],
+      // ssh is a real executable (OpenSSH ships with Windows) — unlike npx,
+      // which is a .cmd shim, so no shell wrapper is needed here.
+      shell: false,
+      localCommandStdout: true,
+      useConfigOptions: true,
+      mcpServers: [],
+      // No stripEnv/CLAUDE_CODE_EXECUTABLE: both target the LOCAL environment,
+      // which the remote process doesn't inherit anyway.
+    };
+  }
   const opts = {
     cwd,
     command: 'npx',
@@ -288,10 +319,26 @@ function claudeCodeClientOptions(cwd) {
 let _claudeExecutablePath;
 
 const claudeAdapterUpdate = require('./src/claude-adapter-update');
+const sshRemote = require('./src/ssh-remote');
 
 /** The pinned adapter version to launch (user override from Settings, else the built-in default). */
 function getClaudeAdapterVersion() {
   return readPreferences().claudeCodeAdapterVersion || claudeAdapterUpdate.DEFAULT_VERSION;
+}
+
+/**
+ * SSH target for the remote Claude Code provider, as you'd type it after
+ * `ssh` — either `user@host` or an alias defined in the user's ~/.ssh/config.
+ * Empty/unset means the provider isn't configured yet.
+ * @returns {string}
+ */
+function getClaudeCodeSshHost() {
+  return (readPreferences().claudeCodeSshHost || '').trim();
+}
+
+/** Default working directory on the remote host for the SSH provider ('' if unset). */
+function getClaudeCodeSshCwd() {
+  return (readPreferences().claudeCodeSshCwd || '').trim();
 }
 
 /** Resolves the absolute path of the `claude` executable on PATH (cached). */
@@ -318,10 +365,22 @@ function resolveClaudeExecutable() {
 }
 
 async function sendAgentPrompt(tabId, prompt, options = {}) {
-  const cwd = options.cwd || COPILOT_CWD;
   // The explicit ProviderID from the renderer is authoritative; fall back to
   // deriving it from the model only for legacy callers.
   const provider = options.provider || getModelProvider(options.model || '');
+  // COPILOT_CWD is a path on THIS machine — a meaningless fallback for a
+  // remote provider, so the SSH one falls back to its own configured remote
+  // directory instead (and errors out rather than silently running somewhere
+  // unintended if neither is set).
+  let cwd;
+  if (provider === 'claude-code-ssh') {
+    cwd = options.cwd || getClaudeCodeSshCwd();
+    if (!cwd) {
+      throw new Error('Kein Arbeitsverzeichnis für Claude Code (SSH) gesetzt (Einstellungen → Provider → Claude Code (SSH)).');
+    }
+  } else {
+    cwd = options.cwd || COPILOT_CWD;
+  }
 
   let client = backends.get(tabId);
 
@@ -332,19 +391,24 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
     client = null;
   }
 
-  // ACP-based backends: Copilot CLI and Claude Code (via the ACP adapter).
-  // Everything else is a direct-API backend.
-  const ACP_PROVIDERS = new Set(['copilot', 'claude-code']);
+  // ACP-based backends: Copilot CLI and both Claude Code variants (local and
+  // over SSH). Everything else is a direct-API backend.
+  const ACP_PROVIDERS = new Set(['copilot', 'claude-code', 'claude-code-ssh']);
   if (!ACP_PROVIDERS.has(provider)) {
     return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
   }
 
   // ── ACP path (Copilot / Claude Code) ─────────────────────────
   let clientOptions;
-  if (provider === 'claude-code') {
-    await resolveClaudeExecutable();
+  if (provider === 'claude-code' || provider === 'claude-code-ssh') {
+    const sshHost = provider === 'claude-code-ssh' ? getClaudeCodeSshHost() : null;
+    if (provider === 'claude-code-ssh' && !sshHost) {
+      throw new Error('Kein SSH-Host konfiguriert (Einstellungen → Provider → Claude Code (SSH)).');
+    }
+    // Only relevant locally: the remote host resolves its own `claude` binary.
+    if (!sshHost) await resolveClaudeExecutable();
     clientOptions = {
-      ...claudeCodeClientOptions(cwd),
+      ...claudeCodeClientOptions(cwd, { sshHost }),
       // No app-side auto-approve override here: Claude Code's own permission
       // mode (default/acceptEdits/plan/bypassPermissions, set via options.mode)
       // is the single source of truth for whether it asks before acting.
@@ -597,6 +661,83 @@ ipcMain.handle('claudecode:status', async () => {
 });
 
 /**
+ * @ipc claudecode:testSsh — One-shot reachability check for the remote Claude
+ * Code provider. Runs a single SSH command that reports node/claude versions
+ * and whether the working directory exists, so a misconfiguration surfaces
+ * here instead of as an opaque failure on the first prompt.
+ * @param {string} host - SSH target (user@host or ~/.ssh/config alias)
+ * @param {string} [cwd] - Optional remote working directory to verify
+ * @returns {Promise<{ok:boolean, nodeVersion?:string, claudeVersion?:string, cwdOk?:boolean, error?:string}>}
+ */
+ipcMain.handle('claudecode:testSsh', async (_event, host, cwd) => {
+  if (!host || typeof host !== 'string') return { ok: false, error: 'Kein SSH-Ziel angegeben' };
+
+  const probe = sshRemote.buildProbeCommand(cwd);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      // BatchMode: fail instead of blocking forever on a password prompt —
+      // there's no TTY here to type one into.
+      const proc = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, probe], { windowsHide: true });
+      let out = '';
+      let err = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.stderr?.on('data', (d) => { err += d.toString(); });
+      proc.on('error', (e) => finish({ ok: false, error: e.message || String(e) }));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          return finish({ ok: false, error: (err.trim().split('\n')[0] || `ssh beendet mit Code ${code}`) });
+        }
+        finish({ ok: true, ...sshRemote.parseProbeOutput(out) });
+      });
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ ok: false, error: 'Zeitüberschreitung' }); }, 20_000);
+    } catch (e) {
+      finish({ ok: false, error: e.message || String(e) });
+    }
+  });
+});
+
+/**
+ * @ipc claudecode:sshListDir — Lists subdirectories of a path on the remote
+ * host, for the remote folder picker. The local directory dialog can't browse
+ * another machine, and hand-typing remote paths is error-prone in a way that
+ * fails silently here: a wrong-but-existing path doesn't error, it just binds
+ * the session to a different directory (and thus a different session list).
+ * @param {string} host - SSH target
+ * @param {string} [dirPath] - Directory to list; empty/omitted = remote home
+ * @returns {Promise<{ok:boolean, path?:string, dirs?:string[], error?:string}>}
+ */
+ipcMain.handle('claudecode:sshListDir', async (_event, host, dirPath) => {
+  if (!host || typeof host !== 'string') return { ok: false, error: 'Kein SSH-Ziel angegeben' };
+
+  const cmd = sshRemote.buildListDirCommand(dirPath);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      const proc = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, cmd], { windowsHide: true });
+      let out = '';
+      let err = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.stderr?.on('data', (d) => { err += d.toString(); });
+      proc.on('error', (e) => finish({ ok: false, error: e.message || String(e) }));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          return finish({ ok: false, error: (err.trim().split('\n')[0] || `ssh beendet mit Code ${code}`) });
+        }
+        finish({ ok: true, ...sshRemote.parseListDirOutput(out) });
+      });
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ ok: false, error: 'Zeitüberschreitung' }); }, 20_000);
+    } catch (e) {
+      finish({ ok: false, error: e.message || String(e) });
+    }
+  });
+});
+
+/**
  * @ipc claudecode:checkAdapterUpdate — Checks npm for a newer version of the
  * pinned Claude Code ACP adapter package. Used by the silent background
  * check that shows a banner when an update is actually available (renderer)
@@ -640,7 +781,8 @@ ipcMain.handle('claudecode:applyAdapterUpdate', async (_event, version) => {
   // until it's next torn down — force that now so the pin takes effect
   // immediately instead of only for brand-new tabs.
   for (const [tabId, client] of backends) {
-    if (client.__provider === 'claude-code') {
+    // Both variants launch the same pinned adapter, so both need tearing down.
+    if (client.__provider === 'claude-code' || client.__provider === 'claude-code-ssh') {
       try { await client.destroy(); } catch (_) { /* ignore */ }
       backends.delete(tabId);
     }

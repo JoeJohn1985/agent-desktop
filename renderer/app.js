@@ -773,7 +773,10 @@ async function createTab(label, initialModel, provider) {
     statusEl,
     label: tabLabel,
     sessionId: null,    // filled after first response
-    cwd: null,          // per-tab working directory
+    // Per-tab working directory. SSH tabs start at the configured REMOTE
+    // default — leaving it null would let the backend fall back to this
+    // machine's local cwd, which is meaningless (and wrong) on the far side.
+    cwd: tabProvider === 'claude-code-ssh' ? (getClaudeCodeSshCwd() || null) : null,
     isProcessing: false,
     lastActivityAt: null,
     _inactivityTimer: null,
@@ -2234,6 +2237,14 @@ const DEFAULT_MODELS = [
   { id: 'sonnet', label: 'Sonnet 5', short: 'Sonnet 5', provider: 'claude-code', tier: 'sub' },
   { id: 'opus', label: 'Opus 5', short: 'Opus 5', provider: 'claude-code', tier: 'sub' },
   { id: 'haiku', label: 'Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code', tier: 'sub' },
+  // Claude Code over SSH (provider: 'claude-code-ssh') — same adapter and the
+  // same aliases, but spawned on a remote host so the session lives there and
+  // can be resumed from any terminal on that machine. Same pre-discovery
+  // fallback caveat as above.
+  { id: 'default', label: 'Default (Sonnet 5)', short: 'Sonnet 5', provider: 'claude-code-ssh', tier: 'sub' },
+  { id: 'sonnet', label: 'Sonnet 5', short: 'Sonnet 5', provider: 'claude-code-ssh', tier: 'sub' },
+  { id: 'opus', label: 'Opus 5', short: 'Opus 5', provider: 'claude-code-ssh', tier: 'sub' },
+  { id: 'haiku', label: 'Haiku 4.5', short: 'Haiku 4.5', provider: 'claude-code-ssh', tier: 'sub' },
   // Anthropic API (provider: 'anthropic') — benötigt API-Key in den Einstellungen
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', short: 'Haiku 4.5', provider: 'anthropic', tier: 'paid' },
   // TODO: Claude 5 (claude-sonnet-5 / claude-opus-5) hier ergänzen, sobald
@@ -2274,6 +2285,7 @@ function modelTierBadge(model) {
 const PROVIDER_LABELS = {
   copilot: 'GitHub Copilot',
   'claude-code': 'Claude Code',
+  'claude-code-ssh': 'Claude Code (SSH)',
   anthropic: 'Anthropic API',
   gemini: 'Google Gemini',
   openai: 'OpenAI',
@@ -2285,6 +2297,7 @@ const PROVIDER_LABELS = {
 // per connected provider, so keeping these tight matters more there than in
 // the model dropdown/provider list (which use the full PROVIDER_LABELS).
 const SETTINGS_TAB_LABELS = {
+  'claude-code-ssh': 'CC (SSH)',
   anthropic: 'Anthropic',
   gemini: 'Gemini',
   ollama: 'Ollama',
@@ -2296,7 +2309,7 @@ const PROVIDER_ICON = '🔌';
 // Maturity markers per provider. Beta = tested but not final; Alpha = untested.
 // Copilot is the primary, fully-tested provider and carries no badge.
 const BETA_PROVIDERS = new Set(['gemini']);
-const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama']);
+const ALPHA_PROVIDERS = new Set(['anthropic', 'openai', 'glm', 'ollama', 'claude-code-ssh']);
 
 /** Maturity badge (Alpha/Beta) HTML for a provider, or '' for none. */
 function providerStageBadge(provider) {
@@ -2331,6 +2344,7 @@ function getDefaultProvider() {
 const PROVIDER_DEFAULT_MODEL = {
   copilot: DEFAULT_MODEL_ID,        // claude-sonnet-4.6
   'claude-code': 'claude-sonnet-5', // refined once ACP reports the real models
+  'claude-code-ssh': 'claude-sonnet-5',
   anthropic: 'claude-opus-4-8',
   gemini: 'gemini-2.5-flash',
   openai: 'gpt-5.1',
@@ -2353,7 +2367,7 @@ function getDefaultModelForProvider(provider) {
   // Claude Code: don't force a model — let the ACP adapter use its own default
   // (the subscription default) unless the user explicitly configured one. Forcing
   // an id we're unsure about would make the adapter reject the prompt.
-  if (provider === 'claude-code') return '';
+  if (isClaudeCodeProvider(provider)) return '';
   if (valid(PROVIDER_DEFAULT_MODEL[provider])) return PROVIDER_DEFAULT_MODEL[provider];
   const m = DEFAULT_MODELS.find(x => (x.provider || 'copilot') === provider);
   if (m) return m.id;
@@ -2430,7 +2444,7 @@ const _dynamicModels = {};
 
 /** Default cost tier for freshly-discovered models, by provider. */
 const PROVIDER_DEFAULT_TIER = {
-  copilot: 'aic', 'claude-code': 'sub', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
+  copilot: 'aic', 'claude-code': 'sub', 'claude-code-ssh': 'sub', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
 };
 
 /**
@@ -2554,21 +2568,49 @@ function getTabProvider(tab) {
     || 'copilot';
 }
 
-const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
+const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', 'claude-code-ssh': 'CC (SSH)', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
 
 /** Inline brand-icon HTML for a provider (via provider-icons.js). */
 function providerIconHtml(provider, cls) {
   return window.ProviderIcons ? window.ProviderIcons.iconSvg(provider, cls) : '';
 }
 
+/**
+ * Both Claude Code variants: the local one and the SSH one, which run the same
+ * adapter against the same subscription and differ only in WHERE the process
+ * lives. Use this for behaviour that follows from "this is Claude Code"
+ * (billing, session semantics, UI affordances) — not for anything that touches
+ * the local filesystem or the local CLI, since for the SSH variant those live
+ * on the remote host (see the history/instructions/status branches, which stay
+ * deliberately local-only).
+ */
+function isClaudeCodeProvider(provider) {
+  return provider === 'claude-code' || provider === 'claude-code-ssh';
+}
+
+/**
+ * Configured SSH target for the remote Claude Code provider ('' if unset).
+ * Stored top-level in preferences (not under `settings`) so it matches how
+ * main.js reads it — see getClaudeCodeSshHost() there.
+ * @returns {string}
+ */
+function getClaudeCodeSshHost() {
+  return String(getPref('claudeCodeSshHost', '') || '').trim();
+}
+
+/** Default working directory ON THE REMOTE HOST for new SSH tabs ('' if unset). */
+function getClaudeCodeSshCwd() {
+  return String(getPref('claudeCodeSshCwd', '') || '').trim();
+}
+
 /** ACP-based backends (CLI/adapter over stdio), as opposed to direct-API providers. */
 function isAcpProvider(provider) {
-  return provider === 'copilot' || provider === 'claude-code';
+  return provider === 'copilot' || isClaudeCodeProvider(provider);
 }
 
 /** Whether a provider is billed via a subscription (no per-token USD cost). */
 function isSubscriptionProvider(provider) {
-  return provider === 'claude-code';
+  return isClaudeCodeProvider(provider);
 }
 
 // Which app features each provider actually supports. This is the single source
@@ -2594,6 +2636,11 @@ function isSubscriptionProvider(provider) {
 const PROVIDER_CAPABILITIES = {
   copilot:       { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: true,  sessions: true,  marketplace: true,  denylist: true },
   'claude-code': { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: true,  marketplace: false, denylist: false },
+  // Same as claude-code, minus everything that reads the LOCAL filesystem:
+  // skills/agents/instructions all live on the remote host, so the app can't
+  // list or edit them from here (Claude Code itself still discovers them over
+  // there — they're just not surfaced in this UI yet).
+  'claude-code-ssh': { models: true, modes: true, tools: true, context: true, costs: true, skills: false, agents: false, instructions: false, mcp: false, sessions: true, marketplace: false, denylist: false },
   anthropic:     { models: true, modes: true,  tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
   openai:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: true,  agents: true,  instructions: true,  mcp: false, sessions: false, marketplace: false, denylist: true },
   gemini:        { models: true, modes: false, tools: true, context: true, costs: true,  skills: false, agents: false, instructions: false, mcp: false, sessions: true,  marketplace: false, denylist: false },
@@ -2618,7 +2665,7 @@ const PROVIDER_FEATURE_META = [
 ];
 
 // Providers shown as columns in the feature matrix (order matters).
-const PROVIDER_MATRIX_ORDER = ['copilot', 'claude-code', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
+const PROVIDER_MATRIX_ORDER = ['copilot', 'claude-code', 'claude-code-ssh', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
 
 /** Whether a provider supports a given app feature (default true if unknown). */
 function providerSupports(provider, feature) {
@@ -2808,7 +2855,7 @@ function updateModelSelectBtn(tabId) {
 function updateProviderSpecificControls(tabId) {
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = tab ? getTabProvider(tab) : 'copilot';
-  const isClaudeCode = provider === 'claude-code';
+  const isClaudeCode = isClaudeCodeProvider(provider);
   const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
   if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
   // Hide sidebar sections the active provider doesn't support (skills/agents/MCP/sessions).
@@ -3337,7 +3384,7 @@ function updateUsageDisplay(parsed, tokens, fullText) {
  */
 function updateSubscriptionUsageDisplay(tab) {
   const el = document.getElementById('sessionUsage');
-  if (!el || !tab || getTabProvider(tab) !== 'claude-code') return;
+  if (!el || !tab || !isClaudeCodeProvider(getTabProvider(tab))) return;
   // Prefer the /usage windows (they carry the authoritative utilization %);
   // fall back to the live stream events (window + status + reset, usually no %).
   const windows = (Array.isArray(tab._subUsageWindows) && tab._subUsageWindows.length)
@@ -3704,7 +3751,23 @@ function startSessionRename(sessionId, card) {
  * @param {string} sessionId
  */
 async function pickSessionCwd(sessionId) {
-  const selected = await desktop.folders.browse();
+  // An SSH session's directory lives on the remote host, so the OS dialog
+  // (which can only see this machine) would hand back a meaningless local
+  // path. Find the owning tab first to pick the right picker.
+  const owningTab = [...tabs.values()].find(t => t.sessionId === sessionId);
+  const isSsh = owningTab && getTabProvider(owningTab) === 'claude-code-ssh';
+
+  let selected;
+  if (isSsh) {
+    const host = getClaudeCodeSshHost();
+    if (!host) {
+      showNotification('Kein SSH-Ziel konfiguriert (Einstellungen → Provider → Claude Code (SSH)).', 'error');
+      return;
+    }
+    selected = await pickRemoteFolder(host, owningTab.cwd || getClaudeCodeSshCwd());
+  } else {
+    selected = await desktop.folders.browse();
+  }
   if (!selected) return;
 
   // If the session is open in a tab, route through changeTabCwd (Claude Code
@@ -3729,7 +3792,9 @@ async function pickSessionCwd(sessionId) {
  * @param {string} newCwd
  */
 async function changeTabCwd(tabId, tab, newCwd) {
-  if (getTabProvider(tab) === 'claude-code' && tab.sessionId) {
+  // Applies to both Claude Code variants: the session is bound to its folder
+  // either way, only the machine holding it differs.
+  if (isClaudeCodeProvider(getTabProvider(tab)) && tab.sessionId) {
     const oldId = tab.sessionId;
     const name = tab._sessionName || getSessionName(oldId) || null;
     // Drop our named reference to the old session — this tab now starts anew.
@@ -3896,6 +3961,12 @@ async function displaySessionContext(tab, sessionId, tabId) {
       renderSimpleHistory(await desktop.sessions.readAllMessages(sessionId), insertBefore, tab);
     } else if (provider === 'claude-code') {
       renderSimpleHistory(await desktop.sessions.readClaudeCodeTranscript(tab.cwd, sessionId), insertBefore, tab);
+    } else if (provider === 'claude-code-ssh') {
+      // No history preview yet: the transcript lives in ~/.claude/projects on
+      // the REMOTE host, and readClaudeCodeTranscript reads the local disk.
+      // Falling through to the API branch below would be wrong (that reads a
+      // different store entirely), so render nothing — the session itself is
+      // intact and the adapter over there still has its full context.
     } else {
       const { messages, geminiMode } = await window.desktop.providers.loadSessionHistory(sessionId);
       renderApiHistory(messages, insertBefore, tab);
@@ -5709,6 +5780,24 @@ const PROVIDER_SETTINGS = [
     ].join('\n'),
   },
   {
+    id: 'claude-code-ssh', active: true, cli: true,
+    info: [
+      'Claude Code auf einem anderen Rechner – über SSH, gleiches Abo.',
+      '',
+      'Derselbe ACP-Adapter, nur gestartet auf dem Zielrechner statt lokal.',
+      'Dadurch liegt die Session dort — du kannst sie auf dem Zielrechner',
+      'jederzeit im Terminal mit „claude --resume <id>" weiterführen.',
+      '',
+      'Voraussetzungen auf dem Zielrechner: Node.js/npx, die „claude"-CLI',
+      'mit Abo eingeloggt, und ein SSH-Zugang ohne Passwortabfrage',
+      '(SSH-Key), da die App keine Passworteingabe anzeigen kann.',
+      '',
+      'Skills, Agents und Instructions liegen auf dem Zielrechner und',
+      'werden hier (noch) nicht angezeigt — Claude Code nutzt sie dort',
+      'trotzdem.',
+    ].join('\n'),
+  },
+  {
     id: 'anthropic', active: true, placeholder: 'sk-ant-…',
     info: [
       'Claude – voll agentisch (direkte API).',
@@ -5785,6 +5874,11 @@ async function getConnectedProviders() {
   let cc = { installed: false };
   try { cc = await window.desktop.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
   if (cc.installed) result.push({ id: 'claude-code', label: SETTINGS_TAB_LABELS['claude-code'] || PROVIDER_LABELS['claude-code'] || 'Claude Code' });
+  // The SSH variant needs no local CLI — a configured host is what makes it
+  // usable, so that's its "connected" signal (same idea as Ollama's base URL).
+  if (getClaudeCodeSshHost()) {
+    result.push({ id: 'claude-code-ssh', label: SETTINGS_TAB_LABELS['claude-code-ssh'] || PROVIDER_LABELS['claude-code-ssh'] });
+  }
 
   await refreshProviderStatus();
   for (const p of PROVIDER_SETTINGS) {
@@ -5819,13 +5913,40 @@ async function getConnectedProviderConfigs() {
  */
 function buildProviderConfigPanelHtml(providerId) {
   const label = PROVIDER_LABELS[providerId] || providerId;
-  const parts = [`
+  const parts = [];
+
+  // SSH target first: without it this provider can't start at all, so it
+  // belongs above the model picker rather than buried under it.
+  if (providerId === 'claude-code-ssh') {
+    parts.push(`
+      <div class="settings__group">
+        <label class="settings__label">🖧 SSH-Ziel</label>
+        <div class="settings__hint">Wie hinter <code>ssh</code> eingegeben — z.B. <code>pi@192.168.1.50</code> oder ein Alias aus deiner <code>~/.ssh/config</code>. Der Zugang muss ohne Passwortabfrage funktionieren (SSH-Key).</div>
+        <input type="text" class="settings__input" id="settClaudeCodeSshHost" placeholder="pi@raspberrypi.local" value="${escapeAttr(getClaudeCodeSshHost())}" />
+      </div>
+      <div class="settings__group">
+        <label class="settings__label">📂 Arbeitsverzeichnis (Standard)</label>
+        <div class="settings__hint">Pfad <strong>auf dem Zielrechner</strong>, in dem neue Tabs starten — z.B. <code>/home/pi/projekt</code>. Claude Code bindet Sessions an ihr Verzeichnis: derselbe Pfad = dieselbe Session-Liste beim späteren <code>claude --resume</code> dort.</div>
+        <div class="settings__folder-row">
+          <input type="text" class="settings__folder-input" id="settClaudeCodeSshCwd" placeholder="/home/pi/projekt" value="${escapeAttr(getClaudeCodeSshCwd())}" />
+          <button class="action-btn" id="btnBrowseClaudeCodeSshCwd" data-tooltip="Auf dem Zielrechner durchsuchen">📁</button>
+        </div>
+      </div>
+      <div class="settings__group">
+        <button class="action-btn" id="btnTestClaudeCodeSsh">Verbindung testen</button>
+        <span class="providers-row__hint" id="claudeCodeSshTestStatus"></span>
+      </div>
+      <div class="settings__separator"></div>
+    `);
+  }
+
+  parts.push(`
     <div class="settings__group">
       <label class="settings__label">Standard-Modell</label>
       <div class="settings__hint">Modell, mit dem ein neuer ${escapeHtml(label)}-Tab startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
       <select class="settings__select" data-provider-model-select="${escapeAttr(providerId)}"></select>
     </div>
-  `];
+  `);
 
   const folderRows = [];
   if (providerSupports(providerId, 'skills')) folderRows.push({ key: 'skillsDir', icon: '🧩', title: 'Skills' });
@@ -5889,6 +6010,150 @@ function buildProviderConfigPanelHtml(providerId) {
 }
 
 /**
+ * Opens a folder picker for a directory on the REMOTE host, since the OS
+ * dialog can only browse this machine. Navigation is one SSH round trip per
+ * level (see claudecode:sshListDir) — deliberately not pre-fetched, because
+ * each call is a full SSH handshake and most picks only descend a few levels.
+ *
+ * Resolves to the chosen absolute remote path, or null if cancelled.
+ * @param {string} host - SSH target
+ * @param {string} [startPath] - Where to open; defaults to the remote home
+ * @returns {Promise<string|null>}
+ */
+function pickRemoteFolder(host, startPath) {
+  return new Promise((resolve) => {
+    document.querySelectorAll('.remote-picker').forEach(el => el.remove());
+
+    const overlay = document.createElement('div');
+    overlay.className = 'sidebar-confirm remote-picker';
+    overlay.innerHTML = `
+      <div class="sidebar-confirm__box remote-picker__box">
+        <p class="sidebar-confirm__text">📂 Ordner auf <strong>${escapeHtml(host)}</strong> wählen</p>
+        <div class="remote-picker__path" id="remotePickerPath">…</div>
+        <div class="remote-picker__list" id="remotePickerList"></div>
+        <div class="sidebar-confirm__actions">
+          <button class="action-btn action-btn--primary" id="remotePickerChoose">Diesen Ordner wählen</button>
+          <button class="action-btn" id="remotePickerCancel">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const pathEl = overlay.querySelector('#remotePickerPath');
+    const listEl = overlay.querySelector('#remotePickerList');
+    const chooseBtn = overlay.querySelector('#remotePickerChoose');
+    let currentPath = null;
+
+    const close = (result) => { overlay.remove(); resolve(result); };
+
+    const navigate = async (target) => {
+      listEl.innerHTML = '<div class="remote-picker__hint">Lade…</div>';
+      chooseBtn.disabled = true;
+      let res;
+      try {
+        res = await window.desktop.chat.sshListDir(host, target);
+      } catch (e) {
+        res = { ok: false, error: e?.message || String(e) };
+      }
+      if (!res.ok) {
+        listEl.innerHTML = `<div class="remote-picker__hint remote-picker__hint--error">❌ ${escapeHtml(res.error || 'Fehler')}</div>`;
+        // Keep the previous path selectable so one bad subfolder doesn't
+        // strand the user in a dead dialog.
+        chooseBtn.disabled = !currentPath;
+        return;
+      }
+      currentPath = res.path;
+      pathEl.textContent = currentPath;
+      chooseBtn.disabled = false;
+
+      const rows = [];
+      // Root has no parent — offering ".." there would just reload root.
+      if (currentPath && currentPath !== '/') {
+        rows.push('<button class="remote-picker__row" data-remote-up="1">📁 ..</button>');
+      }
+      for (const d of res.dirs || []) {
+        rows.push(`<button class="remote-picker__row" data-remote-dir="${escapeAttr(d)}">📁 ${escapeHtml(d)}</button>`);
+      }
+      listEl.innerHTML = rows.length ? rows.join('') : '<div class="remote-picker__hint">Keine Unterordner</div>';
+    };
+
+    listEl.addEventListener('click', (e) => {
+      const up = e.target.closest('[data-remote-up]');
+      if (up) { navigate(`${currentPath}/..`); return; }
+      const dir = e.target.closest('[data-remote-dir]');
+      // Join manually rather than with path helpers: this is a POSIX path on
+      // the remote host, and the renderer runs on Windows.
+      if (dir) navigate(`${currentPath.replace(/\/$/, '')}/${dir.dataset.remoteDir}`);
+    });
+
+    chooseBtn.addEventListener('click', () => close(currentPath));
+    overlay.querySelector('#remotePickerCancel').addEventListener('click', () => close(null));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+
+    navigate(startPath || '');
+  });
+}
+
+/**
+ * Wires the Claude Code (SSH) settings: host/cwd inputs (saved on change) and
+ * the connection test. Both fields are saved as typed rather than validated —
+ * an SSH target can be a config alias, a user@host, or an IP, and guessing
+ * which is "valid" would reject legitimate setups. The test button is the
+ * validation instead: it reports what actually happened when connecting.
+ * @param {HTMLElement} panel
+ */
+function wireClaudeCodeSshPanel(panel) {
+  const hostInput = panel.querySelector('#settClaudeCodeSshHost');
+  const cwdInput = panel.querySelector('#settClaudeCodeSshCwd');
+  const testBtn = panel.querySelector('#btnTestClaudeCodeSsh');
+  const statusEl = panel.querySelector('#claudeCodeSshTestStatus');
+
+  hostInput?.addEventListener('change', () => setPref('claudeCodeSshHost', hostInput.value.trim()));
+  cwdInput?.addEventListener('change', () => setPref('claudeCodeSshCwd', cwdInput.value.trim()));
+
+  panel.querySelector('#btnBrowseClaudeCodeSshCwd')?.addEventListener('click', async () => {
+    const host = (hostInput?.value || '').trim();
+    if (!host) {
+      statusEl.textContent = 'Bitte zuerst ein SSH-Ziel eintragen.';
+      return;
+    }
+    setPref('claudeCodeSshHost', host); // browsing implies this host is the one we want
+    const picked = await pickRemoteFolder(host, (cwdInput?.value || '').trim());
+    if (picked && cwdInput) {
+      cwdInput.value = picked;
+      setPref('claudeCodeSshCwd', picked);
+    }
+  });
+
+  testBtn?.addEventListener('click', async () => {
+    const host = (hostInput?.value || '').trim();
+    if (!host) {
+      statusEl.textContent = 'Bitte zuerst ein SSH-Ziel eintragen.';
+      return;
+    }
+    // Persist before testing, so a user who types and immediately clicks
+    // doesn't test one value while a different one stays configured.
+    setPref('claudeCodeSshHost', host);
+    if (cwdInput) setPref('claudeCodeSshCwd', cwdInput.value.trim());
+
+    testBtn.disabled = true;
+    const prevLabel = testBtn.textContent;
+    testBtn.textContent = 'Teste…';
+    statusEl.textContent = '';
+    try {
+      const res = await window.desktop.chat.testClaudeCodeSsh(host, (cwdInput?.value || '').trim());
+      statusEl.textContent = res.ok
+        ? `✅ Verbunden${res.nodeVersion ? ` · Node ${res.nodeVersion}` : ''}${res.claudeVersion ? ` · claude ${res.claudeVersion}` : ' · „claude"-CLI nicht gefunden'}${res.cwdOk === false ? ' · Arbeitsverzeichnis existiert nicht' : ''}`
+        : `❌ ${res.error || 'Verbindung fehlgeschlagen'}`;
+    } catch (e) {
+      statusEl.textContent = `❌ ${e?.message || e}`;
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = prevLabel;
+    }
+  });
+}
+
+/**
  * Wires one dynamically-generated provider tab's controls after it's been
  * inserted into the DOM: fills the default-model select, loads and displays
  * the Skills/Agents/Instructions folder paths, and wires the "open" buttons.
@@ -5901,6 +6166,10 @@ async function wireProviderConfigPanel(providerId, panel) {
   if (providerSupports(providerId, 'denylist')) {
     renderDeniedTools(providerId);
     initTagInput(`btnAddDeniedTool-${providerId}`, `settDeniedToolInput-${providerId}`, (val) => addDeniedTool(providerId, val));
+  }
+
+  if (providerId === 'claude-code-ssh') {
+    wireClaudeCodeSshPanel(panel);
   }
 
   if (providerId === 'claude-code') {

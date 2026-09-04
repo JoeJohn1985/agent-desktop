@@ -523,6 +523,51 @@ body {
   justify-content: flex-end;
 }
 
+/* ── Remote folder picker (Claude Code over SSH) ───────── */
+/* Reuses .sidebar-confirm as the overlay; only the wider box and the
+   scrollable directory list are specific to it. */
+.remote-picker__box {
+  max-width: 520px;
+}
+.remote-picker__path {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.remote-picker__list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.remote-picker__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.remote-picker__row:last-child { border-bottom: none; }
+.remote-picker__row:hover { background: var(--bg-hover); }
+.remote-picker__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px;
+}
+.remote-picker__hint--error { color: var(--red); }
+
 /* ── Status Panel ─────────────────────────────────────── */
 .status-panel { padding: 12px 14px; font-size: 16px; }
 .status-panel__empty { color: var(--text-muted); font-style: italic; font-size: 16px; }

@@ -12,7 +12,7 @@ const path = require('path');
 
 /** Every provider id the renderer may ask about. Anything else is rejected
  *  before it reaches a path join — see the validation note below. */
-const ALL_PROVIDERS = ['copilot', 'claude-code', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
+const ALL_PROVIDERS = ['copilot', 'claude-code', 'claude-code-ssh', 'anthropic', 'openai', 'gemini', 'glm', 'ollama'];
 
 /**
  * Validates an IPC-supplied (provider, cwd) pair. `provider` ends up in a

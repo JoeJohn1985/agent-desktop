@@ -108,6 +108,10 @@ contextBridge.exposeInMainWorld('desktop', {
     resetBackend: (tabId) => ipcRenderer.invoke('agent:resetBackend', tabId),
     /** @ipc claudecode:status — {installed, version} for the Claude Code CLI. */
     claudeCodeStatus: () => ipcRenderer.invoke('claudecode:status'),
+    /** @ipc claudecode:testSsh — Reachability check for the remote Claude Code provider. @param {string} host @param {string} [cwd] @returns {Promise<{ok:boolean, nodeVersion?:string, claudeVersion?:string, cwdOk?:boolean, error?:string}>} */
+    testClaudeCodeSsh: (host, cwd) => ipcRenderer.invoke('claudecode:testSsh', host, cwd),
+    /** @ipc claudecode:sshListDir — Lists remote subdirectories (remote folder picker). @param {string} host @param {string} [dirPath] @returns {Promise<{ok:boolean, path?:string, dirs?:string[], error?:string}>} */
+    sshListDir: (host, dirPath) => ipcRenderer.invoke('claudecode:sshListDir', host, dirPath),
     /** @ipc claudecode:checkAdapterUpdate @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>} */
     checkAdapterUpdate: () => ipcRenderer.invoke('claudecode:checkAdapterUpdate'),
     /** @ipc claudecode:applyAdapterUpdate — Pins & verifies the given adapter version. @returns {Promise<{ok:boolean, newVersion?:string, error?:string}>} */

@@ -1,6 +1,44 @@
 # Changelog
 
-## [1.15.0] - 2026-08-09
+## [1.16.0] - 2026-09-03
+
+### Added
+- **New provider: Claude Code (SSH)** — runs the same ACP adapter on a remote
+  machine instead of locally, alongside the existing local Claude Code (both
+  can be used at the same time, one per tab).
+
+  The point isn't remote compute, it's *where the session lives*: Claude Code
+  stores a session next to the process running it and binds it to that
+  process's working directory. Running it on e.g. a home server means that
+  machine holds the conversation, so any terminal there can pick it up later
+  with `claude --resume <id>` — including from a phone over SSH, hours after
+  the desktop was shut down.
+
+  - Configured under Settings → Provider → Claude Code (SSH): SSH target
+    (`user@host` or a `~/.ssh/config` alias), a default remote working
+    directory, and a connection test that reports node/claude versions and
+    whether the directory exists — so a misconfiguration surfaces there
+    rather than as an opaque failure on the first prompt.
+  - **Remote folder picker**, since the OS dialog can only browse this
+    machine. Typing remote paths by hand fails silently in a nasty way here:
+    a wrong-but-existing path doesn't error, it just binds the session to a
+    different directory (and therefore a different `--resume` list).
+  - Requires on the remote host: Node.js/npx, the `claude` CLI logged into
+    the subscription, and password-less SSH (key-based) — the app has no way
+    to show a password prompt.
+  - Skills/agents/instructions are not listed for this provider: those folders
+    live on the remote host, and showing this machine's would be actively
+    misleading. Claude Code still discovers its own over there.
+  - No history preview when reopening such a tab yet, for the same reason —
+    the transcript is on the remote disk. The session itself is unaffected.
+
+### Security
+- SSH command construction lives in `src/ssh-remote.js` and is quoted with a
+  POSIX single-quote escape. SSH doesn't pass an argv through — it joins its
+  arguments into one string that a shell on the *other* machine executes, so
+  an unquoted path containing `;` or `$(…)` would be remote code execution
+  rather than a display bug. Covered by tests aimed specifically at escape
+  attempts (embedded quotes, command chaining, substitution).
 
 ### Changed
 - Renamed the last Copilot-only naming left over from before the app went
