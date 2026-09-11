@@ -723,9 +723,20 @@ function parseResetTextToMs(resetText, nowMs) {
   let hour = parseInt(m[3], 10) % 12;
   if (/pm/i.test(m[5])) hour += 12;
   const min = m[4] ? parseInt(m[4], 10) : 0;
+  const year = new Date(nowMs).getFullYear();
+  // Adapter ≥ 0.75.0 prints a fixed UTC offset (`GMT+2`) instead of an IANA
+  // zone in parentheses (`(Europe/Berlin)`). The offset is unambiguous, so it's
+  // resolved directly rather than going through the DST-aware zone lookup.
+  const gmtMatch = resetText.match(/GMT\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?/i);
+  if (gmtMatch) {
+    const sign = gmtMatch[1] === '-' ? -1 : 1;
+    const offsetMs = sign * ((parseInt(gmtMatch[2], 10) * 60 + (gmtMatch[3] ? parseInt(gmtMatch[3], 10) : 0)) * 60_000);
+    let t = Date.UTC(year, mon, day, hour, min, 0, 0) - offsetMs;
+    if (t < nowMs - 24 * 3600 * 1000) t = Date.UTC(year + 1, mon, day, hour, min, 0, 0) - offsetMs;
+    return t;
+  }
   const tzMatch = resetText.match(/\(([^)]+)\)/);
   const timeZone = tzMatch ? tzMatch[1].trim() : null;
-  const year = new Date(nowMs).getFullYear();
   let t = zonedWallClockToEpoch(year, mon, day, hour, min, timeZone);
   // Reset lies in the future; a computed past time means the year rolled over.
   if (t < nowMs - 24 * 3600 * 1000) t = zonedWallClockToEpoch(year + 1, mon, day, hour, min, timeZone);
@@ -851,23 +862,91 @@ function formatSubscriptionUsage(rateLimits, subCostUsd, now) {
 
 /** Utilization (%) at/above which a plan window is flagged „fast erreicht". */
 const SUBSCRIPTION_WARN_PCT = 80;
-/** Matches a `/usage` plan line: `Current session: 35% used · resets …`. */
+/**
+ * Legacy `/usage` plan line (adapter ≤ 0.74.x, plain prose):
+ * `Current session: 35% used · resets …`.
+ */
 const USAGE_LINE_RE = /Current (session|week)(?:\s*\(([^)]+)\))?:\s*(\d+)\s*%\s*used(?:\s*[·•]\s*resets\s+([^\n]+?))?\s*(?:\n|$)/gi;
+/**
+ * Current `/usage` plan line (adapter ≥ 0.75.0, markdown):
+ * `**5-hour limit** — **34%** · Resets Sep 10, 6:20 AM GMT+2`
+ * `**Weekly · all models** — **45%** · Resets …`
+ * `**Weekly · Opus** — **12%** · Resets …`
+ *
+ * The scope label and the percentage are both bold, separated by an em dash;
+ * the weekly bucket carries its qualifier after a middle dot instead of in
+ * parentheses. The trailing `Resets …` is optional — a window without one is
+ * still worth showing.
+ */
+const USAGE_LINE_MD_RE = /\*\*\s*(5-hour limit|Weekly(?:\s*[·•]\s*([^*]+?))?)\s*\*\*\s*[—–-]\s*\*\*\s*(\d+)\s*%\s*\*\*(?:\s*[·•]\s*Resets\s+([^\n`]+?))?\s*(?:\n|$)/gi;
 
 /**
- * Parses the plan rate-limit lines from a Claude Code `/usage` response, e.g.
- * `Current session: 35% used · resets Jul 10, 3:29am (Europe/Berlin)` and
- * `Current week (all models): 3% used · resets …`. Returns display-ready window
- * infos (utilization %, literal reset text, status derived from the %). The
- * `Current week (<model>)` buckets are flagged `secondary` so they stay in the
- * tooltip only. The literal reset timestamp is also converted to an epoch
- * (`resetsAt`) so the UI can show a live countdown. Returns [] when nothing
- * matches.
+ * Parses the plan rate-limit lines from a Claude Code `/usage` response.
+ * Handles both shapes the adapter has shipped:
+ *   - `Current session: 35% used · resets Jul 10, 3:29am (Europe/Berlin)` (≤ 0.74.x)
+ *   - `**5-hour limit** — **34%** · Resets Sep 10, 6:20 AM GMT+2` (≥ 0.75.0)
+ *
+ * Both are tried because the adapter version is pinned per install, so an older
+ * one can still be in use — and this parser silently returning [] is exactly
+ * how the subscription display went blank when 0.75.0 switched to markdown.
+ *
+ * Returns display-ready window infos (utilization %, literal reset text, status
+ * derived from the %). Model-scoped weekly buckets are flagged `secondary` so
+ * they stay in the tooltip only. The literal reset timestamp is also converted
+ * to an epoch (`resetsAt`) so the UI can show a live countdown. Returns []
+ * when nothing matches.
  * @param {string} text - Raw `/usage` output.
  * @param {number} [now] - Current epoch ms (for reset parsing; defaults to Date.now()).
  * @returns {Array<Object>}
  */
 function parseUsageWindows(text, now) {
+  if (typeof text !== 'string' || !text) return [];
+  const legacy = parseUsageWindowsLegacy(text, now);
+  return legacy.length ? legacy : parseUsageWindowsMarkdown(text, now);
+}
+
+/** Builds one window entry from an already-extracted scope/percentage/reset triple. */
+function buildUsageWindow(isSession, qualifier, pct, resetText, nowMs) {
+  const status = pct >= 100 ? 'rejected' : pct >= SUBSCRIPTION_WARN_PCT ? 'allowed_warning' : 'allowed';
+  const resetMs = resetText ? parseResetTextToMs(resetText, nowMs) : null;
+  const resetsAt = resetMs != null ? Math.round(resetMs / 1000) : undefined;
+  if (isSession) {
+    return { rateLimitType: 'five_hour', label: RATE_LIMIT_FAMILY_LABELS.session, utilization: pct, status, resetText, resetsAt };
+  }
+  const allModels = !qualifier || /^all models$/i.test(qualifier);
+  return {
+    rateLimitType: 'seven_day',
+    label: allModels ? RATE_LIMIT_FAMILY_LABELS.weekly : `${RATE_LIMIT_FAMILY_LABELS.weekly} (${qualifier})`,
+    utilization: pct,
+    status,
+    resetText,
+    resetsAt,
+    secondary: !allModels,
+  };
+}
+
+/** Markdown shape, adapter ≥ 0.75.0 (see USAGE_LINE_MD_RE). */
+function parseUsageWindowsMarkdown(text, now) {
+  const nowMs = typeof now === 'number' ? now : Date.now();
+  const out = [];
+  USAGE_LINE_MD_RE.lastIndex = 0;
+  let m;
+  while ((m = USAGE_LINE_MD_RE.exec(text)) !== null) {
+    const [, scopeRaw, qualifierRaw, pctRaw, resetRaw] = m;
+    const isSession = /^5-hour limit$/i.test(scopeRaw.trim());
+    out.push(buildUsageWindow(
+      isSession,
+      qualifierRaw ? qualifierRaw.trim() : '',
+      parseInt(pctRaw, 10),
+      resetRaw ? resetRaw.trim() : undefined,
+      nowMs,
+    ));
+  }
+  return out;
+}
+
+/** Legacy prose shape, adapter ≤ 0.74.x (see USAGE_LINE_RE). */
+function parseUsageWindowsLegacy(text, now) {
   if (typeof text !== 'string' || !text) return [];
   const nowMs = typeof now === 'number' ? now : Date.now();
   const out = [];
@@ -875,26 +954,13 @@ function parseUsageWindows(text, now) {
   let m;
   while ((m = USAGE_LINE_RE.exec(text)) !== null) {
     const [, scope, qualifierRaw, pctRaw, resetRaw] = m;
-    const pct = parseInt(pctRaw, 10);
-    const status = pct >= 100 ? 'rejected' : pct >= SUBSCRIPTION_WARN_PCT ? 'allowed_warning' : 'allowed';
-    const resetText = resetRaw ? resetRaw.trim() : undefined;
-    const resetMs = resetText ? parseResetTextToMs(resetText, nowMs) : null;
-    const resetsAt = resetMs != null ? Math.round(resetMs / 1000) : undefined;
-    if (scope.toLowerCase() === 'session') {
-      out.push({ rateLimitType: 'five_hour', label: RATE_LIMIT_FAMILY_LABELS.session, utilization: pct, status, resetText, resetsAt });
-    } else {
-      const qualifier = qualifierRaw ? qualifierRaw.trim() : '';
-      const allModels = qualifier === '' || /^all models$/i.test(qualifier);
-      out.push({
-        rateLimitType: 'seven_day',
-        label: allModels ? RATE_LIMIT_FAMILY_LABELS.weekly : `${RATE_LIMIT_FAMILY_LABELS.weekly} (${qualifier})`,
-        utilization: pct,
-        status,
-        resetText,
-        resetsAt,
-        secondary: !allModels,
-      });
-    }
+    out.push(buildUsageWindow(
+      scope.toLowerCase() === 'session',
+      qualifierRaw ? qualifierRaw.trim() : '',
+      parseInt(pctRaw, 10),
+      resetRaw ? resetRaw.trim() : undefined,
+      nowMs,
+    ));
   }
   return out;
 }

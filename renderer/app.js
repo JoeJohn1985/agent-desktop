@@ -76,7 +76,7 @@ let richTextMode = false;
 /**
  * Map of all open chat tabs. Each entry holds the tab's DOM elements, session
  * state, processing flags, terminal reference, and context metadata.
- * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, mode: string, context: Object}>}
+ * @type {Map<string, {streamEl: HTMLElement, statusEl: HTMLElement, label: string, sessionId: string|null, isProcessing: boolean, lastActivityAt: number|null, terminal?: Object, mode: string, selectedModel: string|null, reasoningByModel: Object<string, string|null>, context: Object}>}
  */
 const tabs = new Map();
 /** @type {Map<string, {toolName: string, arguments: Object}>} Pending tool calls awaiting completion, keyed by toolCallId. */
@@ -290,6 +290,59 @@ function setPref(key, value) {
 
 window.addEventListener('beforeunload', () => { if (_prefsSaveTimer) _flushPrefs(); });
 
+/**
+ * Reasoning-effort levels. Fixed and provider-agnostic: Anthropic's effort
+ * parameter isn't gated per model in practice (confirmed — Haiku offers the
+ * same levels as Sonnet), so Copilot and Claude Code share this one list
+ * rather than Claude Code discovering its own per model/session. A missing
+ * entry and null both mean "use the backend's own default".
+ */
+const REASONING_EFFORTS = [
+  { value: null, label: 'Standard', short: 'Standard' },
+  { value: 'low', label: 'low', short: 'low' },
+  { value: 'medium', label: 'medium', short: 'medium' },
+  { value: 'high', label: 'high', short: 'high' },
+  { value: 'xhigh', label: 'xhigh', short: 'xhigh' },
+  { value: 'max', label: 'max', short: 'max' },
+];
+const VALID_REASONING_EFFORTS = new Set(REASONING_EFFORTS.filter((x) => x.value).map((x) => x.value));
+
+/**
+ * Generic type/shape guard for a stored reasoning-effort value — used at the
+ * shared persistence layer (reasoningByModel is the same data structure for
+ * Copilot and Claude Code tabs, see docs/ARCHITECTURE.md). It only folds the
+ * "no override" sentinels to null; it does not check legality against
+ * REASONING_EFFORTS — that's normalizeKnownReasoningEffort()'s job.
+ */
+function normalizeReasoningEffort(value) {
+  if (value == null || value === '' || value === 'standard' || value === 'default') return null;
+  return typeof value === 'string' ? value : null;
+}
+
+/** Only the fixed low/medium/high/xhigh/max set is legal — same for every provider. */
+function normalizeKnownReasoningEffort(value) {
+  const normalized = normalizeReasoningEffort(value);
+  return normalized != null && VALID_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
+function normalizeReasoningByModel(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([modelId]) => typeof modelId === 'string' && modelId.length > 0)
+      .map(([modelId, effort]) => [modelId, normalizeReasoningEffort(effort)]),
+  );
+}
+
+function reasoningEffortMeta(value) {
+  const normalized = normalizeKnownReasoningEffort(value);
+  return REASONING_EFFORTS.find((x) => x.value === normalized) || REASONING_EFFORTS[0];
+}
+
+function reasoningEffortLabel(value) {
+  return reasoningEffortMeta(value).label;
+}
+
 function getCurrentTheme() {
   return getPref('theme', 'dark');
 }
@@ -312,13 +365,32 @@ function saveOpenTabs() {
     // The ProviderID must be persisted explicitly — it can't always be derived
     // from the model (Claude Code and the Anthropic API share the same model ids).
     const provider = getTabProvider(tab);
+    const reasoningByModel = normalizeReasoningByModel(tab.reasoningByModel);
+    tab.reasoningByModel = reasoningByModel;
     if (tab.sessionId) {
-      openTabs.push({ sessionId: tab.sessionId, label: tab.label, selectedModel: tab.selectedModel || null, provider });
+      openTabs.push({
+        sessionId: tab.sessionId,
+        label: tab.label,
+        selectedModel: tab.selectedModel || null,
+        provider,
+        reasoningByModel,
+      });
+      saveSessionReasoningByModel(tab.sessionId, reasoningByModel);
       // Persist denied tools in namedSessions
       saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
-    } else if (provider !== getDefaultProvider() || (tab.selectedModel && tab.selectedModel !== getDefaultModelId())) {
+    } else if (
+      provider !== getDefaultProvider()
+      || (tab.selectedModel && tab.selectedModel !== getDefaultModelId())
+      || Object.keys(reasoningByModel).length > 0
+    ) {
       // Unsent tab with a non-default provider/model chosen.
-      openTabs.push({ sessionId: null, label: tab.label, selectedModel: tab.selectedModel, provider });
+      openTabs.push({
+        sessionId: null,
+        label: tab.label,
+        selectedModel: tab.selectedModel,
+        provider,
+        reasoningByModel,
+      });
     }
   });
   setPref('openTabs', openTabs);
@@ -340,7 +412,12 @@ async function restoreOpenTabs() {
       // Resolve the model up front (entry first, then per-session map) so the
       // provider is correct from creation — including unsent tabs without id.
       const model = t.selectedModel || (t.sessionId ? getSessionModel(t.sessionId) : null) || undefined;
-      const tabId = await createTab(label, model, t.provider);
+      const sessionReasoningByModel = t.sessionId ? getSessionReasoningByModel(t.sessionId) : {};
+      const reasoningByModel = {
+        ...sessionReasoningByModel,
+        ...normalizeReasoningByModel(t.reasoningByModel),
+      };
+      const tabId = await createTab(label, model, t.provider, reasoningByModel);
       const tab = tabs.get(tabId);
       if (tab) {
         tab.sessionId = t.sessionId || null;
@@ -475,6 +552,37 @@ function saveSessionModel(sessionId, modelId) {
   setPref('sessionModels', models);
 }
 
+/**
+ * Get the persisted model-to-reasoning map for a session.
+ * @param {string} sessionId
+ * @returns {Object<string, string|null>}
+ */
+function getSessionReasoningByModel(sessionId) {
+  const all = getPref('sessionReasoningByModel', {});
+  if (!all || typeof all !== 'object' || Array.isArray(all)) return {};
+  return normalizeReasoningByModel(all[sessionId]);
+}
+
+/**
+ * Persist the model-to-reasoning map for a session.
+ * @param {string} sessionId
+ * @param {Object<string, string|null>} reasoningByModel
+ */
+function saveSessionReasoningByModel(sessionId, reasoningByModel) {
+  if (!sessionId) return;
+  const stored = getPref('sessionReasoningByModel', {});
+  const all = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
+  all[sessionId] = normalizeReasoningByModel(reasoningByModel);
+  setPref('sessionReasoningByModel', all);
+}
+
+/** Persist the complete model selection state for a session. */
+function saveSessionModelConfiguration(sessionId, tab) {
+  if (!sessionId || !tab) return;
+  if (tab.selectedModel) saveSessionModel(sessionId, tab.selectedModel);
+  saveSessionReasoningByModel(sessionId, tab.reasoningByModel);
+}
+
 // Providers that get their own, fully independent "Verbotene Shell-Tools"
 // list — see the denylist flag in PROVIDER_CAPABILITIES for why Gemini/Claude
 // Code are excluded.
@@ -597,6 +705,11 @@ function applyDevMode(enabled) {
   const onboardingResetSeparator = document.getElementById('settOnboardingResetSeparator');
   if (onboardingResetGroup) onboardingResetGroup.style.display = enabled ? '' : 'none';
   if (onboardingResetSeparator) onboardingResetSeparator.style.display = enabled ? '' : 'none';
+  // The adapter-update banner is a developer affordance (see
+  // checkClaudeAdapterUpdate) — a banner already on screen has to go when dev
+  // mode is switched off, otherwise it would sit there un-dismissable by the
+  // rules that produced it.
+  if (!enabled) document.getElementById('claudeAdapterUpdateBanner')?.remove();
 }
 
 // ── Notification Sound ──────────────────────────────────────
@@ -742,9 +855,13 @@ function showNotification(message, type = 'info') {
  * Create a new chat tab, register it in the tabs map, and switch to it.
  * Also allocates a stream-output element and a status-line element.
  * @param {string} [label='🤖 Chat'] - Display label for the tab.
+ * @param {string} [initialModel] - Model to select initially.
+ * @param {string} [provider] - Provider owning the tab.
+ * @param {Object<string, string|null>} [initialReasoningByModel] - Persisted
+ *   per-model reasoning choices.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label, initialModel, provider) {
+async function createTab(label, initialModel, provider, initialReasoningByModel) {
   const tabLabel = label || '🤖 Chat';
   // The ProviderID is the authoritative discriminator (it determines available
   // models and provider-specific behaviour). Prefer the explicit arg; else derive
@@ -792,6 +909,7 @@ async function createTab(label, initialModel, provider) {
     _costUsd: 0,
     _sessionName: null,
     provider: tabProvider,
+    reasoningByModel: normalizeReasoningByModel(initialReasoningByModel),
     // Per-tab manual-approval toggle; new tabs inherit the global default.
     manualApproval: getSettings().manualApproval === true,
     selectedModel: initialModel || getDefaultModelForProvider(tabProvider),
@@ -1149,7 +1267,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
         // Persist provider/cwd now that the session has a namedSessions entry.
         saveSessionProvider(tab.sessionId, getTabProvider(tab));
         if (tab.cwd) saveSessionCwd(tab.sessionId, tab.cwd);
-        if (tab.selectedModel) saveSessionModel(tab.sessionId, tab.selectedModel);
+        saveSessionModelConfiguration(tab.sessionId, tab);
       } else {
         // No session yet — create one
         try {
@@ -1161,7 +1279,7 @@ function startTabRename(tabId, tabEl, labelSpan) {
             // Persist the tab's chosen model/provider (and cwd) against the new
             // session id. Without this, a tab saved before its first message
             // would lose its provider and fall back to Copilot on resume.
-            if (tab.selectedModel) saveSessionModel(newId, tab.selectedModel);
+            saveSessionModelConfiguration(newId, tab);
             if (tab.cwd) saveSessionCwd(newId, tab.cwd);
             saveSessionProvider(newId, getTabProvider(tab));
             saveOpenTabs();
@@ -1387,9 +1505,10 @@ function sendMessage() {
 
   if (tab.isProcessing) return;
 
+  const tabProvider = getTabProvider(tab);
   // Guard: a Copilot model that the CLI no longer offers (removed from the
   // dynamic list) can't be used — tell the user instead of failing opaquely.
-  if (getTabProvider(tab) === 'copilot' && tab.selectedModel && !isCopilotModelAvailable(tab.selectedModel)) {
+  if (tabProvider === 'copilot' && tab.selectedModel && !isCopilotModelAvailable(tab.selectedModel)) {
     showNotification(`Modell „${tab.selectedModel}" ist bei Copilot nicht mehr verfügbar. Bitte im 🧠-Menü ein anderes wählen.`, 'error');
     return;
   }
@@ -1477,7 +1596,10 @@ function sendMessage() {
   // Send to Copilot via JSON API
   const settings = getSettings();
   const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
-  const mergedDenied = [...new Set([...getDeniedTools(getTabProvider(tab)), ...sessionDenied])];
+  const mergedDenied = [...new Set([...getDeniedTools(tabProvider), ...sessionDenied])];
+  const effort = (tabProvider === 'copilot' || isClaudeCodeProvider(tabProvider)) && tab.selectedModel
+    ? getReasoningForModel(tab, tab.selectedModel)
+    : null;
 
   const sendTabId = activeTabId;
   // Freeze the model this prompt actually runs on. The token delta measured after
@@ -1497,7 +1619,8 @@ function sendMessage() {
     // Empty → let the backend use its own default model (e.g. Claude Code before
     // we know its real model ids). Don't force a Copilot id onto other providers.
     model: tab.selectedModel || undefined,
-    provider: getTabProvider(tab),
+    effort: effort || undefined,
+    provider: tabProvider,
     cwd: tab.cwd || undefined,
     geminiMode: tab.geminiMode || 'search',
     baseURL: getProviderBaseUrl(getTabProvider(tab)) || undefined,
@@ -2007,6 +2130,8 @@ function initAgentIPC() {
         // shows the active model instead of being blank.
         if (!tab.selectedModel && event.data.currentModelId) {
           tab.selectedModel = event.data.currentModelId;
+          if (tab.sessionId) saveSessionModelConfiguration(tab.sessionId, tab);
+          saveOpenTabs();
           updateModelSelectBtn(tabId);
         }
         break;
@@ -2105,8 +2230,8 @@ function initAgentIPC() {
             tab._renameOnNextSession = null;
             renderTabs();
           }
-          // Persist selected model for this new session
-          if (tab.selectedModel) saveSessionModel(event.sessionId, tab.selectedModel);
+          // Persist the selected model and all model-specific reasoning choices.
+          saveSessionModelConfiguration(event.sessionId, tab);
           // Persist CWD for this session
           if (tab.cwd) saveSessionCwd(event.sessionId, tab.cwd);
           // Persist provider so a resumed session uses the right backend.
@@ -2568,6 +2693,41 @@ function getTabProvider(tab) {
     || 'copilot';
 }
 
+/**
+ * The reasoning-effort value stored for a model on this tab, validated
+ * against the fixed low/medium/high/xhigh/max set — the same set for every
+ * provider that supports reasoning (Copilot, Claude Code).
+ */
+function getReasoningForModel(tab, modelId) {
+  if (!tab || !modelId) return null;
+  return normalizeKnownReasoningEffort(tab.reasoningByModel?.[modelId]);
+}
+
+/**
+ * Select a model and, for Copilot and Claude Code tabs, its remembered
+ * reasoning level. A model click without an explicit effort restores the
+ * model's existing mapping and records Standard when the model has no
+ * mapping yet.
+ */
+function selectModelForTab(tabId, modelId, effort) {
+  const tab = tabs.get(tabId);
+  if (!tab || !modelId) return;
+
+  tab.selectedModel = modelId;
+  tab.reasoningByModel = normalizeReasoningByModel(tab.reasoningByModel);
+  const provider = getTabProvider(tab);
+  if (provider === 'copilot' || isClaudeCodeProvider(provider)) {
+    const selectedEffort = effort === undefined
+      ? getReasoningForModel(tab, modelId)
+      : normalizeKnownReasoningEffort(effort);
+    tab.reasoningByModel[modelId] = selectedEffort;
+  }
+
+  if (tab.sessionId) saveSessionModelConfiguration(tab.sessionId, tab);
+  saveOpenTabs();
+  updateModelSelectBtn(tabId);
+}
+
 const PROVIDER_SHORT = { copilot: 'Copilot', 'claude-code': 'Claude Code', 'claude-code-ssh': 'CC (SSH)', anthropic: 'Anthropic', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama', glm: 'GLM' };
 
 /** Inline brand-icon HTML for a provider (via provider-icons.js). */
@@ -2829,6 +2989,7 @@ function updateModelSelectBtn(tabId) {
   const btn = document.getElementById('btnModelSelect');
   if (!btn) return;
   const tab = tabs.get(tabId ?? activeTabId);
+  const provider = getTabProvider(tab);
   // Explicit selection takes priority, fallback to actual model from session,
   // then DEFAULT_MODEL_ID — so modelId is always a non-empty string.
   const modelId = tab?.selectedModel || tab?.context?.model || DEFAULT_MODEL_ID;
@@ -2837,9 +2998,19 @@ function updateModelSelectBtn(tabId) {
   // the live one for ids that exist in both: Claude Code's aliases ('opus',
   // 'sonnet', …) never change, but what they point at does, so the button kept
   // showing e.g. "Opus 4.8" long after the adapter reported Opus 5.
-  const found = Object.values(_dynamicModels).flat().find(m => m.id === modelId)
+  const found = getModelsForProvider(provider).find(m => m.id === modelId)
+    || Object.values(_dynamicModels).flat().find(m => m.id === modelId)
     || DEFAULT_MODELS.find(m => m.id === modelId);
-  btn.textContent = `🧠 ${found ? found.short : modelId}`;
+  const modelLabel = found ? found.short : modelId;
+  // Claude Code shows the same 🧠-badge as Copilot — same fixed reasoning set
+  // for both, no per-model discovery needed.
+  const hasEffortUi = provider === 'copilot' || isClaudeCodeProvider(provider);
+  const effort = hasEffortUi ? getReasoningForModel(tab, tab?.selectedModel || modelId) : null;
+  const effortLabel = reasoningEffortLabel(effort);
+  btn.innerHTML = `🧠 ${escapeHtml(modelLabel)}${hasEffortUi ? ` <span class="model-select__reasoning">${escapeHtml(effortLabel)}</span>` : ''}`;
+  btn.setAttribute('data-tooltip', hasEffortUi
+    ? `Model und Reasoning für diesen Tab auswählen (aktuell: ${effortLabel})`
+    : 'Model für diesen Tab auswählen');
   btn.classList.remove('session-actions__btn--active');
   updateProviderSelectBtn(tabId);
   updateApprovalBtn(tabId);
@@ -2900,52 +3071,105 @@ async function toggleApproval(tabId) {
 
 /**
  * Initialize the tab-specific model selector button in the session-actions bar.
- * Clicking the button opens a dropdown that sets tab.selectedModel, which is
- * then passed as --model to the Copilot process on the next sendMessage() call.
+ * Copilot model entries additionally expose a nested reasoning menu. Selecting
+ * a reasoning level activates the model and stores the pair for this tab.
  */
 function initTabModelSelector() {
   const btn = document.getElementById('btnModelSelect');
   if (!btn) return;
 
   let activeCloseHandler = null;
+  let activeDropdown = null;
+
+  const closeDropdown = () => {
+    if (activeDropdown) {
+      activeDropdown.remove();
+      activeDropdown = null;
+    }
+    if (activeCloseHandler) {
+      document.removeEventListener('click', activeCloseHandler, true);
+      activeCloseHandler = null;
+    }
+  };
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const existing = document.querySelector('.model-dropdown--below');
-    if (existing) {
-      existing.remove();
-      if (activeCloseHandler) {
-        document.removeEventListener('click', activeCloseHandler, true);
-        activeCloseHandler = null;
-      }
+    if (activeDropdown || existing) {
+      closeDropdown();
+      if (existing && existing !== activeDropdown) existing.remove();
       return;
     }
 
     const openedForTabId = activeTabId;
     const tab = tabs.get(openedForTabId);
     const currentModel = tab?.selectedModel || '';
-    // Only show models for the tab's currently selected provider.
-    const models = getModelsForProvider(getTabProvider(tab));
+    const provider = getTabProvider(tab);
+    const hasReasoning = provider === 'copilot' || isClaudeCodeProvider(provider);
+    const models = getModelsForProvider(provider);
 
     const dropdown = document.createElement('div');
     dropdown.className = 'model-dropdown model-dropdown--below';
+    activeDropdown = dropdown;
 
     models.forEach(m => {
       const isActive = currentModel === m.id;
+      // Reasoning is the same fixed set for every model of a reasoning-capable
+      // provider (Copilot, Claude Code) — no per-model/per-session discovery,
+      // so every row gets the submenu, not just the currently active one.
+      const showReasoning = hasReasoning;
       const item = document.createElement('div');
-      item.className = 'model-dropdown__item' + (isActive ? ' model-dropdown__item--active' : '');
-      item.innerHTML = `<span class="model-dropdown__label">${escapeHtml(m.label)}</span>${modelTierBadge(m)}`;
+      item.className = 'model-dropdown__item'
+        + (isActive ? ' model-dropdown__item--active' : '')
+        + (showReasoning ? ' model-dropdown__item--has-submenu' : '');
+      item.tabIndex = 0;
+
+      const label = document.createElement('span');
+      label.className = 'model-dropdown__label';
+      label.textContent = m.label;
+      item.appendChild(label);
+      if (modelTierBadge(m)) item.insertAdjacentHTML('beforeend', modelTierBadge(m));
+
+      if (showReasoning) {
+        const effort = getReasoningForModel(tab, m.id);
+        const effortEl = document.createElement('span');
+        effortEl.className = 'model-dropdown__reasoning';
+        effortEl.textContent = reasoningEffortLabel(effort);
+        item.appendChild(effortEl);
+
+        const arrow = document.createElement('span');
+        arrow.className = 'model-dropdown__submenu-arrow';
+        arrow.textContent = '›';
+        item.appendChild(arrow);
+
+        const submenu = document.createElement('div');
+        submenu.className = 'model-dropdown__submenu';
+        // Same fixed list for every reasoning-capable provider.
+        REASONING_EFFORTS.forEach((option) => {
+          const optionBtn = document.createElement('button');
+          optionBtn.type = 'button';
+          optionBtn.className = 'model-dropdown__submenu-item'
+            + (effort === option.value ? ' model-dropdown__submenu-item--active' : '');
+          optionBtn.innerHTML = `<span>${escapeHtml(option.label)}</span>${effort === option.value ? '<span class="model-dropdown__submenu-check">✓</span>' : ''}`;
+          optionBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeDropdown();
+            selectModelForTab(openedForTabId, m.id, option.value);
+          });
+          submenu.appendChild(optionBtn);
+        });
+        item.appendChild(submenu);
+      }
+
       item.addEventListener('click', () => {
-        dropdown.remove();
-        if (activeCloseHandler) {
-          document.removeEventListener('click', activeCloseHandler, true);
-          activeCloseHandler = null;
-        }
-        const t = tabs.get(openedForTabId);
-        if (!t) return;
-        t.selectedModel = m.id;
-        if (t.sessionId) saveSessionModel(t.sessionId, m.id);
-        updateModelSelectBtn(openedForTabId);
+        closeDropdown();
+        selectModelForTab(openedForTabId, m.id);
+      });
+      item.addEventListener('keydown', (event) => {
+        if (event.target !== item || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        item.click();
       });
       dropdown.appendChild(item);
     });
@@ -2954,9 +3178,7 @@ function initTabModelSelector() {
 
     activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== btn) {
-        dropdown.remove();
-        document.removeEventListener('click', activeCloseHandler, true);
-        activeCloseHandler = null;
+        closeDropdown();
       }
     };
     setTimeout(() => document.addEventListener('click', activeCloseHandler, true), 0);
@@ -3300,10 +3522,20 @@ async function refreshUsageDisplay(tabId) {
 async function refreshSubscriptionUsage(tabId) {
   try {
     const result = await window.desktop.chat.silentCommand(tabId, '/usage');
-    if (!result.success) return;
+    if (!result.success) {
+      console.warn('[usage] /usage nicht ausführbar:', result.error || '(kein Grund gemeldet)');
+      return;
+    }
     const tab = tabs.get(tabId);
     if (!tab) return;
     tab._subUsageWindows = parseUsageWindows(result.text, Date.now());
+    // Text da, aber nichts erkannt → das Ausgabeformat hat sich geändert.
+    // Genau so ist der Wechsel auf Markdown in Adapter 0.75.0 unbemerkt
+    // geblieben: die Anzeige wurde still leer, ohne Fehler und ohne Log.
+    if (!tab._subUsageWindows.length && (result.text || '').trim()) {
+      console.warn('[usage] /usage lieferte Text, aber kein bekanntes Limit-Format — Parser veraltet?',
+        (result.text || '').slice(0, 200));
+    }
     if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
   } catch (e) {
     console.warn('[usage] refreshSubscriptionUsage fehlgeschlagen:', e?.message);
@@ -3864,7 +4096,8 @@ async function resumeSession(sessionId) {
   // model ids, so the ProviderID must come from the stored session, not the model).
   const provider = getSessionProvider(sessionId) || 'copilot';
   const sessionModel = getSessionModel(sessionId);
-  const tabId = await createTab(label, sessionModel || undefined, provider);
+  const sessionReasoningByModel = getSessionReasoningByModel(sessionId);
+  const tabId = await createTab(label, sessionModel || undefined, provider, sessionReasoningByModel);
   const tab = tabs.get(tabId);
   if (!tab) return;
 
@@ -5540,7 +5773,13 @@ function initSettings() {
     applyChatFontSize(size);
   });
   settSound.addEventListener('change', () => saveSetting('soundEnabled', settSound.checked));
-  settDevMode.addEventListener('change', () => { saveSetting('devMode', settDevMode.checked); applyDevMode(settDevMode.checked); });
+  settDevMode.addEventListener('change', () => {
+    saveSetting('devMode', settDevMode.checked);
+    applyDevMode(settDevMode.checked);
+    // Switching dev mode on shouldn't mean waiting up to 6h for the next
+    // scheduled adapter check before the banner can appear.
+    if (settDevMode.checked) checkClaudeAdapterUpdate();
+  });
   settAllowAllPaths.addEventListener('change', () => saveSetting('allowAllPaths', settAllowAllPaths.checked));
   settDefaultProvider?.addEventListener('change', () => {
     saveSetting('defaultProvider', settDefaultProvider.value);
@@ -7004,17 +7243,27 @@ function initUpdateChecker() {
 // ── Claude Code ACP Adapter Update (auto-check + banner) ─────
 // Same idea as the self-updater above, but for the pinned
 // @agentclientprotocol/claude-agent-acp npm package (see claudeCodeClientOptions
-// in main.js): checked silently in the background; a banner with an
-// "Aktualisieren" button appears only when a newer version is actually found,
-// instead of requiring a trip into Settings.
+// in main.js): checked in the background; a banner with an "Aktualisieren"
+// button appears only when a newer version is actually found.
+//
+// Developer-mode only, on purpose. The adapter ships frequently and its
+// releases have broken the app before — 0.75.0 switched `/usage` from prose to
+// markdown, which silently emptied the subscription display (see
+// parseUsageWindows in src/renderer-logic.js). Updating it is therefore not a
+// routine action a normal user should be nudged into: the pinned version is
+// the one verified to work, and moving off it is a deliberate, developer-side
+// decision.
 
 let _claudeAdapterUpdateBusy = false;
 /** Version the user dismissed — suppresses re-nagging for the same version. */
 let _dismissedClaudeAdapterVersion = null;
 const CLAUDE_ADAPTER_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-/** Silently checks npm for a newer adapter version and shows a banner if one is found. */
+/** Checks npm for a newer adapter version and shows a banner if one is found. */
 async function checkClaudeAdapterUpdate() {
+  // Guard first: skips the npm request and the CLI probe entirely when the
+  // banner couldn't be shown anyway.
+  if (getSettings().devMode !== true) return;
   if (_claudeAdapterUpdateBusy) return;
   if (!window.desktop?.chat?.checkAdapterUpdate) return;
   // Only relevant if the Claude Code CLI (and thus the adapter) is actually used.
@@ -7063,6 +7312,11 @@ async function applyClaudeAdapterUpdateFromBanner(bar, targetVersion) {
   try {
     const res = await window.desktop.chat.applyAdapterUpdate(targetVersion);
     if (res.ok) {
+      // main.js wrote this directly to disk, bypassing the renderer's own
+      // prefs cache. Without this, the next unrelated setPref() elsewhere
+      // flushes the stale in-memory copy and silently reverts the pin —
+      // the banner would then reappear despite a successful update.
+      _prefs.claudeCodeAdapterVersion = res.newVersion;
       showNotification(`Claude-Code-Adapter aktualisiert auf v${res.newVersion}.`, 'success');
       bar.remove();
     } else {

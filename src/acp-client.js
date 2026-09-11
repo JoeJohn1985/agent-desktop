@@ -13,6 +13,12 @@ const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /c
 const DEBUG_ACP = process.env.ACP_DEBUG === '1'; // verbose diagnostics (models dump, unhandled events)
 const LOCAL_CMD_GRACE_MS = 2_000; // wait for a stderr <local-command-stdout> flush (Claude Code)
 const STOP_GRACE_MS = 5_000;
+const VALID_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function normalizeReasoningEffort(value) {
+  if (value == null || value === '' || value === 'standard') return null;
+  return typeof value === 'string' && VALID_REASONING_EFFORTS.has(value) ? value : null;
+}
 
 /**
  * AcpClient — manages a single `copilot --acp` child process.
@@ -47,6 +53,9 @@ class AcpClient extends EventEmitter {
   #sessionLoadedInProcess = false; // true once the *current* live process has the session loaded
   #appliedModel = null; // the model currently applied to the live session via session/set_model
   #appliedMode = null; // the mode (full ACP id) currently applied via session/set_mode
+  #appliedEffort = null; // the reasoning-effort value currently applied via session/set_config_option('effort')
+  #processEffort = null; // reasoning effort used when the current process was spawned
+  #reasoningRestartPending = false; // true after an effort change, applied before the next prompt
   #availableModes = []; // modes.availableModes from the last session/new|load result
 
   // ── Prompt State ─────────────────────────────────────────────
@@ -88,6 +97,7 @@ class AcpClient extends EventEmitter {
    *   npx package version, whose first install can take much longer than a
    *   normal (already-cached) start.
    * @param {string} [options.model] - Model override
+   * @param {string} [options.effort] - Copilot reasoning effort override
    * @param {string[]} [options.deniedTools] - Tools to deny
    * @param {string[]} [options.addDirs] - Additional allowed directories
    * @param {boolean} [options.allowAllPaths] - Allow all paths
@@ -104,12 +114,21 @@ class AcpClient extends EventEmitter {
     this.#initializeTimeoutMs = Number.isFinite(options.initializeTimeoutMs) ? options.initializeTimeoutMs : INITIALIZE_TIMEOUT_MS;
     this.#shell = options.shell === true;
     this.#localCommandStdout = options.localCommandStdout === true;
-    this.#options = options;
+    // The reasoning-effort set (low/medium/high/xhigh/max) is the same fixed,
+    // model-agnostic set for every provider — Anthropic's effort levels aren't
+    // gated per model in practice, same as Copilot's. Validated up front here;
+    // #applyEffort() only has to worry about *transport* (live config option
+    // vs Copilot's spawn-flag/restart path), not re-validating the value.
+    this.#options = { ...options, effort: normalizeReasoningEffort(options.effort) };
   }
 
   get state() { return this.#state; }
   get sessionId() { return this.#sessionId; }
   get tabId() { return this.#tabId; }
+
+  #effectiveReasoningEffort() {
+    return this.#baseArgs ? null : normalizeReasoningEffort(this.#options.effort);
+  }
 
   // ── Process Management ───────────────────────────────────────
 
@@ -124,6 +143,10 @@ class AcpClient extends EventEmitter {
     this.#sessionLoadedInProcess = false;
     this.#appliedModel = null;
     this.#appliedMode = null;
+    this.#appliedEffort = null;
+    const effort = this.#effectiveReasoningEffort();
+    this.#processEffort = effort;
+    this.#reasoningRestartPending = false;
 
     // Non-Copilot ACP adapters (e.g. Claude Code) get their fixed args verbatim;
     // model/deny are applied over ACP, not via CLI flags. Copilot uses its flags.
@@ -136,6 +159,7 @@ class AcpClient extends EventEmitter {
       args = ['--acp'];
       if (this.#options.allowAll !== false) args.push('--allow-all');
       if (this.#options.model) args.push('--model', this.#options.model);
+      if (effort) args.push('--reasoning-effort', effort);
       if (this.#options.deniedTools) {
         for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
       }
@@ -217,6 +241,7 @@ class AcpClient extends EventEmitter {
     this.#rejectAllPending(new Error('Client stopped'));
     if (!this.#process) {
       this.#state = 'dead';
+      this.#processEffort = null;
       return;
     }
 
@@ -236,6 +261,7 @@ class AcpClient extends EventEmitter {
     }).then(() => {
       this.#process = null;
       this.#state = 'dead';
+      this.#processEffort = null;
     });
   }
 
@@ -452,6 +478,35 @@ class AcpClient extends EventEmitter {
   }
 
   /**
+   * Applies the configured reasoning-effort level via `session/set_config_option`,
+   * unless already applied. No-op if no session, the level is unchanged from
+   * what's already applied, or this backend doesn't speak config options at
+   * all — Copilot's effort is a spawn-time flag instead, handled by
+   * #restartForReasoningIfNeeded(). The value itself is already validated
+   * against the fixed low/medium/high/xhigh/max set in the constructor/
+   * updateOptions() — the same set for every provider, since Anthropic's
+   * effort levels aren't gated per model in practice.
+   *
+   * A null/missing effort is NOT simply skipped: once a level has been
+   * explicitly applied, the adapter pins it server-side (`effortPinnedByUser`)
+   * and it survives model switches on its own. Picking "Standard" again is a
+   * real state change that must be sent as `value: 'default'` to un-pin it —
+   * otherwise the session keeps running at the old level while the UI already
+   * shows "Standard".
+   */
+  async #applyEffort() {
+    if (!this.#options.useConfigOptions || !this.#sessionId) return;
+    const effort = this.#options.effort || null;
+    if (effort === this.#appliedEffort) return;
+    try {
+      await this.#sendRequest('session/set_config_option', { sessionId: this.#sessionId, configId: 'effort', value: effort || 'default' });
+      this.#appliedEffort = effort;
+    } catch (err) {
+      console.warn(`[acp:tab${this.#tabId}] set effort(${effort ?? 'default'}) failed:`, err.message);
+    }
+  }
+
+  /**
    * Lists available sessions.
    * @returns {Promise<Array>}
    */
@@ -461,6 +516,24 @@ class AcpClient extends EventEmitter {
   }
 
   // ── Prompt + Streaming ───────────────────────────────────────
+
+  /**
+   * Recreates the Copilot process when its spawn-time reasoning effort changed.
+   * The current session ID survives the restart and is loaded into the fresh
+   * process before the caller applies model/mode and sends the prompt.
+   */
+  async #restartForReasoningIfNeeded() {
+    if (!this.#reasoningRestartPending) return;
+    if (this.#state === 'busy') {
+      throw new Error('Reasoning kann während eines laufenden Prompts nicht gewechselt werden');
+    }
+
+    const sessionId = this.#sessionId;
+    this.#reasoningRestartPending = false;
+    await this.stop();
+    await this.start();
+    if (sessionId) await this.loadSession(sessionId);
+  }
 
   /**
    * Sends a prompt and streams events to the renderer.
@@ -479,6 +552,7 @@ class AcpClient extends EventEmitter {
     if (!this.#sessionId) {
       throw new Error('No active session. Call newSession() or loadSession() first.');
     }
+    await this.#restartForReasoningIfNeeded();
     // After a process restart the live process has no session loaded yet,
     // even though we remember the sessionId. Reload it before prompting.
     if (!this.#sessionLoadedInProcess) {
@@ -491,6 +565,8 @@ class AcpClient extends EventEmitter {
     await this.#applyModel();
     // Apply the selected session mode (agent/plan/autopilot) the same way.
     await this.#applyMode();
+    // Apply the selected reasoning-effort level (Claude Code only) the same way.
+    await this.#applyEffort();
 
     this.#state = 'busy';
     this.#promptDone = false;
@@ -1124,10 +1200,12 @@ class AcpClient extends EventEmitter {
       try { this.#process.kill('SIGKILL'); } catch (_) {}
       this.#process = null;
     }
+    this.#processEffort = null;
   }
 
   #handleExit(code, signal) {
     this.#process = null;
+    this.#processEffort = null;
     if (this.#readline) {
       this.#readline.close();
       this.#readline = null;
@@ -1143,6 +1221,7 @@ class AcpClient extends EventEmitter {
 
     console.warn(`[acp:tab${this.#tabId}] process exited unexpectedly (code=${code}, signal=${signal})`);
     this.#state = 'dead';
+    this.#reasoningRestartPending = false;
 
     // Auto-restart with rate limiting
     this.#attemptRestart();
@@ -1212,8 +1291,25 @@ class AcpClient extends EventEmitter {
    * Updates runtime options (e.g., model change for next session).
    */
   updateOptions(options) {
-    Object.assign(this.#options, options);
-    if (options.env && typeof options.env === 'object') this.#extraEnv = options.env;
+    const hasEffort = Object.prototype.hasOwnProperty.call(options || {}, 'effort');
+    const nextOptions = { ...(options || {}) };
+    if (hasEffort) {
+      // Same fixed low/medium/high/xhigh/max set for every provider (see
+      // constructor) — no per-provider branching needed here anymore.
+      const normalized = normalizeReasoningEffort(nextOptions.effort);
+      if (nextOptions.effort != null && normalized == null) {
+        console.warn(`[acp:tab${this.#tabId}] ignoring invalid reasoning effort:`, nextOptions.effort);
+        delete nextOptions.effort;
+      } else {
+        nextOptions.effort = normalized;
+      }
+    }
+    Object.assign(this.#options, nextOptions);
+    if (nextOptions.env && typeof nextOptions.env === 'object') this.#extraEnv = nextOptions.env;
+    const nextEffort = this.#effectiveReasoningEffort();
+    if (this.#process) {
+      this.#reasoningRestartPending = this.#processEffort !== nextEffort;
+    }
   }
 
   /**
@@ -1225,4 +1321,4 @@ class AcpClient extends EventEmitter {
   }
 }
 
-module.exports = { AcpClient };
+module.exports = { AcpClient, normalizeReasoningEffort };

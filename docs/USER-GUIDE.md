@@ -325,14 +325,60 @@ Drag files directly into the chat area — the file paths are sent as context to
 | **Reorder** | Drag & drop |
 | **Sync** | 🔄 button → first 5 open todos as a prompt |
 
+### Plans (across providers)
+
+Plans are ordinary markdown files under `plans/` in your project — one file per
+plan, e.g. `plans/reasoning-effort.md`. They exist so you can work something out
+in one provider's session and continue it in another's: ask one agent to write a
+plan, then in a session with a different provider ask it to carry that plan out.
+
+There is nothing to click. The agents know the convention because Agent Desktop
+keeps it in their own global instruction files:
+
+| File | Written when |
+|---|---|
+| `~/.claude/CLAUDE.md` | the `claude` CLI is installed |
+| `~/.copilot/copilot-instructions.md` | the `copilot` CLI is installed |
+
+The app only ever touches a marked block in those files
+(`<!-- agent-desktop:plans:start … end -->`) — everything else you have written
+there stays untouched. The text itself comes from `~/.agent-desktop/plans.md`,
+which is created on first start and never overwritten afterwards: **edit that
+file if you want to change the wording or the rules.** Changes inside the block
+in the target files are replaced on the next start, so make them in the source.
+
+The `plans/` folder is not created up front — the agent creates it when it
+writes the first plan.
+
+Two current limits: the direct API providers (Anthropic, OpenAI, GLM, Ollama,
+Gemini) don't get the convention yet, and for Claude Code over SSH the
+instruction file lives on the remote host, which the app can't write to.
+
 ### Session actions
 
 #### 🧠 Model selection
 
-Opens a dropdown for tab-specific model selection. Passed as the `--model` argument.
+Opens the tab-specific model dropdown. Every model entry also shows its saved
+reasoning level (`Standard`, `low`, `medium`, `high`, `xhigh` or `max`). Hover
+over an entry or focus it with the keyboard to open its reasoning submenu.
+Selecting a level selects the model and reasoning combination together.
+
+This works identically for GitHub Copilot and Claude Code (both the local and
+the SSH variant) — the reasoning levels are the same fixed set for every
+model, no per-model or per-session lookup needed.
 
 - Per tab; persistent across app restarts
 - Default: `claude-sonnet-4.6`
+- Each model keeps its own reasoning level within the tab/session
+- `Standard` uses the backend's own default and does not add an override
+- Changing reasoning takes effect before the next prompt; the current prompt is
+  not interrupted
+- On Copilot, a reasoning change transparently restarts the ACP process (a
+  spawn-time flag); a model-only change does not. On Claude Code, reasoning is
+  applied as a live session setting — no restart either way.
+
+Direct API providers (Anthropic, OpenAI, GLM, Ollama, Gemini) keep their
+existing model selection without a reasoning submenu.
 
 #### 🤖 Mode
 
@@ -397,9 +443,17 @@ Everything that applies across every provider, not to one specific backend.
 | **Default provider** | Provider new tabs and "+" start with |
 | **CWD** | Working directory every provider uses by default (requires an app restart) |
 | **Images folder** | Gallery folder, provider-independent (requires an app restart) |
-| **Developer mode** | Enables the test runner (🧪) and developer console (🖥️) in the sidebar |
+| **Developer mode** | Enables the test runner (🧪) and developer console (🖥️) in the sidebar, and the update notice for the Claude Code ACP adapter (see below) |
 
 Every setting here auto-saves the moment you change it — no separate "Save" button. CWD/Images folder still need a full app restart to actually take effect (shown via a toast), since those are read once at startup.
+
+**On the Claude Code adapter update notice:** the app pins one exact version of
+the `@agentclientprotocol/claude-agent-acp` package — the one verified to work.
+That package releases often, and its releases have broken things here before
+(0.75.0 changed the `/usage` output format, which silently emptied the
+subscription display). Updating it is therefore not a routine action, and the
+notice only appears in developer mode. Without developer mode the app simply
+stays on its pinned, working version — no check runs and nothing is shown.
 
 #### Provider tab
 

@@ -58,7 +58,7 @@ jest.mock('child_process', () => ({
 }));
 
 // ── AcpClient Import ────────────────────────────────────────────
-const { AcpClient } = require('../src/acp-client');
+const { AcpClient, normalizeReasoningEffort } = require('../src/acp-client');
 
 // ── Helper ──────────────────────────────────────────────────────
 
@@ -68,6 +68,113 @@ function flushPromises() {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parseStdin(written) {
+  return written
+    .map(line => {
+      try { return JSON.parse(line.trim()); } catch { return null; }
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Installs a small ACP responder for lifecycle tests.
+ * @param {EventEmitter} proc
+ * @param {string[]} written
+ * @param {{sessionId?: string, respondToPrompt?: boolean}} [options]
+ */
+function installLifecycleResponder(proc, written, { sessionId = 's1', respondToPrompt = true } = {}) {
+  proc.stdin = new Writable({
+    write(chunk, enc, cb) {
+      const line = chunk.toString();
+      written.push(line);
+      try {
+        const request = JSON.parse(line.trim());
+        let result;
+        switch (request.method) {
+          case 'initialize':
+            result = { status: 'ok' };
+            break;
+          case 'session/new':
+            result = { sessionId };
+            break;
+          case 'session/load':
+            result = {};
+            break;
+          case 'session/set_model':
+          case 'session/set_mode':
+            result = {};
+            break;
+          case 'session/prompt':
+            if (!respondToPrompt) break;
+            result = { stopReason: 'end_turn' };
+            break;
+          default:
+            break;
+        }
+        if (result !== undefined) {
+          setImmediate(() => sendResponse(proc, { jsonrpc: '2.0', id: request.id, result }));
+        }
+      } catch { /* ignore non-JSON writes */ }
+      cb();
+    },
+  });
+}
+
+/**
+ * Installs an ACP responder that mimics the current Claude Code adapter's
+ * `configOptions` mechanism (model/mode/effort as session config options,
+ * see `useConfigOptions`). Used for the Effort-Discovery/-Anwendung tests.
+ * @param {EventEmitter} proc
+ * @param {string[]} written
+ * @param {{sessionId?: string, newSessionConfigOptions?: Array, loadSessionConfigOptions?: Array|null, configOptionsAfterModelSwitch?: Object<string, Array>}} [opts]
+ */
+function installConfigOptionsResponder(proc, written, {
+  sessionId = 's1',
+  newSessionConfigOptions = [],
+  loadSessionConfigOptions = null,
+  configOptionsAfterModelSwitch = {},
+} = {}) {
+  proc.stdin = new Writable({
+    write(chunk, enc, cb) {
+      const line = chunk.toString();
+      written.push(line);
+      try {
+        const request = JSON.parse(line.trim());
+        let result;
+        switch (request.method) {
+          case 'initialize':
+            result = { status: 'ok' };
+            break;
+          case 'session/new':
+            result = { sessionId, configOptions: newSessionConfigOptions };
+            break;
+          case 'session/load':
+            result = { configOptions: loadSessionConfigOptions ?? newSessionConfigOptions };
+            break;
+          case 'session/set_config_option': {
+            const { configId, value } = request.params || {};
+            if (configId === 'model' && configOptionsAfterModelSwitch[value]) {
+              result = { configOptions: configOptionsAfterModelSwitch[value] };
+            } else {
+              result = {};
+            }
+            break;
+          }
+          case 'session/prompt':
+            result = { stopReason: 'end_turn' };
+            break;
+          default:
+            break;
+        }
+        if (result !== undefined) {
+          setImmediate(() => sendResponse(proc, { jsonrpc: '2.0', id: request.id, result }));
+        }
+      } catch { /* ignore non-JSON writes */ }
+      cb();
+    },
+  });
 }
 
 // ── Tests ───────────────────────────────────────────────────────
@@ -123,6 +230,19 @@ describe('AcpClient', () => {
       client = new AcpClient('tab-1', mockSendToRenderer);
       expect(client.sessionId).toBeNull();
     });
+
+    it('normalisiert Standard und ungültige Werte zu null', () => {
+      expect(normalizeReasoningEffort(null)).toBeNull();
+      expect(normalizeReasoningEffort('standard')).toBeNull();
+      expect(normalizeReasoningEffort('invalid')).toBeNull();
+      expect(normalizeReasoningEffort(42)).toBeNull();
+    });
+
+    it('akzeptiert alle gültigen Reasoning-Stufen', () => {
+      for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+        expect(normalizeReasoningEffort(effort)).toBe(effort);
+      }
+    });
   });
 
   // ════════════════════════════════════════════════════════════════
@@ -148,6 +268,54 @@ describe('AcpClient', () => {
       const proc = mockProcesses[0];
       sendResponse(proc, { jsonrpc: '2.0', id: 1, result: { status: 'ok' } });
       await flushPromises();
+    });
+
+    it.each(['low', 'medium', 'high', 'xhigh', 'max'])(
+      'übergibt die gültige Reasoning-Stufe "%s" beim Prozessstart',
+      async (effort) => {
+        const proc = createMockProcess();
+        const written = [];
+        installLifecycleResponder(proc, written);
+        mockSpawnFn = jest.fn(() => proc);
+
+        client = new AcpClient('tab-1', mockSendToRenderer, { effort });
+        await client.start();
+
+        expect(mockSpawnFn.mock.calls[0][1]).toEqual(
+          expect.arrayContaining(['--reasoning-effort', effort]),
+        );
+      },
+    );
+
+    it.each([undefined, null, '', 'standard', 'invalid'])(
+      'übergibt für "%s" kein Reasoning-CLI-Argument',
+      async (effort) => {
+        const proc = createMockProcess();
+        const written = [];
+        installLifecycleResponder(proc, written);
+        mockSpawnFn = jest.fn(() => proc);
+
+        client = new AcpClient('tab-1', mockSendToRenderer, { effort });
+        await client.start();
+
+        expect(mockSpawnFn.mock.calls[0][1]).not.toContain('--reasoning-effort');
+      },
+    );
+
+    it('übergibt Reasoning nicht an Nicht-Copilot-ACP-Adapter', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written);
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        baseArgs: ['@adapter/package'],
+        effort: 'max',
+      });
+      await client.start();
+
+      expect(mockSpawnFn.mock.calls[0][1]).toEqual(['@adapter/package']);
+      expect(mockSpawnFn.mock.calls[0][1]).not.toContain('--reasoning-effort');
     });
 
     it('wechselt State von "dead" zu "starting" beim Start', () => {
@@ -1085,7 +1253,142 @@ describe('AcpClient', () => {
   });
 
   // ════════════════════════════════════════════════════════════════
-  // 11. Modus-Anwendung (session/set_mode)
+  // 11. Reasoning-Effort-Lifecycle
+  // ════════════════════════════════════════════════════════════════
+
+  describe('Reasoning-Effort-Lifecycle', () => {
+    it('startet bei einer geänderten Stufe erst vor dem nächsten Prompt neu', async () => {
+      const proc1 = createMockProcess();
+      const proc2 = createMockProcess();
+      const written1 = [];
+      const written2 = [];
+      installLifecycleResponder(proc1, written1);
+      installLifecycleResponder(proc2, written2);
+      mockSpawnFn = jest.fn()
+        .mockReturnValueOnce(proc1)
+        .mockReturnValueOnce(proc2);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        model: 'claude-opus-4.8',
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+
+      client.updateOptions({ effort: 'max' });
+      expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+      expect(proc1.kill).not.toHaveBeenCalled();
+
+      const promptP = client.prompt('nächste Nachricht');
+      await flushPromises();
+      expect(proc1.kill).toHaveBeenCalledWith('SIGTERM');
+
+      // stop() wartet bewusst auf das close-Event des alten Prozesses.
+      proc1.emit('close', 0, null);
+      await promptP;
+
+      expect(mockSpawnFn).toHaveBeenCalledTimes(2);
+      expect(mockSpawnFn.mock.calls[1][1]).toEqual(
+        expect.arrayContaining(['--reasoning-effort', 'max']),
+      );
+
+      const methods = parseStdin(written2).map(message => message.method);
+      const loadIndex = methods.indexOf('session/load');
+      const setModelIndex = methods.indexOf('session/set_model');
+      const promptIndex = methods.indexOf('session/prompt');
+      expect(loadIndex).toBeGreaterThanOrEqual(0);
+      expect(setModelIndex).toBeGreaterThan(loadIndex);
+      expect(promptIndex).toBeGreaterThan(setModelIndex);
+
+      const stopP = client.stop();
+      proc2.emit('close', 0, null);
+      await stopP;
+    });
+
+    it('startet bei unveränderter Reasoning-Stufe nicht neu', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written);
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { effort: 'high' });
+      await client.start();
+      await client.newSession();
+
+      client.updateOptions({ effort: 'high' });
+      await client.prompt('ohne Neustart');
+
+      expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      const stopP = client.stop();
+      proc.emit('close', 0, null);
+      await stopP;
+    });
+
+    it('ignoriert ungültige Laufzeitwerte ohne die aktive Stufe zu ändern', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written);
+      mockSpawnFn = jest.fn(() => proc);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { effort: 'high' });
+      await client.start();
+      await client.newSession();
+
+      client.updateOptions({ effort: 'invalid' });
+      await client.prompt('gültige Stufe bleibt aktiv');
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('ignoring invalid reasoning effort'),
+        'invalid',
+      );
+      expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+      expect(mockSpawnFn.mock.calls[0][1]).toEqual(
+        expect.arrayContaining(['--reasoning-effort', 'high']),
+      );
+
+      const stopP = client.stop();
+      proc.emit('close', 0, null);
+      await stopP;
+    });
+
+    it('unterbricht einen laufenden Prompt nicht durch eine Reasoning-Änderung', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written, { respondToPrompt: false });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { effort: 'high' });
+      await client.start();
+      await client.newSession();
+
+      const promptP = client.prompt('laufender Prompt');
+      await flushPromises();
+      expect(client.state).toBe('busy');
+
+      client.updateOptions({ effort: 'max' });
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      const promptRequest = parseStdin(written).find(message => message.method === 'session/prompt');
+      sendResponse(proc, {
+        jsonrpc: '2.0',
+        id: promptRequest.id,
+        result: { stopReason: 'end_turn' },
+      });
+      await promptP;
+
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      const stopP = client.stop();
+      proc.emit('close', 0, null);
+      await stopP;
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // 12. Modus-Anwendung (session/set_mode)
   // ════════════════════════════════════════════════════════════════
 
   describe('Modus-Anwendung', () => {
@@ -1169,6 +1472,275 @@ describe('AcpClient', () => {
       const setModeCount = written.filter(l => { try { return JSON.parse(l.trim()).method === 'session/set_mode'; } catch { return false; } }).length;
       // Applied at most once (not re-sent when unchanged).
       expect(setModeCount).toBeLessThanOrEqual(1);
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // 13. Effort-Discovery (configOptions, Claude Code)
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Claude Code (@agentclientprotocol/claude-agent-acp) meldet unterstützte
+  // Reasoning-Effort-Stufen als configOptions-Eintrag (id === 'effort'),
+  // analog zum bereits bestehenden 'mode'-Eintrag (#captureModes). Die Werte
+  // kommen dynamisch vom Modell (supportedEffortLevels) — anders als bei
+  // Copilot gibt es KEINE feste Werteliste.
+
+  // ════════════════════════════════════════════════════════════════
+  // 14. Effort-Anwendung (session/set_config_option, Claude Code)
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Kein separater "Effort-Discovery"-Block mehr: Anthropics Reasoning-Effort
+  // ist ein fixes, modellunabhängiges Set (low/medium/high/xhigh/max) — kein
+  // per-Modell/-Session entdecktes configOptions-Feature wie `mode`. Der
+  // Adapter meldet zwar theoretisch einen 'effort'-configOptions-Eintrag,
+  // aber die App verlässt sich darauf nicht mehr für die UI-Sichtbarkeit
+  // (siehe renderer/app.js REASONING_EFFORTS) — nur noch für die Anwendung
+  // per session/set_config_option selbst.
+
+  describe('Effort-Anwendung (#applyEffort)', () => {
+    const EFFORT_OPTION = {
+      id: 'effort',
+      currentValue: 'medium',
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+        { value: 'max', name: 'Max' },
+      ],
+    };
+
+    it('sendet session/set_config_option(effort) nicht, wenn keine Effort-Stufe konfiguriert ist', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { useConfigOptions: true, baseArgs: ['dummy-claude-acp'] });
+      await client.start();
+      await client.newSession();
+      await client.prompt('ohne Effort-Option');
+
+      const sent = parseStdin(written).find(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(sent).toBeUndefined();
+    });
+
+    it('sendet session/set_config_option(effort) nicht, wenn der konfigurierte Wert kein gültiger Reasoning-Wert ist', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      // Das fixe Set (low/medium/high/xhigh/max) gilt für jeden Provider
+      // gleich — ein Tippfehler/Fantasiewert wird schon im Konstruktor auf
+      // null normalisiert, #applyEffort() sieht ihn also nie.
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        effort: 'super-mega-high',
+      });
+      await client.start();
+      await client.newSession();
+      await client.prompt('ungültige Stufe');
+
+      const sent = parseStdin(written).find(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(sent).toBeUndefined();
+    });
+
+    it('sendet session/set_config_option(effort) nicht erneut, wenn die Stufe unverändert ist', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+
+      await client.prompt('eins');
+      await client.prompt('zwei');
+
+      const effortReqs = parseStdin(written).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(1);
+    });
+
+    it('sendet session/set_config_option mit configId "effort" und dem korrekten Value bei einer echten Änderung', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+
+      await client.prompt('eins');
+      client.updateOptions({ effort: 'max' });
+      await client.prompt('zwei');
+
+      const effortReqs = parseStdin(written).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(2);
+      expect(effortReqs[0].params).toEqual({ sessionId: 's1', configId: 'effort', value: 'high' });
+      expect(effortReqs[1].params).toEqual({ sessionId: 's1', configId: 'effort', value: 'max' });
+    });
+
+    it('sendet value "default", wenn eine bereits angewandte Stufe wieder auf Standard zurückgesetzt wird', async () => {
+      // Regression: der Adapter pinnt eine einmal gesetzte Stufe serverseitig
+      // (effortPinnedByUser) und behält sie über Modellwechsel hinweg bei. Ein
+      // reines "nichts senden" bei effort=null hätte den Pin nie aufgehoben —
+      // die UI hätte "Standard" gezeigt, während die Session weiter mit der
+      // alten Stufe gelaufen wäre.
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+
+      await client.prompt('eins');
+      client.updateOptions({ effort: null });
+      await client.prompt('zurück auf Standard');
+
+      const effortReqs = parseStdin(written).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(2);
+      expect(effortReqs[0].params).toEqual({ sessionId: 's1', configId: 'effort', value: 'high' });
+      expect(effortReqs[1].params).toEqual({ sessionId: 's1', configId: 'effort', value: 'default' });
+    });
+
+    it('sendet nichts, wenn nie eine Stufe konfiguriert war (kein Standard->Standard-Rauschen)', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { useConfigOptions: true, baseArgs: ['dummy-claude-acp'] });
+      await client.start();
+      await client.newSession();
+
+      await client.prompt('eins');
+      await client.prompt('zwei');
+
+      const effortReqs = parseStdin(written).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(0);
+    });
+
+    it('wendet Modus vor Effort und beide vor session/prompt an (Reihenfolge)', async () => {
+      const MODE_OPTION = {
+        id: 'mode',
+        currentValue: 'agent',
+        options: [
+          { value: 'agent', name: 'Agent' },
+          { value: 'plan', name: 'Plan' },
+        ],
+      };
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, {
+        newSessionConfigOptions: [MODE_OPTION, EFFORT_OPTION],
+      });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        mode: 'plan',
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+      await client.prompt('los');
+
+      const msgs = parseStdin(written);
+      const modeIdx = msgs.findIndex((m) => m.method === 'session/set_config_option' && m.params?.configId === 'mode');
+      const effortIdx = msgs.findIndex((m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort');
+      const promptIdx = msgs.findIndex((m) => m.method === 'session/prompt');
+
+      expect(modeIdx).toBeGreaterThanOrEqual(0);
+      expect(effortIdx).toBeGreaterThan(modeIdx);
+      expect(promptIdx).toBeGreaterThan(effortIdx);
+    });
+
+    it('wendet Effort nur an, wenn useConfigOptions gesetzt ist (Copilot bleibt beim Restart-Mechanismus)', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      // Ungewöhnlich (Copilot liefert real keine configOptions), aber isoliert
+      // exakt die Guard-Bedingung "nur bei useConfigOptions".
+      installConfigOptionsResponder(proc, written, { newSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn(() => proc);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, { effort: 'high' }); // kein useConfigOptions
+      await client.start();
+      await client.newSession();
+      await client.prompt('copilot-pfad');
+
+      const sent = parseStdin(written).find(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(sent).toBeUndefined();
+    });
+
+    it('setzt #appliedEffort und die bekannten Effort-Optionen bei einem Prozess-Neustart zurück (Re-Apply nach restart)', async () => {
+      const proc1 = createMockProcess();
+      const proc2 = createMockProcess();
+      const written1 = [];
+      const written2 = [];
+      installConfigOptionsResponder(proc1, written1, { newSessionConfigOptions: [EFFORT_OPTION] });
+      installConfigOptionsResponder(proc2, written2, { loadSessionConfigOptions: [EFFORT_OPTION] });
+      mockSpawnFn = jest.fn().mockReturnValueOnce(proc1).mockReturnValueOnce(proc2);
+
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        useConfigOptions: true,
+        baseArgs: ['dummy-claude-acp'],
+        effort: 'high',
+      });
+      await client.start();
+      await client.newSession();
+      await client.prompt('vor dem Neustart');
+
+      let effortReqs = parseStdin(written1).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(1);
+
+      const stopP = client.stop();
+      proc1.emit('close', 0, null);
+      await stopP;
+
+      await client.start();
+      // prompt() lädt die Session automatisch neu (#sessionLoadedInProcess === false
+      // nach start()) und wendet Effort danach erneut an.
+      await client.prompt('nach dem Neustart');
+
+      effortReqs = parseStdin(written2).filter(
+        (m) => m.method === 'session/set_config_option' && m.params?.configId === 'effort',
+      );
+      expect(effortReqs).toHaveLength(1);
+      expect(effortReqs[0].params).toEqual({ sessionId: 's1', configId: 'effort', value: 'high' });
     });
   });
 

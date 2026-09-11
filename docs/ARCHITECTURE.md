@@ -306,7 +306,7 @@ User              Renderer            Preload          Main            AcpClient
 ```
 
 **Detailed flow:**
-1. `sendMessage()` in the renderer collects: text (force-activated skills/agents prepended as a hint, if any), model, session ID, denied tools, CWD, autopilot flag
+1. `sendMessage()` in the renderer collects: text (force-activated skills/agents prepended as a hint, if any), model, the model's Copilot reasoning effort, session ID, denied tools, CWD, autopilot flag
 2. IPC call `copilot:send` → `main.js` → `client.prompt(text, opts)`
 3. AcpClient sends `session/prompt` to the running `copilot --acp` process
 4. `session/update` notifications come back as an NDJSON stream
@@ -352,6 +352,64 @@ User disables a tool in the session-tools popup
      client.loadSession(sessionId)    → restore the session
 ```
 
+### 6.3.1 Process restart (Copilot reasoning effort)
+
+Each tab stores a `reasoningByModel` map alongside its selected model. The
+renderer passes the selected model's effort as `options.effort` only for the
+Copilot provider. `AcpClient` validates the value and adds
+`--reasoning-effort <value>` only when a non-standard level is selected.
+
+Because the flag is a process-start option, changing the effort does not
+interrupt the current turn. `updateOptions()` marks the change, and immediately
+before the next prompt the client:
+
+1. stops the current ACP process,
+2. starts a new process with the selected effort,
+3. loads the existing session with `session/load`,
+4. reapplies the selected model and mode,
+5. sends the prompt.
+
+An unchanged effort keeps the existing process and sends only the normal
+`session/prompt`. A model-only change continues to use `session/set_model`
+without a restart. The map is persisted in `openTabs` and in the
+`sessionReasoningByModel` preference so both open-tab restore and sidebar
+resume preserve each model's choice.
+
+### 6.3.2 Live config option (Claude Code reasoning effort)
+
+Claude Code has no `--reasoning-effort` spawn flag — instead, the ACP adapter
+(`@agentclientprotocol/claude-agent-acp` ≥ 0.72.0) exposes reasoning effort the
+same way it already exposes `model` and `mode`: as a `configOptions` entry on
+`session/new`/`session/load`, settable live via
+`session/set_config_option({ configId: 'effort', value })`, with **no process
+restart**. `#restartForReasoningIfNeeded()` (6.3.1) is Copilot-only and does
+not apply here.
+
+The legal values are the same fixed `low/medium/high/xhigh/max` set Copilot
+uses — Anthropic's effort parameter turned out not to be gated per model in
+practice (confirmed: Haiku offers the same levels as Sonnet, and the same
+fixed list shows up across current model documentation generally). An earlier
+version of this feature tried to discover the legal values per model/session
+from the adapter's `configOptions` response (mirroring how `mode` genuinely
+does vary); that added complexity for no real benefit and was removed —
+Claude Code now validates against the same fixed set as Copilot, upfront, no
+live discovery.
+
+`AcpClient#applyEffort()` runs in `prompt()` right after `#applyModel()`/
+`#applyMode()`. It no-ops when the value matches what's already applied —
+otherwise it sends `session/set_config_option({ configId: 'effort', value })`.
+Reverting to Standard (`null`) is a real state change too, not just "nothing
+to do": the adapter pins an explicitly-applied level server-side and keeps it
+across model switches, so un-pinning requires sending `value: 'default'` —
+silently skipping it would leave the session running at the old level while
+the UI already shows Standard.
+
+In the renderer, Claude Code tabs use the same `REASONING_EFFORTS` constant
+and `tab.reasoningByModel` map as Copilot — no separate per-tab discovery
+state. The 🧠-button badge and the model dropdown's reasoning submenu render
+identically for both providers, on every model row, without needing a
+session or a sent message first.
+
 ### 6.4 App start
 
 ```
@@ -369,6 +427,49 @@ User disables a tool in the session-tools popup
 12. for each tab: AcpClient created + started (session/new or session/load)
 13. check onboarding → wizard if needed
 ```
+
+`app.whenReady()` also kicks off `syncPlansConvention()` (fire-and-forget, see
+6.4.1) — it spawns `--version` probes, so it must not delay the window.
+
+### 6.4.1 Cross-provider plans
+
+Plans are plain markdown under `plans/` in a project. Every provider can already
+read and write files there, so nothing has to be transported between sessions —
+what's missing is that the model *knows* the convention without being told in
+every chat. So the app mirrors that convention into the instruction files the
+ACP CLIs read by themselves:
+
+```
+~/.agent-desktop/plans.md          ← source of truth
+        │  content copied (one-way)
+        ├──► ~/.claude/CLAUDE.md                 (if `claude` is installed)
+        └──► ~/.copilot/copilot-instructions.md  (if `copilot` is installed)
+```
+
+- The source file is created with a default text if missing and **never
+  overwritten** — the user's edits are the point.
+- Only installed providers are touched (`isCliAvailable()`), so a Claude-Code-only
+  user doesn't get a Copilot instruction file created for them.
+- Copilot's `config.instructionsFile` preference is **ignored**: it's a leftover
+  from an older feature, and the file always lives in `~/.copilot/`.
+- The changes are confined to a marked block
+  (`<!-- agent-desktop:plans:start … end -->`), so the rest of those files stays
+  untouched. Content inside the block is overwritten on each sync; edits belong
+  in the source file.
+- `syncToTarget()` writes only when the content actually changes, so a normal
+  start doesn't keep touching files that editors and git are watching.
+
+The block logic lives in `src/plans-convention.js` as a pure function
+(`applyBlock`) rather than inline in main.js, because it edits files that belong
+to the user and are read by tools outside this app — getting the boundaries
+wrong would silently eat someone's instructions. With a broken or half-present
+marker pair it deliberately appends instead of guessing where the block ends: a
+duplicated block is recoverable, swallowed instructions are not.
+
+Deliberately out of scope for now: the direct-API providers (their system prompt
+composition/caching is being reworked first) and `claude-code-ssh` (its
+instruction file lives on the remote host, which needs SSH rather than `fs`).
+See `plans/cross-provider-plans.md`.
 
 ### 6.5 IPC communication
 

@@ -13,7 +13,9 @@
  *  3. initTabModelSelector(): Dropdown-Klick setzt tab.selectedModel + Button-Update
  *  4. Tab-Wechsel: selectedModel-State ist unabhängig pro Tab
  *  5. sendMessage-Integration: model-Option korrekt übergeben (gesetzt / null)
- *  6. main.js: --model CLI-Argument wird hinzugefügt wenn options.model gesetzt
+ *  6. Modellbezogene Reasoning-Zuordnung und Provider-Isolation
+ *  7. main.js: --model / --reasoning-effort CLI-Argumente
+ *  8. Claude-Code-Reasoning-Effort (feste Werteliste wie Copilot, ACP)
  */
 
 // ── Konstanten (aus renderer/app.js) ──────────────────────────
@@ -27,6 +29,42 @@ const DEFAULT_MODELS = [
   { id: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
   { id: 'gpt-5.3-codex',   label: 'GPT-5.3-Codex' },
 ];
+const VALID_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function normalizeReasoningEffort(value) {
+  if (value == null || value === '' || value === 'standard') return null;
+  return VALID_REASONING_EFFORTS.has(value) ? value : null;
+}
+
+/**
+ * Claude Code (`claude-code` / `claude-code-ssh`) teilt sich den ACP-Adapter —
+ * beide behandeln Reasoning-Effort identisch (nur der Prozessort unterscheidet
+ * sich). Spiegelt `isClaudeCodeProvider()` aus renderer/app.js.
+ * @param {string} provider
+ */
+function isClaudeCodeProvider(provider) {
+  return provider === 'claude-code' || provider === 'claude-code-ssh';
+}
+
+/** True für Provider, die überhaupt eine Reasoning-Zuordnung führen (Copilot,
+ * Claude Code — beide über dieselbe feste Werteliste, siehe unten). */
+function reasoningApplicable(tab) {
+  return tab?.provider === 'copilot' || isClaudeCodeProvider(tab?.provider);
+}
+
+/**
+ * Normalisiert einen Reasoning-Wert gegen die feste Werteliste
+ * (`VALID_REASONING_EFFORTS`) — dieselbe Liste für jeden Provider.
+ * Anthropics Effort-Parameter ist nicht pro Modell gegated (bestätigt: Haiku
+ * bietet dieselben Stufen wie Sonnet); es gibt daher keine pro Modell/Session
+ * entdeckte Werteliste wie bei `mode`.
+ * @param {{provider: string}} tab
+ * @param {string|null|undefined} value
+ */
+function normalizeEffortForTab(tab, value) {
+  if (value == null || value === '' || value === 'standard') return null;
+  return VALID_REASONING_EFFORTS.has(value) ? value : null;
+}
 
 // ── ModelSelectionStateMachine (extrahiert aus renderer/app.js) ──
 
@@ -39,7 +77,7 @@ const DEFAULT_MODELS = [
  */
 class ModelSelectionStateMachine {
   constructor() {
-    /** @type {Map<string, {selectedModel: string|null, autopilot: boolean, sessionId: string|null, isProcessing: boolean}>} */
+    /** @type {Map<string, {selectedModel: string|null, provider: string, reasoningByModel: Object<string, string|null>, autopilot: boolean, sessionId: string|null, isProcessing: boolean}>} */
     this.tabs = new Map();
     /** @type {string|null} */
     this.activeTabId = null;
@@ -48,6 +86,8 @@ class ModelSelectionStateMachine {
     this._btnText = '🧠 Model';
     /** Simuliert das Vorhandensein der ACTIVE_CLASS am Button */
     this._btnActive = false;
+    /** Simuliert die kompakte Reasoning-Anzeige des Buttons */
+    this._btnReasoning = null;
 
     /** @type {Array<{tabId: string, text: string, options: Object}>} Aufgezeichnete send-Aufrufe */
     this.sentMessages = [];
@@ -62,14 +102,23 @@ class ModelSelectionStateMachine {
    * Erstellt einen neuen Tab mit selectedModel: null als Default.
    * @param {string} tabId
    * @param {string} [label]
+   * @param {string} [provider]
+   * @param {Object<string, string|null>} [reasoningByModel]
    */
-  createTab(tabId, label = '🤖 Copilot') {
+  createTab(tabId, label = '🤖 Copilot', provider = 'copilot', reasoningByModel = {}) {
     this.tabs.set(tabId, {
       label,
       sessionId: null,
       isProcessing: false,
       autopilot: false,
       selectedModel: null,           // ← SUT: Default muss null sein
+      provider,
+      reasoningByModel: Object.fromEntries(
+        Object.entries(reasoningByModel).map(([modelId, effort]) => [
+          modelId,
+          normalizeReasoningEffort(effort),
+        ]),
+      ),
     });
     this.activeTabId = tabId;
     this._syncButtonState();
@@ -99,6 +148,9 @@ class ModelSelectionStateMachine {
   updateModelSelectBtn() {
     const tab = this.tabs.get(this.activeTabId);
     const modelId = tab?.selectedModel;
+    this._btnReasoning = tab && reasoningApplicable(tab) && modelId
+      ? normalizeEffortForTab(tab, tab.reasoningByModel?.[modelId])
+      : null;
     if (modelId) {
       const found = this.availableModels.find(m => m.id === modelId);
       this._btnText = `🧠 ${found ? found.label : modelId}`;
@@ -115,13 +167,37 @@ class ModelSelectionStateMachine {
    * Simuliert einen Klick auf ein Dropdown-Item (Model-Auswahl).
    * Spiegelt: item.addEventListener('click', ...) in initTabModelSelector()
    * @param {string} modelId  — ID des gewählten Modells (z.B. 'claude-sonnet-4.6')
+   * @param {string|null} [effort] — optionale Copilot-Reasoning-Stufe
    */
-  selectModel(modelId) {
+  selectModel(modelId, effort) {
     if (!this.activeTabId) return;
     const t = this.tabs.get(this.activeTabId);
     if (!t) return;
     t.selectedModel = modelId;          // ← SUT: tab.selectedModel wird gesetzt
+    if (reasoningApplicable(t)) {
+      t.reasoningByModel[modelId] = arguments.length >= 2
+        ? normalizeEffortForTab(t, effort)
+        : normalizeEffortForTab(t, t.reasoningByModel[modelId]);
+    }
     this.updateModelSelectBtn();        // ← SUT: wird direkt danach aufgerufen
+  }
+
+  selectReasoning(modelId, effort) {
+    this.selectModel(modelId, effort);
+  }
+
+  // ── initTabModelSelector – Submenü-Sichtbarkeit (Zeile ~3097 in app.js) ──
+
+  /**
+   * Spiegelt die Bedingung, unter der initTabModelSelector() für ein
+   * Model-Dropdown-Item ein Reasoning-Untermenü baut: für jedes Modell eines
+   * reasoning-fähigen Providers (Copilot, Claude Code) — nicht nur das
+   * gerade aktive. Die Werteliste ist fest und modellunabhängig, es gibt
+   * also nichts erst zu entdecken (siehe normalizeEffortForTab).
+   * @param {string} modelId — die Model-ID des jeweils gerenderten Dropdown-Items
+   */
+  hasEffortSubmenu(modelId) { // eslint-disable-line no-unused-vars
+    return reasoningApplicable(this.activeTab);
   }
 
   // ── sendMessage (Zeile 1059-1068 in app.js) ────────────────
@@ -141,6 +217,9 @@ class ModelSelectionStateMachine {
       autoApprove: true,
       autopilot:  tab.autopilot || undefined,
       model:      tab.selectedModel || undefined,   // ← SUT
+      effort:      reasoningApplicable(tab) && tab.selectedModel
+        ? normalizeEffortForTab(tab, tab.reasoningByModel?.[tab.selectedModel]) || undefined
+        : undefined,
     };
 
     this.sentMessages.push({ tabId: this.activeTabId, text, options });
@@ -203,7 +282,7 @@ function buildCopilotArgs(prompt, options = {}) {
     args.push('--model', options.model);   // ← SUT: Zeile 303-305 in main.js
   }
 
-  if (options.effort) {
+  if (VALID_REASONING_EFFORTS.has(options.effort)) {
     args.push('--reasoning-effort', options.effort);
   }
 
@@ -235,6 +314,31 @@ describe('ModelSelection — Tab-Default-State (createTab)', () => {
   test('selectedModel-Default ist null (nicht undefined oder false)', () => {
     sm.createTab('tab1');
     expect(sm.tabs.get('tab1').selectedModel).toStrictEqual(null);
+  });
+
+  test('reasoningByModel ist pro Tab leer und Standard ist implizit', () => {
+    sm.createTab('tab1');
+    expect(sm.tabs.get('tab1').reasoningByModel).toEqual({});
+    expect(sm._btnReasoning).toBeNull();
+  });
+
+  test('alte Persistenz ohne Reasoning-Map wird als Standard geladen', () => {
+    sm.createTab('tab1', '🤖 Copilot', 'copilot');
+    expect(sm.activeTab.reasoningByModel).toEqual({});
+    expect(sm._btnReasoning).toBeNull();
+  });
+
+  test('Persistenzwerte werden beim Laden validiert und pro Model übernommen', () => {
+    sm.createTab('tab1', '🤖 Copilot', 'copilot', {
+      'claude-sonnet-4.6': 'high',
+      'claude-opus-4.8': 'standard',
+      'unknown-model': 'invalid',
+    });
+    expect(sm.activeTab.reasoningByModel).toEqual({
+      'claude-sonnet-4.6': 'high',
+      'claude-opus-4.8': null,
+      'unknown-model': null,
+    });
   });
 
   test('zweiter Tab hat ebenfalls selectedModel: null', () => {
@@ -279,6 +383,13 @@ describe('ModelSelection — updateModelSelectBtn()', () => {
     sm.activeTab.selectedModel = 'claude-sonnet-4.6';
     sm.updateModelSelectBtn();
     expect(sm._btnText).toBe('🧠 Claude Sonnet 4.6');
+  });
+
+  test('Button zeigt für ein Copilot-Model die gespeicherte Reasoning-Stufe', () => {
+    sm.activeTab.selectedModel = 'claude-sonnet-4.6';
+    sm.activeTab.reasoningByModel['claude-sonnet-4.6'] = 'high';
+    sm.updateModelSelectBtn();
+    expect(sm._btnReasoning).toBe('high');
   });
 
   test('Button zeigt die Model-ID wenn unbekanntes Model gesetzt ist', () => {
@@ -381,6 +492,24 @@ describe('ModelSelection — initTabModelSelector (Dropdown-Item-Klick)', () => 
     expect(sm._btnText).toBe('🧠 GPT-5.3-Codex');
     expect(sm.activeTab.selectedModel).toBe('gpt-5.3-codex');
   });
+
+  test('Reasoning-Klick speichert die Stufe unter dem ausgewählten Model', () => {
+    sm.selectModel('claude-sonnet-4.6');
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+    expect(sm.activeTab.reasoningByModel).toEqual({
+      'claude-sonnet-4.6': 'high',
+    });
+    expect(sm._btnReasoning).toBe('high');
+  });
+
+  test('ungültige oder Standard-Reasoning-Werte werden als Standard gespeichert', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'invalid');
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBeNull();
+
+    sm.selectReasoning('claude-sonnet-4.6', 'standard');
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBeNull();
+    expect(sm._btnReasoning).toBeNull();
+  });
 });
 
 // ── 4. Tab-Wechsel: unabhängiger selectedModel-State ──────────
@@ -480,6 +609,29 @@ describe('ModelSelection — Tab-Wechsel (switchTab)', () => {
     sm.switchTab('tab2');
     expect(sm._btnText).toBe('🧠 GPT-5.3-Codex');
   });
+
+  test('Model-Wechsel stellt die jeweils gespeicherte Reasoning-Stufe wieder her', () => {
+    sm.switchTab('tab1');
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+    sm.selectReasoning('claude-opus-4.8', 'max');
+
+    sm.selectModel('claude-sonnet-4.6');
+    expect(sm._btnReasoning).toBe('high');
+
+    sm.selectModel('claude-opus-4.8');
+    expect(sm._btnReasoning).toBe('max');
+  });
+
+  test('Reasoning-Zuordnungen bleiben zwischen Tabs isoliert', () => {
+    sm.switchTab('tab1');
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+
+    sm.switchTab('tab2');
+    sm.selectReasoning('claude-sonnet-4.6', 'low');
+
+    expect(sm.tabs.get('tab1').reasoningByModel['claude-sonnet-4.6']).toBe('high');
+    expect(sm.tabs.get('tab2').reasoningByModel['claude-sonnet-4.6']).toBe('low');
+  });
 });
 
 // ── 5. sendMessage-Integration ────────────────────────────────
@@ -501,6 +653,18 @@ describe('ModelSelection — sendMessage-Integration', () => {
     sm.selectModel('claude-sonnet-4.6');
     const options = sm.sendMessage('Hallo');
     expect(options.model).toBe('claude-sonnet-4.6');
+  });
+
+  test('effort wird nur für Copilot zusammen mit dem Model übergeben', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'xhigh');
+    const options = sm.sendMessage('Hallo');
+    expect(options.model).toBe('claude-sonnet-4.6');
+    expect(options.effort).toBe('xhigh');
+  });
+
+  test('Standard-Reasoning wird nicht als effort übergeben', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'standard');
+    expect(sm.sendMessage('Hallo').effort).toBeUndefined();
   });
 
   test('model ist undefined nach Rücksetzen auf null', () => {
@@ -571,9 +735,31 @@ describe('ModelSelection — sendMessage-Integration', () => {
     const opt2 = sm.sendMessage('Von Tab 2');
     expect(opt2.model).toBeUndefined();
   });
+
+  test('Claude Code erhält die Reasoning-Option wie Copilot (kein Sonderfall mehr)', () => {
+    sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code');
+    sm.selectModel('claude-sonnet-4.6', 'max');
+
+    const options = sm.sendMessage('Hallo');
+    expect(options.model).toBe('claude-sonnet-4.6');
+    expect(options.effort).toBe('max');
+    expect(sm._btnReasoning).toBe('max');
+  });
+
+  test('Direkte API-Provider (z.B. Anthropic) erhalten keine Reasoning-Option', () => {
+    sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-anthropic', 'Anthropic', 'anthropic');
+    sm.selectModel('claude-sonnet-4.6', 'max');
+
+    const options = sm.sendMessage('Hallo');
+    expect(options.model).toBe('claude-sonnet-4.6');
+    expect(options.effort).toBeUndefined();
+    expect(sm._btnReasoning).toBeNull();
+  });
 });
 
-// ── 6. main.js: --model CLI-Argument ─────────────────────────
+// ── 7. main.js: --model / --reasoning-effort CLI-Argumente ───
 
 describe('ModelSelection — main.js CLI-Argument (spawnCopilot)', () => {
 
@@ -581,6 +767,40 @@ describe('ModelSelection — main.js CLI-Argument (spawnCopilot)', () => {
     const args = buildCopilotArgs('Teste', { model: 'claude-sonnet-4.6' });
     expect(args).toContain('--model');
     expect(args).toContain('claude-sonnet-4.6');
+  });
+
+  test('--reasoning-effort wird als Paar hinzugefügt wenn effort gültig ist', () => {
+    const args = buildCopilotArgs('Teste', { effort: 'high' });
+    const idx = args.indexOf('--reasoning-effort');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('high');
+  });
+
+  test('Standard und ungültige effort-Werte werden nicht als CLI-Argument hinzugefügt', () => {
+    for (const effort of [undefined, null, '', 'standard', 'invalid']) {
+      const args = buildCopilotArgs('Teste', { effort });
+      expect(args).not.toContain('--reasoning-effort');
+    }
+  });
+
+  test('alle gültigen effort-Werte können als CLI-Argument übergeben werden', () => {
+    for (const effort of VALID_REASONING_EFFORTS) {
+      const args = buildCopilotArgs('Teste', { effort });
+      expect(args).toEqual(expect.arrayContaining(['--reasoning-effort', effort]));
+    }
+  });
+
+  test('Model und effort werden gemeinsam und jeweils einmal übergeben', () => {
+    const args = buildCopilotArgs('Teste', {
+      model: 'claude-sonnet-4.6',
+      effort: 'medium',
+    });
+    expect(args.filter(a => a === '--model')).toHaveLength(1);
+    expect(args.filter(a => a === '--reasoning-effort')).toHaveLength(1);
+    expect(args).toEqual(expect.arrayContaining([
+      '--model', 'claude-sonnet-4.6',
+      '--reasoning-effort', 'medium',
+    ]));
   });
 
   test('--model und Model-ID stehen als Paar hintereinander in args', () => {
@@ -818,5 +1038,128 @@ describe('ModelSelection — End-to-End-Szenarien', () => {
 
     sm.switchTab('tab3');
     expect(sm.sendMessage('T3').model).toBe('gpt-5.3-codex');
+  });
+});
+
+// ── 8. Claude-Code-Reasoning-Effort (feste Werteliste, wie Copilot) ──
+//
+// Korrektur nach Nutzer-Feedback: Anthropics Effort-Parameter ist NICHT pro
+// Modell gegated (Haiku bietet in der Praxis dieselben Stufen wie Sonnet,
+// ebenso online durchgängig dieselbe feste Liste für alle Modelle, die
+// Reasoning unterstützen). Die ursprünglich geplante dynamische Discovery
+// über `session.effort_available` wurde deshalb wieder entfernt — Claude
+// Code verhält sich hier jetzt identisch zu Copilot: ein Untermenü pro
+// Modell-Zeile, sofort sichtbar, keine Session/Nachricht nötig, um es zu
+// "entdecken".
+
+describe('ModelSelection — Claude-Code-Effort: Untermenü wie bei Copilot', () => {
+  let sm;
+
+  beforeEach(() => {
+    sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code');
+  });
+
+  test('Untermenü erscheint sofort, ohne dass zuvor eine Nachricht gesendet wurde', () => {
+    expect(sm.hasEffortSubmenu('claude-sonnet-4.6')).toBe(true);
+  });
+
+  test('Untermenü erscheint für JEDES Modell in der Liste, nicht nur das aktive', () => {
+    sm.selectModel('claude-sonnet-4.6');
+    expect(sm.hasEffortSubmenu('claude-sonnet-4.6')).toBe(true);
+    expect(sm.hasEffortSubmenu('claude-opus-4.8')).toBe(true);
+    expect(sm.hasEffortSubmenu('claude-haiku-4.5')).toBe(true);
+  });
+
+  test('Copilot-Tabs zeigen identisch immer ein Untermenü (Regressionscheck)', () => {
+    const copilotSm = new ModelSelectionStateMachine();
+    copilotSm.createTab('tab-copilot');
+    expect(copilotSm.hasEffortSubmenu('claude-sonnet-4.6')).toBe(true);
+  });
+
+  test('Nicht-reasoning-fähige Provider zeigen kein Untermenü', () => {
+    const otherSm = new ModelSelectionStateMachine();
+    otherSm.createTab('tab-anthropic', 'Anthropic', 'anthropic');
+    expect(otherSm.hasEffortSubmenu('claude-sonnet-4.6')).toBe(false);
+  });
+});
+
+describe('ModelSelection — Claude-Code-Effort: Auswahl & Badge', () => {
+  let sm;
+
+  beforeEach(() => {
+    sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code');
+    sm.selectModel('claude-sonnet-4.6');
+  });
+
+  test('Reasoning-Klick mit gültiger Stufe wird übernommen', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBe('high');
+    expect(sm._btnReasoning).toBe('high');
+  });
+
+  test('Reasoning-Klick mit ungültigem Wert wird auf Standard (null) normalisiert', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'megathink');
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBeNull();
+    expect(sm._btnReasoning).toBeNull();
+  });
+
+  test('sendMessage() übergibt effort für Claude-Code-Tabs bei gültiger Stufe', () => {
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+    const options = sm.sendMessage('Hallo');
+    expect(options.model).toBe('claude-sonnet-4.6');
+    expect(options.effort).toBe('high');
+  });
+
+  test('sendMessage() lässt effort weg, wenn kein Wert gewählt wurde (Standard)', () => {
+    const options = sm.sendMessage('Hallo');
+    expect(options.model).toBe('claude-sonnet-4.6');
+    expect(options.effort).toBeUndefined();
+  });
+});
+
+describe('ModelSelection — Claude-Code-Effort: Tab-Isolation', () => {
+  test('zwei Claude-Code-Tabs mit unterschiedlichen Modellen/Effort-Stufen beeinflussen sich nicht gegenseitig', () => {
+    const sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-a', 'Claude Code A', 'claude-code');
+    sm.createTab('tab-b', 'Claude Code B', 'claude-code');
+
+    sm.switchTab('tab-a');
+    sm.selectModel('claude-sonnet-4.6');
+    sm.selectReasoning('claude-sonnet-4.6', 'high');
+
+    sm.switchTab('tab-b');
+    sm.selectModel('claude-opus-4.8');
+    sm.selectReasoning('claude-opus-4.8', 'low');
+
+    expect(sm.tabs.get('tab-a').reasoningByModel['claude-sonnet-4.6']).toBe('high');
+    expect(sm.tabs.get('tab-b').reasoningByModel['claude-opus-4.8']).toBe('low');
+
+    // tab-a bleibt von tab-bs Änderungen unberührt.
+    sm.switchTab('tab-b');
+    sm.selectReasoning('claude-opus-4.8', 'max');
+    expect(sm.tabs.get('tab-a').reasoningByModel['claude-sonnet-4.6']).toBe('high');
+  });
+});
+
+describe('ModelSelection — Claude-Code-Effort: Persistenz-Restore', () => {
+  test('Claude-Code-Persistenzwert wird beim Tab-Laden gegen die feste Liste validiert', () => {
+    const sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code', { 'claude-sonnet-4.6': 'high' });
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBe('high');
+  });
+
+  test('ein persistierter, nicht mehr gültiger Wert (z.B. alter CLI-Wortlaut) wird beim Laden auf Standard normalisiert', () => {
+    const sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code', { 'claude-sonnet-4.6': 'ultrathink' });
+    expect(sm.activeTab.reasoningByModel['claude-sonnet-4.6']).toBeNull();
+  });
+
+  test('alte Persistenz ohne Reasoning-Map wird für Claude-Code-Tabs ebenfalls als Standard geladen', () => {
+    const sm = new ModelSelectionStateMachine();
+    sm.createTab('tab-claude', 'Claude Code', 'claude-code');
+    expect(sm.activeTab.reasoningByModel).toEqual({});
+    expect(sm._btnReasoning).toBeNull();
   });
 });

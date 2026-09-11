@@ -1093,6 +1093,88 @@ describe('parseUsageWindows', () => {
     expect(r.tooltip).toContain('Woche: 2 % · Reset in 6 Tagen 16 Std.');
   });
 
+  // ── Markdown-Format (Adapter ≥ 0.75.0) ──────────────────────
+  // Regression: 0.75.0 hat /usage von Fließtext auf Markdown umgestellt. Der
+  // alte Regex fand nichts mehr → parseUsageWindows lieferte [] → die
+  // Abo-Anzeige blieb stumm, ohne Fehler und ohne Logeintrag.
+  describe('Markdown-Format (Adapter ≥ 0.75.0)', () => {
+    // Echter /usage-Output, abgegriffen über Adapter 0.75.1.
+    const SAMPLE_MD = [
+      '## Usage',
+      '',
+      '> Claude pro subscription usage',
+      '',
+      '### Limits',
+      '',
+      '**5-hour limit** — **34%** · Resets Sep 10, 6:20 AM GMT+2',
+      '',
+      '`███████░░░░░░░░░░░░░`',
+      '',
+      '**Weekly · all models** — **45%** · Resets Sep 11, 4:00 AM GMT+2',
+      '',
+      '`█████████░░░░░░░░░░░`',
+      '',
+      '---',
+      '',
+      '### This session',
+      '',
+      '| Cost | API time | Active |',
+      '| $0.00 | 0s | 2s |',
+    ].join('\n');
+
+    it('extrahiert Session- und Wochenfenster aus dem Markdown-Format', () => {
+      const w = parseUsageWindows(SAMPLE_MD);
+      const session = w.find(x => x.rateLimitType === 'five_hour');
+      const week = w.find(x => x.rateLimitType === 'seven_day' && !x.secondary);
+      expect(session).toMatchObject({ utilization: 34, label: '5 Std.', status: 'allowed' });
+      expect(week).toMatchObject({ utilization: 45, label: 'Woche', status: 'allowed' });
+    });
+
+    it('lässt sich von Fortschrittsbalken und Tabellen im Text nicht stören', () => {
+      expect(parseUsageWindows(SAMPLE_MD)).toHaveLength(2);
+    });
+
+    it('markiert modellspezifische Wochen-Buckets als secondary', () => {
+      const w = parseUsageWindows('**Weekly · Opus** — **12%** · Resets Sep 11, 4:00 AM GMT+2');
+      expect(w[0]).toMatchObject({ label: 'Woche (Opus)', utilization: 12, secondary: true });
+    });
+
+    it('leitet den Status aus der Auslastung ab', () => {
+      const w = parseUsageWindows('**5-hour limit** — **85%**\n**Weekly · all models** — **100%**');
+      expect(w[0].status).toBe('allowed_warning');
+      expect(w[1].status).toBe('rejected');
+    });
+
+    it('kommt ohne Reset-Angabe aus', () => {
+      const w = parseUsageWindows('**5-hour limit** — **7%**');
+      expect(w[0]).toMatchObject({ utilization: 7, label: '5 Std.' });
+      expect(w[0].resetText).toBeUndefined();
+    });
+
+    it('rechnet den GMT-Offset korrekt um (gleiches Ergebnis wie die IANA-Zone)', () => {
+      const now = Date.UTC(2026, 8, 10, 0, 0, 0);
+      const gmt = parseUsageWindows('**Weekly · all models** — **45%** · Resets Sep 11, 4:00 AM GMT+2', now);
+      const iana = parseUsageWindows('Current week (all models): 45% used · resets Sep 11, 4am (Europe/Berlin)', now);
+      expect(gmt[0].resetsAt).toBe(iana[0].resetsAt);
+    });
+
+    it('versteht auch einen negativen GMT-Offset', () => {
+      const now = Date.UTC(2026, 8, 10, 0, 0, 0);
+      const w = parseUsageWindows('**5-hour limit** — **10%** · Resets Sep 10, 6:00 AM GMT-5', now);
+      expect(w[0].resetsAt).toBe(Date.UTC(2026, 8, 10, 11, 0, 0) / 1000);
+    });
+
+    it('ergibt zusammen mit formatSubscriptionUsage die Prozent-Anzeige', () => {
+      const r = formatSubscriptionUsage(parseUsageWindows(SAMPLE_MD), undefined, 0);
+      expect(r.text).toBe('Abo · 5 Std. 34 % · Woche 45 %');
+    });
+
+    it('altes Prosa-Format funktioniert unverändert weiter (Abwärtskompatibilität)', () => {
+      const w = parseUsageWindows(SAMPLE);
+      expect(w.find(x => x.rateLimitType === 'five_hour').utilization).toBe(35);
+    });
+  });
+
   it('nutzt Lokalzeit, wenn der Reset-Text keine Zeitzone nennt (Fallback)', () => {
     // Ohne „(Zone)" wird lokal interpretiert; da now und Reset dieselbe lokale
     // Zone nutzen, ist der Delta-Countdown maschinen-zeitzonen-unabhängig.

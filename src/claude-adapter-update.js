@@ -9,10 +9,23 @@
 // download (session/new then failed with a generic "Internal error").
 // Pinning makes installs deterministic; this module lets the user check npm's
 // registry for a newer version instead of just going stale forever.
+//
+// That check is developer-mode only (see checkClaudeAdapterUpdate in
+// renderer/app.js): the package releases often and has broken this app before
+// — 0.75.0 switched `/usage` from prose to markdown, which silently emptied the
+// subscription display. Bumping DEFAULT_VERSION is therefore a deliberate act
+// that requires re-verifying the whole surface the app depends on.
 
 const PACKAGE_NAME = '@agentclientprotocol/claude-agent-acp';
-// Last version verified to work end-to-end (see main.js claudeCodeClientOptions).
-const DEFAULT_VERSION = '0.73.0';
+/**
+ * Last version verified end-to-end (see main.js claudeCodeClientOptions).
+ *
+ * Verified on 2026-09-10 against a live adapter: process start, `session/new`,
+ * 5 session modes and 5 models reported, `/usage` parsed into 2 plan windows,
+ * `/context` parsed to a percentage. Only applies to fresh installs — an
+ * existing `claudeCodeAdapterVersion` preference wins over this.
+ */
+const DEFAULT_VERSION = '0.76.0';
 const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const FETCH_TIMEOUT_MS = 10_000;
 

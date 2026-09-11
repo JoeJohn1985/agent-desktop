@@ -1,5 +1,80 @@
 # Changelog
 
+## [1.17.0] - 2026-09-11
+
+### Added
+- **Reasoning-Stufe pro Modell** (`Standard`/`low`/`medium`/`high`/`xhigh`/`max`)
+  im 🧠-Modell-Dropdown, für GitHub Copilot und Claude Code (lokal wie SSH).
+  Jedes Modell merkt sich seine eigene Stufe pro Tab bzw. Session; ein
+  Modellwechsel aktiviert die dort hinterlegte Kombination.
+
+  Die Werteliste ist für alle Provider dieselbe feste Menge — Anthropics
+  Effort-Parameter ist in der Praxis nicht pro Modell eingeschränkt (Haiku
+  bietet dieselben Stufen wie Sonnet). Eine erste Fassung hatte die Stufen
+  pro Modell live beim Adapter abgefragt; das war unnötig komplex und wurde
+  wieder entfernt.
+
+  Technisch unterscheiden sich die beiden Wege deutlich: Copilot nimmt die
+  Stufe als Startargument (`--reasoning-effort`), weshalb eine Änderung den
+  ACP-Prozess vor dem nächsten Prompt transparent neu startet und die Session
+  per `session/load` zurückholt. Claude Code setzt sie live über
+  `session/set_config_option` — ohne Neustart. Ein Rücksprung auf `Standard`
+  wird dabei explizit als `value: "default"` gesendet: Der Adapter merkt sich
+  eine einmal gesetzte Stufe serverseitig und behält sie über Modellwechsel
+  hinweg, „einfach nichts senden" hätte den alten Wert stillschweigend
+  weiterlaufen lassen, während die Oberfläche schon `Standard` anzeigt.
+
+- **Providerübergreifende Pläne.** Pläne liegen als Markdown unter `plans/`
+  im Projekt und lassen sich in einer Session eines Providers ausarbeiten und
+  in der eines anderen fortsetzen — jeder Provider kann diese Dateien ohnehin
+  lesen und schreiben.
+
+  Dafür braucht es keine Übertragungsmechanik, sondern nur, dass die Modelle
+  die Konvention kennen. Die App pflegt den Text deshalb aus einer einzigen
+  Quelle (`~/.agent-desktop/plans.md`) in die globalen Instruction-Dateien der
+  installierten ACP-Provider ein (`~/.claude/CLAUDE.md`,
+  `~/.copilot/copilot-instructions.md`). Geschrieben wird ausschließlich
+  innerhalb eines markierten Blocks, alles andere in diesen Dateien bleibt
+  unangetastet; die Quelldatei wird beim ersten Start angelegt und danach nie
+  überschrieben. Kein Bedienelement, keine Sidebar-Sektion.
+
+  Noch nicht abgedeckt: die Direkt-API-Provider (deren Systemprompt-Aufbau
+  wird zuerst grundsätzlich überarbeitet) und `claude-code-ssh`, dessen
+  Instruction-Datei auf dem entfernten Rechner liegt.
+
+### Fixed
+- **Abo-Auslastung wurde nicht mehr angezeigt.** Adapter 0.75.0 hat die
+  Ausgabe von `/usage` von Fließtext auf Markdown umgestellt
+  (`**5-hour limit** — **34%** · Resets …` statt
+  `Current session: 34% used · resets …`). Der Parser fand nichts mehr und
+  lieferte eine leere Liste — ohne Fehler und ohne Logeintrag, weshalb die
+  Anzeige einfach stumm blieb. Beide Formate werden jetzt unterstützt, da die
+  Adapter-Version pro Installation gepinnt ist und ältere weiter im Umlauf
+  sein können. Zusätzlich wird die Zeitzonenangabe `GMT+2` verstanden (vorher
+  nur Klammerform wie `(Europe/Berlin)`), und es gibt eine Warnung im Log,
+  wenn `/usage` zwar Text liefert, darin aber kein bekanntes Limit-Format
+  steckt — genau diese stille Lücke hatte den Fehler unsichtbar gemacht.
+
+- **Adapter-Update wurde bei jedem Start erneut angeboten.** Die neue Version
+  wurde im Hauptprozess direkt auf die Platte geschrieben, während der
+  Renderer weiter mit seiner alten Kopie der Einstellungen arbeitete — die
+  nächste beliebige Einstellungsänderung schrieb den Pin wieder zurück. Der
+  Renderer aktualisiert seine Kopie jetzt mit.
+
+### Changed
+- **Die Adapter-Update-Meldung erscheint nur noch im Entwicklermodus.** Das
+  Paket erscheint häufig und hat die Anwendung schon gebrochen (siehe den
+  `/usage`-Fehler oben), weshalb ein Update keine beiläufige Bestätigung sein
+  sollte. Ohne Entwicklermodus entfällt auch die npm-Abfrage samt CLI-Probe;
+  beim Einschalten wird sofort geprüft, beim Ausschalten verschwindet ein
+  bereits sichtbares Banner.
+- **Vorgabeversion des Adapters auf 0.76.0** angehoben (war 0.73.0). Gilt nur
+  für Neuinstallationen; eine vorhandene Pin-Einstellung behält Vorrang.
+  Gegen einen echten Adapter geprüft: Prozessstart, `session/new`, 5 Modi und
+  5 Modelle, `/usage` und `/context` auswertbar.
+- Der Entwicklungsplan des Projekts liegt jetzt unter `plans/` statt als
+  `plan.md` im Wurzelverzeichnis.
+
 ## [1.16.0] - 2026-09-03
 
 ### Added

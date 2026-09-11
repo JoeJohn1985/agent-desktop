@@ -24,6 +24,7 @@ const { processDroppedFile } = require('./src/file-processing');
 const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger');
 const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills, migrateApiSessions } = require('./src/data-dir');
 const { skillDirs, agentDirs, needsContextInjection } = require('./src/context-paths');
+const plansConvention = require('./src/plans-convention');
 const { validateContextTarget, buildSkillsList, buildAgentsList, buildContextPaths } = require('./src/context-list');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 
@@ -153,6 +154,55 @@ function ensureProviderContextDirs() {
   }
 }
 
+/**
+ * The ACP providers' own global instruction files — the ones their CLIs read
+ * by themselves, independent of this app. Deliberately fixed paths: Copilot's
+ * `config.instructionsFile` setting is a leftover from an older feature and is
+ * ignored here, since the file always lives in ~/.copilot/.
+ *
+ * `claude-code-ssh` is absent on purpose: its instruction file lives on the
+ * remote host, which needs SSH rather than fs (a later extension of the SSH
+ * provider, see plans/cross-provider-plans.md).
+ * @type {Array<{bin: string, file: string}>}
+ */
+const PLANS_CONVENTION_TARGETS = [
+  { bin: 'claude', file: path.join(os.homedir(), '.claude', 'CLAUDE.md') },
+  { bin: 'copilot', file: path.join(os.homedir(), '.copilot', 'copilot-instructions.md') },
+];
+
+/** Whether a CLI is on PATH — the app's definition of "this provider is connected". */
+async function isCliAvailable(bin) {
+  try {
+    await execCliAsync([bin, '--version']);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Mirrors the plans convention from ~/.agent-desktop/plans.md into the global
+ * instruction file of every ACP provider that is actually installed, so a plan
+ * written in one provider's session can be picked up in another's.
+ *
+ * Best-effort by design: these are the user's files, so a failure is logged and
+ * never blocks startup. Only installed providers are touched — otherwise the app
+ * would create a Copilot instruction file for someone who only uses Claude Code.
+ */
+async function syncPlansConvention() {
+  try {
+    const source = plansConvention.ensureSourceFile(path.join(DATA_DIR, 'plans.md'));
+    for (const { bin, file } of PLANS_CONVENTION_TARGETS) {
+      if (!(await isCliAvailable(bin))) continue;
+      if (plansConvention.syncToTarget(source, file)) {
+        console.log(`[plans] Konvention in ${file} aktualisiert.`);
+      }
+    }
+  } catch (e) {
+    console.warn('[plans] Sync fehlgeschlagen:', e?.message || e);
+  }
+}
+
 // ── Constants ──────────────────────────────────────────────────
 const CLI_VERSION_TIMEOUT_MS = 5000;
 const MCP_PROBE_TIMEOUT_MS = 5000;
@@ -242,7 +292,9 @@ function createWindow() {
  * @param {string[]} [options.addDirs] - Additional directories to grant access to
  * @param {string} [options.sessionId] - Session ID to resume
  * @param {string} [options.model] - Model override
- * @param {string} [options.effort] - Reasoning effort level (unused in ACP currently)
+ * @param {string} [options.effort] - Reasoning effort override. Copilot: passed
+ *   as --reasoning-effort on the next process spawn. Claude Code: applied live
+ *   via session/set_config_option (no process restart) — see AcpClient.
  * @param {string} [options.cwd] - Working directory override
  * @returns {Promise<number>} The tab ID
  */
@@ -415,6 +467,11 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
       autoApprovePermissions: false,
       model: options.model,
       mode: options.mode,
+      // Claude Code has no --reasoning-effort spawn flag (unlike Copilot below),
+      // but the adapter exposes effort as a live session config option
+      // (session/set_config_option, configId 'effort') — applied without a
+      // process restart, see AcpClient#applyEffort().
+      effort: options.effort,
     };
   } else {
     clientOptions = {
@@ -422,6 +479,8 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
       copilotBin: COPILOT_BIN,
       model: options.model,
       mode: options.mode,
+      // Copilot-only: --reasoning-effort on the next process spawn.
+      effort: options.effort,
       deniedTools: options.deniedTools,
       addDirs: options.addDirs || [],
       allowAllPaths: options.allowAllPaths,
@@ -2234,6 +2293,9 @@ app.whenReady().then(() => {
   ensureProviderContextDirs();
   createWindow();
   startImageWatcher();
+  // Fire-and-forget: spawns two `--version` probes, so it must not delay the
+  // window. Failures are logged inside and never surface to the user.
+  syncPlansConvention();
 });
 
 app.on('window-all-closed', () => {
