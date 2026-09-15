@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.18.0] - 2026-09-15
+
+### Added
+- **Schalter „Kostenpflichtige Modelle anzeigen"** in den Gemini-Einstellungen.
+  Aus bedeutet: kostenpflichtige Modelle verschwinden aus der Auswahl.
+  Unabhängig davon — und immer aktiv — zeigt jede Modell-Familie nur noch ihre
+  neueste Version: Google bringt alle paar Wochen eine neue Flash-Version
+  heraus, ohne die alte zurückzuziehen, sodass sonst 3.5/3.6/3.7/3.8-Flash
+  gleichzeitig in der Liste stehen.
+- **Gemini 3.x nutzt Websuche und Datei-Tools gleichzeitig.** Bisher erzwang
+  die App ein Entweder-oder („Recherche-" vs. „Datei-Modus"), weil Gemini 2.5
+  die Kombination von `googleSearch` mit eigenen Funktionsdeklarationen
+  ablehnt. Für Gemini 3 hat Google diese Einschränkung aufgehoben; bei diesen
+  Modellen sind jetzt beide Werkzeugsätze in derselben Anfrage aktiv und der
+  Modus-Umschalter entfällt. Für 2.5 und älter bleibt die Trennung bestehen.
+
+### Fixed
+- **Ein Bild auf die App zu ziehen konnte die gesamte Oberfläche ersetzen.**
+  Die Drop-Zone war nur die Nachrichtenliste; außerhalb davon griff Electrons
+  Standardverhalten, und da der `will-navigate`-Schutz `file://` bewusst
+  durchlässt, navigierte das Fenster zur Bilddatei. Jetzt ist das gesamte
+  Fenster Drop-Zone — ein Drop direkt auf das Eingabefeld funktioniert also
+  ebenso — und im Rich-Text-Modus landet der Pfad im sichtbaren Feld statt im
+  ausgeblendeten Textarea.
+- **Gemini-Modellauswahl enthielt Dutzende unbrauchbarer Einträge.** Der
+  Discovery-Filter prüfte nur auf `generateContent`-Unterstützung, die Googles
+  Bild-, Video-, Musik-, Robotik- und Agent-Modelle ebenfalls melden (sie
+  teilen sich denselben Endpunkt). Diese werden jetzt wie bei den
+  OpenAI-kompatiblen Anbietern herausgefiltert.
+- **Jedes neu entdeckte Gemini-Modell war als „kostenpflichtig" markiert**,
+  auch Flash und Flash-Lite, die im kostenlosen Kontingent laufen — die
+  Einstufung kam pauschal pro Anbieter statt pro Modell. Die hartkodierte
+  Modell-Liste machte diese Unterscheidung längst.
+- **Falsche Gemini-Preise korrigiert** (bestätigt gegen Googles Preisseite):
+  Der Cache-Preis von `gemini-2.5-pro` stand auf 0.31 statt 0.125, und
+  `gemini-3.5-flash` war mit dem Preis von 2.5-Flash geraten (per Kommentar als
+  unbestätigt markiert) — tatsächlich kostet es rund das Fünffache.
+
+### Changed
+- **Aktualisierte Gemini-Modell-Liste** als Rückfallebene vor der ersten
+  Discovery: `gemini-3.8-flash` und `gemini-3.5-flash-lite` statt der
+  überholten Einträge; `gemini-2.5-pro` bleibt als stabile Pro-Variante.
+- **Der Bilder-Bereich in der Seitenleiste blendet sich aus**, solange der
+  Bilderordner leer ist. Sobald eine Datei dort liegt, erscheint er wieder —
+  der vorhandene Ordner-Watcher erledigt das ohne Neustart.
+- Zwei Pläne unter `plans/` ergänzt (Historie-Vorschau und
+  Skills/Agents-Discovery für Claude Code über SSH) — noch nicht umgesetzt.
+
 ## [1.17.0] - 2026-09-11
 
 ### Added

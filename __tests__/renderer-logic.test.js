@@ -19,6 +19,10 @@ const {
   TOOL_ARGS_MAX_LENGTH,
   TOOL_PREVIEW_MAX_LENGTH,
   MODEL_PRICING,
+  tierForDiscoveredModel,
+  filterGeminiModels,
+  keepNewestGeminiPerFamily,
+  isGemini3Model,
   parseTokenK,
   parseUsageTokens,
   parseUsageRequests,
@@ -703,6 +707,154 @@ describe('Dynamischer Preis-Fallback (setDynamicPricing / getModelPricing)', () 
     // claude-sonnet-5 (Copilot): 200/20/1000 bis 31.08.2026, danach 300/30/1500
     expect(getModelPricing('claude-sonnet-5', before)).toEqual({ input: 200, cache: 20, output: 1000 });
     expect(getModelPricing('claude-sonnet-5', after)).toEqual({ input: 300, cache: 30, output: 1500 });
+  });
+
+  it('zeitabhängiger Preis gilt auch für gemini-3.8-flash (Einführungspreis bis 31.12.2026)', () => {
+    const before = Date.parse('2026-12-01T12:00:00Z');
+    const after = Date.parse('2027-01-02T12:00:00Z');
+    expect(getModelPricing('gemini-3.8-flash', before)).toEqual({ input: 0.75, cache: 0.075, output: 3.75 });
+    expect(getModelPricing('gemini-3.8-flash', after)).toEqual({ input: 1.50, cache: 0.15, output: 7.50 });
+  });
+
+  // ── tierForDiscoveredModel ────────────────────────────────
+  // Regression: jedes frisch entdeckte Gemini-Modell zeigte "kostenpflichtig",
+  // auch Flash/Flash-Lite, die tatsächlich im kostenlosen Google-Kontingent
+  // laufen (dieselbe Unterscheidung, die die hartkodierte DEFAULT_MODELS-Liste
+  // längst macht).
+  describe('tierForDiscoveredModel', () => {
+    const PROVIDER_DEFAULT_TIER = { anthropic: 'paid', ollama: 'free', gemini: 'paid' };
+
+    it('Gemini Flash/Flash-Lite gelten als kostenlos, unabhängig vom Provider-Default', () => {
+      expect(tierForDiscoveredModel('gemini', 'gemini-3.8-flash', PROVIDER_DEFAULT_TIER)).toBe('free');
+      expect(tierForDiscoveredModel('gemini', 'gemini-3.5-flash-lite', PROVIDER_DEFAULT_TIER)).toBe('free');
+    });
+
+    it('Gemini Pro bleibt kostenpflichtig', () => {
+      expect(tierForDiscoveredModel('gemini', 'gemini-2.5-pro', PROVIDER_DEFAULT_TIER)).toBe('paid');
+      expect(tierForDiscoveredModel('gemini', 'gemini-3.1-pro-preview', PROVIDER_DEFAULT_TIER)).toBe('paid');
+    });
+
+    it('andere Provider nutzen weiterhin den flachen Provider-Default', () => {
+      expect(tierForDiscoveredModel('anthropic', 'claude-sonnet-5', PROVIDER_DEFAULT_TIER)).toBe('paid');
+      expect(tierForDiscoveredModel('ollama', 'llama3.1', PROVIDER_DEFAULT_TIER)).toBe('free');
+    });
+
+    it('fällt ohne Tabelle/unbekannten Provider auf "paid" zurück', () => {
+      expect(tierForDiscoveredModel('unbekannt', 'irgendwas', {})).toBe('paid');
+      expect(tierForDiscoveredModel('unbekannt', 'irgendwas')).toBe('paid');
+    });
+  });
+
+  // ── keepNewestGeminiPerFamily / filterGeminiModels ──────────
+  // Regression: Google bringt alle paar Wochen eine neue Flash-Version heraus,
+  // ohne die alte aus der Modell-Liste zu entfernen — ohne diese Funktion
+  // stehen 3.5/3.6/3.7/3.8-flash gleichzeitig im Dropdown.
+  describe('keepNewestGeminiPerFamily', () => {
+    it('behält je Familie nur die neueste Version', () => {
+      const models = [
+        { id: 'gemini-3.5-flash' }, { id: 'gemini-3.7-flash' }, { id: 'gemini-3.6-flash' },
+      ];
+      expect(keepNewestGeminiPerFamily(models)).toEqual([{ id: 'gemini-3.7-flash' }]);
+    });
+
+    it('behandelt "flash" und "flash-lite" als getrennte Familien', () => {
+      const models = [{ id: 'gemini-3.5-flash' }, { id: 'gemini-3.5-flash-lite' }];
+      expect(keepNewestGeminiPerFamily(models)).toEqual(models);
+    });
+
+    it('behandelt "pro" und "pro-preview" als getrennte Familien (kein Ersatz füreinander)', () => {
+      const models = [{ id: 'gemini-2.5-pro' }, { id: 'gemini-3.1-pro-preview' }];
+      expect(keepNewestGeminiPerFamily(models)).toEqual(models);
+    });
+
+    it('vergleicht Versionen numerisch, nicht als String (3.10 > 3.9)', () => {
+      const models = [{ id: 'gemini-3.9-flash' }, { id: 'gemini-3.10-flash' }];
+      expect(keepNewestGeminiPerFamily(models)).toEqual([{ id: 'gemini-3.10-flash' }]);
+    });
+
+    it('lässt IDs ohne gemini-<version>-<familie>-Form unverändert durch', () => {
+      const models = [{ id: 'gemini-pro' }, { id: 'irgendwas' }];
+      expect(keepNewestGeminiPerFamily(models)).toEqual(models);
+    });
+
+    it('bewahrt die relative Reihenfolge der Gewinner', () => {
+      const models = [{ id: 'gemini-2.5-pro' }, { id: 'gemini-3.5-flash' }, { id: 'gemini-3.6-flash' }];
+      expect(keepNewestGeminiPerFamily(models).map(m => m.id)).toEqual(['gemini-2.5-pro', 'gemini-3.6-flash']);
+    });
+  });
+
+  describe('filterGeminiModels', () => {
+    const models = [
+      { id: 'gemini-2.5-pro', tier: 'paid' },
+      { id: 'gemini-3.5-flash', tier: 'free' },
+      { id: 'gemini-3.6-flash', tier: 'free' },
+      { id: 'gemini-3.5-flash-lite', tier: 'free' },
+    ];
+
+    it('showPaid=true dedupliziert weiterhin, entfernt aber nichts nach Kostenpflicht', () => {
+      // "Neueste pro Familie" ist unabhängig vom Toggle — nur die alte
+      // gemini-3.5-flash (verdrängt von 3.6-flash) fällt weg, das
+      // kostenpflichtige gemini-2.5-pro bleibt.
+      expect(filterGeminiModels(models, true)).toEqual([
+        { id: 'gemini-2.5-pro', tier: 'paid' },
+        { id: 'gemini-3.6-flash', tier: 'free' },
+        { id: 'gemini-3.5-flash-lite', tier: 'free' },
+      ]);
+    });
+
+    it('showPaid=false entfernt zusätzlich die kostenpflichtigen', () => {
+      expect(filterGeminiModels(models, false)).toEqual([
+        { id: 'gemini-3.6-flash', tier: 'free' },
+        { id: 'gemini-3.5-flash-lite', tier: 'free' },
+      ]);
+    });
+
+    it('Dedup wirkt auch über kostenpflichtige Familien hinweg (unabhängig vom Toggle)', () => {
+      const withPaidDup = [
+        { id: 'gemini-2.5-pro', tier: 'paid' },
+        { id: 'gemini-3.1-pro-preview', tier: 'paid' },
+      ];
+      // Unterschiedliche Familien ("pro" vs. "pro-preview") — beide bleiben,
+      // das ist kein Duplikat.
+      expect(filterGeminiModels(withPaidDup, true)).toEqual(withPaidDup);
+    });
+
+    it('robust bei ungültiger Eingabe', () => {
+      expect(filterGeminiModels(null, false)).toEqual([]);
+      expect(filterGeminiModels(undefined, true)).toEqual([]);
+    });
+  });
+
+  // ── isGemini3Model ───────────────────────────────────────────
+  // Gemini 3.x kann laut aktueller Google-Doku googleSearch mit eigenen
+  // Function-Declarations in einer Anfrage kombinieren, 2.5 und älter nicht.
+  describe('isGemini3Model', () => {
+    it('erkennt versionierte 3.x-IDs (mit und ohne Nachkommastelle)', () => {
+      expect(isGemini3Model('gemini-3-flash-preview')).toBe(true);
+      expect(isGemini3Model('gemini-3.5-flash')).toBe(true);
+      expect(isGemini3Model('gemini-3.1-pro-preview')).toBe(true);
+      expect(isGemini3Model('gemini-3.10-flash')).toBe(true);
+    });
+
+    it('lehnt 2.5er und ältere Modelle ab', () => {
+      expect(isGemini3Model('gemini-2.5-pro')).toBe(false);
+      expect(isGemini3Model('gemini-2.5-flash')).toBe(false);
+    });
+
+    it('lehnt unversionierte "-latest"-Aliase ab (Generation nicht bekannt — konservativ)', () => {
+      expect(isGemini3Model('gemini-flash-latest')).toBe(false);
+      expect(isGemini3Model('gemini-pro-latest')).toBe(false);
+    });
+
+    it('verwechselt eine zukünftige Generation 30 nicht mit 3.x', () => {
+      expect(isGemini3Model('gemini-30-flash')).toBe(false);
+    });
+
+    it('robust bei fehlender/ungültiger Eingabe', () => {
+      expect(isGemini3Model(null)).toBe(false);
+      expect(isGemini3Model(undefined)).toBe(false);
+      expect(isGemini3Model('')).toBe(false);
+    });
   });
 
   it('fester Preis hat Vorrang vor der dynamischen Quelle', () => {

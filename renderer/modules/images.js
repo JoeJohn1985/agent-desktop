@@ -15,6 +15,13 @@ async function loadImages() {
 }
 
 function renderImages() {
+  // Hide the whole sidebar section (header included, same pattern as
+  // updateSidebarForProvider()'s skills/agents/mcp sections) when the images
+  // folder is empty — an always-visible, always-empty gallery is just noise
+  // in an already crowded sidebar.
+  const section = document.getElementById('imagesSection');
+  if (section) section.style.display = currentImages.length ? '' : 'none';
+
   const container = document.getElementById('imageGallery');
   if (currentImages.length === 0) {
     container.innerHTML = `<div class="image-gallery__empty">${emptyStateHtml('🖼️', 'Keine Bilder/Videos vorhanden')}</div>`;

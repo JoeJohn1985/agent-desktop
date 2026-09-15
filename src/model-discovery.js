@@ -19,6 +19,15 @@ const FETCH_TIMEOUT_MS = 15_000;
 // cannot serve as a chat model — filtered out so they don't pollute the picker.
 const NON_CHAT_MODEL = /(embedding|whisper|tts|dall-e|dalle|moderation|image|audio|realtime|rerank|speech|transcrib)/i;
 
+// Gemini-specific: Google's catalog also returns image/video/music/robotics/
+// agent models that still report `generateContent` as a supported method (it's
+// the shared multimodal endpoint), so NON_CHAT_MODEL alone lets them through.
+// Everything here is either non-text output or a specialized agent product,
+// not a general chat model a user would pick in this dropdown.
+// Matched against the raw `models/<id>` name (prefix still attached), so no
+// `^` anchors — "models/veo-..." / "models/lyria-..." would never match one.
+const NON_CHAT_MODEL_GEMINI = /(embedding|tts|image|audio|video|live|transcrib|computer-use|robotics|deep-research|antigravity|omni|veo-|lyria-)/i;
+
 /** OpenAI-compatible /models → [{id,name}] (chat-capable only). */
 function parseOpenAIModels(json) {
   const data = json && json.data;
@@ -35,13 +44,21 @@ function parseAnthropicModels(json) {
   return data.filter(m => m && m.id).map(m => ({ id: String(m.id), name: String(m.display_name || m.id) }));
 }
 
-/** Gemini /v1beta/models → [{id,name}] (only models that support generateContent). */
+/**
+ * Gemini /v1beta/models → [{id,name}] (chat-capable only).
+ *
+ * `generateContent` alone isn't a reliable chat-model filter here: Google's
+ * catalog also lists image/video/music/robotics/agent models under the same
+ * shared endpoint, so without NON_CHAT_MODEL_GEMINI a discovery run returns
+ * dozens of entries no one would pick from a chat dropdown.
+ */
 function parseGeminiModels(json) {
   const list = json && json.models;
   if (!Array.isArray(list)) return [];
   return list
     .filter(m => m && m.name)
     .filter(m => !Array.isArray(m.supportedGenerationMethods) || m.supportedGenerationMethods.includes('generateContent'))
+    .filter(m => !NON_CHAT_MODEL_GEMINI.test(String(m.name)))
     .map(m => ({ id: String(m.name).replace(/^models\//, ''), name: String(m.displayName || m.name).replace(/^models\//, '') }));
 }
 

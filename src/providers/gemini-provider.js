@@ -11,6 +11,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { ApiAgentClient } = require('./api-agent-client');
 const { getToolDefs } = require('./agent-tools');
+const { isGemini3Model } = require('../renderer-logic');
 
 const MAX_OUTPUT_TOKENS = 8192;
 
@@ -72,22 +73,27 @@ function collectSources(grounding) {
 
 // Gemini 2.5 forbids combining the built-in googleSearch tool with custom
 // functionDeclarations in the same request, so each turn runs in exactly one
-// mode. The mode is switchable per tab between turns.
+// mode there. Gemini 3.x lifted that restriction — see isGemini3Model() — so
+// for those models both tool sets are simply always active and the
+// search/files toggle has nothing left to switch.
 const GEMINI_MODES = ['search', 'files'];
 const DEFAULT_GEMINI_MODE = 'search';
 
 const FILE_TOOLS = toGeminiTools(getToolDefs().filter(d => GEMINI_TOOL_NAMES.includes(d.name)));
 const SEARCH_TOOLS = [{ googleSearch: {} }];
+const COMBINED_TOOLS = [...SEARCH_TOOLS, ...FILE_TOOLS];
 
 function resolveGeminiMode(mode) {
   return GEMINI_MODES.includes(mode) ? mode : DEFAULT_GEMINI_MODE;
 }
 
-function buildSystemPrompt(cwd, mode) {
+function buildSystemPrompt(cwd, mode, combined) {
   const lines = [
     'You are a helpful research and writing assistant embedded in a desktop app.',
   ];
-  if (resolveGeminiMode(mode) === 'search') {
+  if (combined) {
+    lines.push('You can search the web (Google Search) for current information and cite your sources, AND read/create/edit files via the provided tools (there is no shell) — both are available in the same turn, use whichever the task needs.');
+  } else if (resolveGeminiMode(mode) === 'search') {
     lines.push('You can search the web (Google Search) for current information and cite your sources.');
     lines.push('File tools are disabled in this mode; if the user wants the result saved to a file, tell them to switch to "Datei-Modus" and ask again.');
   } else {
@@ -104,10 +110,15 @@ class GeminiProvider extends ApiAgentClient {
   #client = null;
   #contents = [];
 
-  // Active tool set per turn: either live Google Search OR the file tools — never
-  // both (Gemini 2.5 rejects the combination). Driven by options.geminiMode.
+  // Active tool set per turn. Gemini 3.x can use live Google Search and the
+  // file tools together, so options.geminiMode only matters for older models
+  // that still reject the combination (see isGemini3Model()).
   get #mode() { return resolveGeminiMode(this.options.geminiMode); }
-  get #tools() { return this.#mode === 'search' ? SEARCH_TOOLS : FILE_TOOLS; }
+  get #combinesTools() { return isGemini3Model(this.options.model); }
+  get #tools() {
+    if (this.#combinesTools) return COMBINED_TOOLS;
+    return this.#mode === 'search' ? SEARCH_TOOLS : FILE_TOOLS;
+  }
 
   _ensureClient() {
     if (!this.options.apiKey) throw new Error('Kein Google-Gemini-API-Key hinterlegt.');
@@ -133,7 +144,7 @@ class GeminiProvider extends ApiAgentClient {
       model: this.options.model,
       contents: this.#contents,
       config: {
-        systemInstruction: buildSystemPrompt(this.options.cwd || process.cwd(), this.#mode),
+        systemInstruction: buildSystemPrompt(this.options.cwd || process.cwd(), this.#mode, this.#combinesTools),
         tools: this.#tools,
         abortSignal: signal,
         maxOutputTokens: MAX_OUTPUT_TOKENS,

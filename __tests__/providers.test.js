@@ -376,7 +376,9 @@ describe('Gemini-Provider', () => {
   });
 
   it('hat USD-Preise für Gemini-Modelle', () => {
-    expect(MODEL_PRICING['gemini-2.5-pro']).toEqual({ input: 1.25, cache: 0.31, output: 10 });
+    // cache: 0.125 bestätigt gegen ai.google.dev/gemini-api/docs/pricing
+    // (2026-09-14) — der frühere Wert 0.31 war falsch/veraltet.
+    expect(MODEL_PRICING['gemini-2.5-pro']).toEqual({ input: 1.25, cache: 0.125, output: 10 });
     expect(MODEL_PRICING['gemini-2.5-flash'].output).toBe(2.5);
   });
 
@@ -403,6 +405,16 @@ describe('Gemini-Provider', () => {
     expect(files).toMatch(/create or edit files/);
     expect(files).toMatch(/Live web search is disabled/);
   });
+
+  it('buildSystemPrompt beschreibt bei combined=true beide Tool-Sets gleichzeitig, ohne Modus-Einschränkung', () => {
+    // Gemini 3.x: keine Modus-Exklusivität mehr — Suche und Datei-Tools sind
+    // in derselben Anfrage aktiv (siehe isGemini3Model()).
+    const combined = buildSystemPrompt('C:/x', 'search', true);
+    expect(combined).toMatch(/Google Search/);
+    expect(combined).toMatch(/read\/create\/edit files/);
+    expect(combined).not.toMatch(/disabled/);
+  });
+
 
   it('collectSources extrahiert und dedupliziert Web-Quellen', () => {
     const { collectSources } = require('../src/providers/gemini-provider');

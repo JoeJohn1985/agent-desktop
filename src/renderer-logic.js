@@ -242,11 +242,22 @@ const MODEL_PRICING = {
   'claude-sonnet-4-6': { input: 3,   cache: 0.3, output: 15 },
   'claude-opus-4-7':   { input: 5,   cache: 0.5, output: 25 },
   'claude-opus-4-8':   { input: 5,   cache: 0.5, output: 25 },
-  // Google Gemini API (USD pro 1M)
-  'gemini-2.5-pro':    { input: 1.25, cache: 0.31,  output: 10  },
-  'gemini-2.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
-  // TODO: Preise bestätigen — vorläufig wie 2.5 Flash übernommen.
-  'gemini-3.5-flash':  { input: 0.30, cache: 0.075, output: 2.5 },
+  // Google Gemini API (USD pro 1M) — bestätigt 2026-09-14 gegen
+  // ai.google.dev/gemini-api/docs/pricing (Preise für Prompts <= 200k Tokens;
+  // die App kennt keine promptgrößenabhängige Staffelung, das ist der
+  // Normalfall). Modelle bleiben hier auch dann eingetragen, wenn sie nicht
+  // mehr im DEFAULT_MODELS-Fallback stehen — diese Tabelle ist ein
+  // Nachschlage-Katalog für jedes je genutzte Modell (auch dynamisch
+  // entdeckte), kein Duplikat der Dropdown-Liste.
+  // Cache-Preis war zuvor 0.31 (falsch/veraltet) — korrigiert.
+  'gemini-2.5-pro':    { input: 1.25, cache: 0.125, output: 10   },
+  'gemini-2.5-flash':  { input: 0.30, cache: 0.075, output: 2.5  },
+  // War als TODO mit dem 2.5-Flash-Preis geraten — jetzt der bestätigte, klar
+  // andere Preis.
+  'gemini-3.5-flash':  { input: 1.50, cache: 0.15,  output: 9    },
+  'gemini-3.5-flash-lite': { input: 0.30, cache: 0.03, output: 2.5 },
+  // Einführungspreis bis 31.12.2026, danach regulär (analog claude-sonnet-5 oben).
+  'gemini-3.8-flash':  { input: 0.75, cache: 0.075, output: 3.75, until: '2026-12-31', then: { input: 1.50, cache: 0.15, output: 7.50 } },
   // OpenAI API (USD pro 1M) — TODO: bei Preisänderungen aktualisieren.
   'gpt-5.1':           { input: 1.25, cache: 0.125, output: 10 },
   'gpt-5.1-mini':      { input: 0.25, cache: 0.025, output: 2  },
@@ -269,9 +280,11 @@ const MODEL_PROVIDERS = {
   'claude-sonnet-4-6': 'anthropic',
   'claude-opus-4-7':   'anthropic',
   'claude-opus-4-8':   'anthropic',
-  'gemini-2.5-pro':    'gemini',
-  'gemini-2.5-flash':  'gemini',
-  'gemini-3.5-flash':  'gemini',
+  'gemini-2.5-pro':        'gemini',
+  'gemini-2.5-flash':      'gemini',
+  'gemini-3.5-flash':      'gemini',
+  'gemini-3.5-flash-lite': 'gemini',
+  'gemini-3.8-flash':      'gemini',
   'gpt-5.1':           'openai',
   'gpt-5.1-mini':      'openai',
   'gpt-4.1':           'openai',
@@ -285,6 +298,106 @@ const MODEL_PROVIDERS = {
 
 function getModelProvider(modelId) {
   return MODEL_PROVIDERS[modelId] || 'copilot';
+}
+
+/**
+ * Cost-tier badge for a freshly discovered model (applyDynamicModels() in
+ * app.js), where a flat per-provider default would be misleading.
+ *
+ * Gemini is the one case that needs this: Flash/Flash-Lite run on Google's
+ * free quota, only Pro is paid-only — the same split the hardcoded
+ * DEFAULT_MODELS entries already make. Without it, every freshly discovered
+ * Gemini model (Flash included) showed "kostenpflichtig", which isn't true.
+ * @param {string} provider
+ * @param {string} modelId
+ * @param {Object<string,string>} providerDefaultTier - PROVIDER_DEFAULT_TIER from app.js
+ * @returns {string}
+ */
+function tierForDiscoveredModel(provider, modelId, providerDefaultTier) {
+  if (provider === 'gemini') return /flash/i.test(modelId) ? 'free' : 'paid';
+  return (providerDefaultTier && providerDefaultTier[provider]) || 'paid';
+}
+
+/** Numeric, dot-separated version compare (ignores non-numeric junk). -1/0/1. */
+function compareModelVersions(a, b) {
+  const parts = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0);
+  const pa = parts(a);
+  const pb = parts(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+// Matches Gemini's "<version>-<family>" id shape: gemini-3.6-flash → version
+// "3.6", family "flash"; gemini-3.5-flash-lite → "3.5" / "flash-lite";
+// gemini-3.1-pro-preview → "3.1" / "pro-preview". "-preview" is its own family
+// on purpose — a preview isn't simply an older/newer point release of the
+// stable line, so it isn't collapsed together with it.
+const GEMINI_VERSION_FAMILY_RE = /^gemini-(\d+(?:\.\d+)*)-(.+)$/;
+
+/**
+ * Collapses Gemini's same-family point releases (gemini-3.5-flash,
+ * gemini-3.6-flash, gemini-3.7-flash, …) down to the newest one. Google ships
+ * these every few weeks; without this the picker accumulates near-duplicate
+ * entries no one would deliberately choose an older one from. Models whose id
+ * doesn't match the gemini-<version>-<family> shape pass through unchanged —
+ * safe default, no id shape assumed, no dedup attempted.
+ * @param {Array<{id:string}>} models
+ * @returns {Array} same objects, original relative order preserved
+ */
+function keepNewestGeminiPerFamily(models) {
+  const winnerIdByFamily = new Map(); // family -> {id, version}
+  for (const m of models) {
+    const match = GEMINI_VERSION_FAMILY_RE.exec(m.id);
+    if (!match) continue;
+    const [, version, family] = match;
+    const current = winnerIdByFamily.get(family);
+    if (!current || compareModelVersions(version, current.version) > 0) {
+      winnerIdByFamily.set(family, { id: m.id, version });
+    }
+  }
+  const winnerIds = new Set([...winnerIdByFamily.values()].map((w) => w.id));
+  return models.filter((m) => !GEMINI_VERSION_FAMILY_RE.test(m.id) || winnerIds.has(m.id));
+}
+
+/**
+ * Applies Gemini's two independent display rules to a model list:
+ *  - "newest per family" ALWAYS collapses same-family point releases (Google
+ *    ships a new Flash point release every few weeks without retiring the
+ *    old one) — unrelated to cost, so it applies whether or not paid models
+ *    are shown.
+ *  - the "kostenpflichtige Modelle anzeigen" toggle ONLY controls whether
+ *    tier:'paid' entries stay in the (already deduplicated) list.
+ * @param {Array<{id:string, tier?:string}>} models
+ * @param {boolean} showPaid
+ * @returns {Array}
+ */
+function filterGeminiModels(models, showPaid) {
+  if (!Array.isArray(models)) return [];
+  const deduped = keepNewestGeminiPerFamily(models);
+  return showPaid ? deduped : deduped.filter((m) => m.tier !== 'paid');
+}
+
+/**
+ * Whether a Gemini model id is generation 3.x. Confirmed against Google's
+ * current docs (ai.google.dev/gemini-api/docs/google-search, 2026-09):
+ * Gemini 3 models can combine the built-in googleSearch tool with custom
+ * function declarations in one request; 2.5 and earlier cannot and need the
+ * exclusive search-XOR-files mode this app has used since the 2.5 era.
+ *
+ * Matches "gemini-3-…" and "gemini-3.<minor>-…" (e.g. gemini-3-flash-preview,
+ * gemini-3.5-flash, gemini-3.1-pro-preview). Deliberately does NOT match
+ * un-versioned aliases like "gemini-flash-latest" — we can't know which
+ * generation those currently resolve to, and assuming 3.x could send a tool
+ * combination an actually-2.5 model rejects outright.
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+function isGemini3Model(modelId) {
+  return /^gemini-3(\.\d+)?-/i.test(String(modelId || ''));
 }
 
 function parseTokenK(str) {
@@ -1009,6 +1122,10 @@ const _api = {
   MODEL_PRICING,
   MODEL_PROVIDERS,
   getModelProvider,
+  tierForDiscoveredModel,
+  filterGeminiModels,
+  keepNewestGeminiPerFamily,
+  isGemini3Model,
   parseTokenK,
   parseUsageTokens,
   parseUsageRequests,

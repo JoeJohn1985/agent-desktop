@@ -59,6 +59,33 @@ describe('model-discovery: parseGeminiModels', () => {
     expect(parseGeminiModels(null)).toEqual([]);
     expect(parseGeminiModels({})).toEqual([]);
   });
+
+  // Regression: Googles Katalog listet Bild-/Video-/Musik-/Robotik-/Agent-
+  // Modelle unter demselben generateContent-Endpunkt wie Chat-Modelle — ohne
+  // diesen Filter zeigte die Modellauswahl ein Vielfaches dessen, was auf
+  // gemini.google.com als Chat-Modell auswählbar ist.
+  it('filtert Bild-, Video-, Audio-, Musik-, Robotik- und Agent-Modelle heraus', () => {
+    const junk = [
+      'gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.5-transcribe',
+      'gemini-3.5-transcribe-live', 'gemini-3.1-flash-live-preview',
+      'gemini-3.1-flash-tts-preview', 'gemini-omni-1.1-flash',
+      'gemini-2.5-computer-use-preview-10-2025', 'gemini-robotics-er-2-preview',
+      'deep-research-preview-04-2026', 'antigravity-preview-05-2026',
+      'veo-3.1-generate-preview', 'lyria-3.5', 'gemini-embedding-001',
+    ];
+    const res = parseGeminiModels({
+      models: junk.map(id => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })),
+    });
+    expect(res).toEqual([]);
+  });
+
+  it('behält echte Chat-Modelle (Pro/Flash/Flash-Lite, auch Previews)', () => {
+    const chat = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'];
+    const res = parseGeminiModels({
+      models: chat.map(id => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })),
+    });
+    expect(res.map(m => m.id)).toEqual(chat);
+  });
 });
 
 // ── listModels: der Fetch-Wrapper ────────────────────────────

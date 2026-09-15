@@ -2378,10 +2378,15 @@ const DEFAULT_MODELS = [
   // Kostenschätzung. Die API-Modell-Discovery liefert sie ohnehin bereits.
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6', provider: 'anthropic', tier: 'paid' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', short: 'Opus 4.8', provider: 'anthropic', tier: 'paid' },
-  // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen
+  // Google Gemini API (provider: 'gemini') — benötigt API-Key in den Einstellungen.
+  // Nur der Fallback vor der ersten echten Discovery (siehe refreshAllProviderModels/
+  // applyDynamicModels) — sobald ein Key gesetzt ist, ersetzt die Liste des Accounts
+  // diese drei Einträge. Aktualisiert 2026-09-14 gegen die offizielle Modell-/
+  // Preisliste (vorher: 2.5-pro, 2.5-flash, 3.5-flash — 3.5-flash war bereits von
+  // 3.8-flash abgelöst).
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', short: 'Gemini Pro', provider: 'gemini', tier: 'paid' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', short: 'Gemini Flash', provider: 'gemini', tier: 'free' },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', short: 'Gemini 3.5 Flash', provider: 'gemini', tier: 'paid' },
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', short: 'Gemini Flash', provider: 'gemini', tier: 'free' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', short: 'Gemini Flash-Lite', provider: 'gemini', tier: 'free' },
   // OpenAI API (provider: 'openai') — benötigt API-Key
   { id: 'gpt-5.1', label: 'GPT-5.1', short: 'GPT-5.1', provider: 'openai', tier: 'paid' },
   { id: 'gpt-5.1-mini', label: 'GPT-5.1 mini', short: 'GPT-5.1 mini', provider: 'openai', tier: 'paid' },
@@ -2571,6 +2576,8 @@ const _dynamicModels = {};
 const PROVIDER_DEFAULT_TIER = {
   copilot: 'aic', 'claude-code': 'sub', 'claude-code-ssh': 'sub', ollama: 'free', anthropic: 'paid', openai: 'paid', gemini: 'paid', glm: 'paid',
 };
+// tierForDiscoveredModel() itself lives in renderer-logic.js (pure, unit-tested;
+// destructured from window.RendererLogic near the other usage-display helpers below).
 
 /**
  * Merge a freshly discovered model list for a provider: normalize to the internal
@@ -2580,10 +2587,9 @@ const PROVIDER_DEFAULT_TIER = {
  */
 function applyDynamicModels(provider, models) {
   if (!Array.isArray(models) || !models.length) return;
-  const tier = PROVIDER_DEFAULT_TIER[provider] || 'paid';
   const mapped = models
     .filter(m => m && m.id)
-    .map(m => ({ id: m.id, label: m.name || m.id, short: m.name || m.id, provider, tier }));
+    .map(m => ({ id: m.id, label: m.name || m.id, short: m.name || m.id, provider, tier: window.RendererLogic.tierForDiscoveredModel(provider, m.id, PROVIDER_DEFAULT_TIER) }));
   if (!mapped.length) return;
 
   // "New" = neither in the hardcoded list nor in the previously-known dynamic
@@ -2674,11 +2680,36 @@ function isCopilotModelAvailable(modelId) {
   return list.some(m => m.id === modelId);
 }
 
+/**
+ * Whether paid models should be offered for a provider. Persisted per provider
+ * (object, not a flat bool) so this generalizes if another provider ever gets
+ * a real free/paid split — today only Gemini's config panel exposes the
+ * toggle. Defaults to true (show everything) so this ships without changing
+ * anyone's dropdown until they actively turn it off.
+ */
+function getShowPaidModels(provider) {
+  const all = getPref('showPaidModels', {});
+  return (all && typeof all === 'object' && all[provider]) !== false;
+}
+
+function setShowPaidModels(provider, value) {
+  const all = getPref('showPaidModels', {});
+  const next = (all && typeof all === 'object' && !Array.isArray(all)) ? { ...all } : {};
+  next[provider] = value;
+  setPref('showPaidModels', next);
+}
+
 /** Models belonging to a given provider (the dynamic list wins when known). */
 function getModelsForProvider(provider) {
   const dyn = _dynamicModels[provider];
-  if (dyn && dyn.length) return dyn;
-  return DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
+  const list = (dyn && dyn.length) ? dyn : DEFAULT_MODELS.filter(m => (m.provider || 'copilot') === provider);
+  // Gemini-only for now: it's the one provider whose discovered list mixes
+  // free and paid models AND iterates fast enough (new Flash point release
+  // every few weeks) that near-duplicate versions pile up. filterGeminiModels()
+  // always collapses same-family point releases to the newest AND additionally
+  // hides paid ones when the toggle is off — two independent rules, not one.
+  if (provider === 'gemini') return window.RendererLogic.filterGeminiModels(list, getShowPaidModels('gemini'));
+  return list;
 }
 
 /**
@@ -2886,8 +2917,10 @@ const GEMINI_MODE_LABELS = {
 };
 
 /**
- * Show/refresh the Gemini tool-mode toggle. Only visible for Gemini tabs, since
- * Gemini 2.5 cannot use live search and file tools in the same request.
+ * Show/refresh the Gemini tool-mode toggle. Only visible for Gemini tabs on a
+ * model that actually needs the choice — Gemini 3.x combines live search and
+ * file tools in one request (see isGemini3Model()/gemini-provider.js), so
+ * there's nothing left to toggle there; only 2.5-era models still need it.
  */
 function updateGeminiModeBtn(tabId) {
   const wrapper = document.getElementById('geminiModeWrapper');
@@ -2895,8 +2928,9 @@ function updateGeminiModeBtn(tabId) {
   if (!wrapper || !btn) return;
   const tab = tabs.get(tabId ?? activeTabId);
   const isGemini = tab && getTabProvider(tab) === 'gemini';
-  wrapper.style.display = isGemini ? '' : 'none';
-  if (!isGemini) return;
+  const needsToggle = isGemini && !window.RendererLogic.isGemini3Model(tab.selectedModel);
+  wrapper.style.display = needsToggle ? '' : 'none';
+  if (!needsToggle) return;
   const mode = tab.geminiMode || 'search';
   btn.textContent = GEMINI_MODE_LABELS[mode] || GEMINI_MODE_LABELS.search;
 }
@@ -6187,6 +6221,24 @@ function buildProviderConfigPanelHtml(providerId) {
     </div>
   `);
 
+  // Gemini-only: the one provider where the discovered list mixes free and
+  // paid models, and iterates fast enough (a new Flash point release every
+  // few weeks) that several near-identical versions pile up at once.
+  if (providerId === 'gemini') {
+    parts.push(`
+      <div class="settings__group">
+        <div class="settings__row">
+          <label class="settings__label">💲 Kostenpflichtige Modelle anzeigen</label>
+          <label class="settings__toggle">
+            <input type="checkbox" id="settGeminiShowPaid" ${getShowPaidModels('gemini') ? 'checked' : ''} />
+            <span class="settings__toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings__hint">Aus: nur kostenlose Modelle. Unabhängig davon zeigt jede Modell-Familie (z.B. „Flash") immer nur die neueste Version — Google bringt alle paar Wochen eine neue Flash-Version heraus, ohne die alte zu entfernen.</div>
+      </div>
+    `);
+  }
+
   const folderRows = [];
   if (providerSupports(providerId, 'skills')) folderRows.push({ key: 'skillsDir', icon: '🧩', title: 'Skills' });
   if (providerSupports(providerId, 'agents')) folderRows.push({ key: 'agentsDir', icon: '🤖', title: 'Agents' });
@@ -6409,6 +6461,22 @@ async function wireProviderConfigPanel(providerId, panel) {
 
   if (providerId === 'claude-code-ssh') {
     wireClaudeCodeSshPanel(panel);
+  }
+
+  if (providerId === 'gemini') {
+    panel.querySelector('#settGeminiShowPaid')?.addEventListener('change', (e) => {
+      setShowPaidModels('gemini', e.target.checked);
+      // Re-render just the select's contents — NOT via renderProviderModelSelect(),
+      // which would attach a second 'change' listener onto the same, still-live
+      // <select> element.
+      const sel = panel.querySelector(`[data-provider-model-select="${providerId}"]`);
+      if (sel) {
+        sel.innerHTML = getModelsForProvider(providerId)
+          .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
+          .join('');
+        sel.value = getDefaultModelForProvider(providerId);
+      }
+    });
   }
 
   if (providerId === 'claude-code') {
@@ -7048,21 +7116,33 @@ function initKeyboardShortcuts() {
 }
 
 /**
- * Initialize drag-and-drop on the stream area. Dropped files are processed
- * and inserted into the chat input as @-references or inline code blocks.
+ * Initialize drag-and-drop for files. Dropped files are processed and inserted
+ * into the chat input as @-references or inline code blocks.
+ *
+ * Listens on the whole document, not just the stream area: dropping onto the
+ * input box, the sidebar or the tab bar is at least as natural as dropping
+ * into the message list. That also closes a real hole — main.js's
+ * `will-navigate` guard deliberately lets `file://` through, so a file dropped
+ * anywhere unhandled made Electron navigate the window to that file and
+ * replace the entire UI with it.
  */
 function initDragDrop() {
-  const streamArea = document.getElementById('streamArea');
   const dropOverlay = document.getElementById('dropOverlay');
   let dragCounter = 0;
 
-  streamArea.addEventListener('dragenter', (e) => {
+  // Only react to drags carrying actual files — internal drags (e.g. todo
+  // reordering) bubble up here too and must not flash the overlay.
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+
+  document.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
     dragCounter++;
     if (dropOverlay) dropOverlay.style.display = 'flex';
   });
 
-  streamArea.addEventListener('dragleave', (e) => {
+  document.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
     dragCounter--;
     if (dragCounter <= 0) {
@@ -7071,13 +7151,15 @@ function initDragDrop() {
     }
   });
 
-  streamArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // required, otherwise the drop never fires
     e.dataTransfer.dropEffect = 'copy';
   });
 
-  streamArea.addEventListener('drop', async (e) => {
-    e.preventDefault();
+  document.addEventListener('drop', async (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // without this Electron navigates the window to the file
     dragCounter = 0;
     if (dropOverlay) dropOverlay.style.display = 'none';
 
@@ -7112,12 +7194,21 @@ function initDragDrop() {
       }
     }
 
-    if (parts.length > 0) {
-      const prefix = chatInput.value ? '\n' : '';
-      chatInput.value += prefix + parts.join('\n');
-      resizeChatInput(chatInput);
-      chatInput.focus();
+    if (parts.length === 0) return;
+    const text = parts.join('\n');
+
+    // Rich-text mode hides the textarea behind a contenteditable — writing to
+    // chatInput.value there would drop the path into an invisible field.
+    const richInput = document.getElementById('chatInputRich');
+    if (richTextMode && richInput) {
+      const existing = richInput.innerText.trim();
+      richInput.innerText = existing ? `${existing}\n${text}` : text;
+      richInput.focus();
+      return;
     }
+    chatInput.value += (chatInput.value ? '\n' : '') + text;
+    resizeChatInput(chatInput);
+    chatInput.focus();
   });
 }
 
