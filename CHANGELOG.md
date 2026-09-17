@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.19.1] - 2026-09-17
+
+### Fixed
+- **Claude-Token-Historie blieb dauerhaft leer.** Die Neustart-Erkennung
+  verwarf die komplette Messrunde und setzte die Basislinie zurück, sobald
+  auch nur einer der vier Zähler (Eingabe/Ausgabe/Cache-Read/Cache-Write)
+  gegenüber der letzten Lesung nicht gestiegen war. Da `/usage` große Werte
+  gerundet mit K/M-Suffix anzeigt, kippt so ein Einzelwert bei normaler
+  Nutzung ständig scheinbar nach unten — in der Praxis wurde dadurch fast
+  jede Runde verworfen. Jetzt gilt nur eine sinkende **Gesamtsumme** aller
+  vier Zähler als echter Neustart; ein einzeln gesunkener Wert wird auf 0
+  geklemmt statt die ganze Runde ungültig zu machen. Die Logik steckt jetzt
+  in der eigenständig testbaren Funktion `computeClaudeTokenDelta()`
+  (`src/renderer-logic.js`), inklusive Regressionstest für das
+  Rundungsszenario.
+
 ## [1.19.0] - 2026-09-17
 
 ### Added

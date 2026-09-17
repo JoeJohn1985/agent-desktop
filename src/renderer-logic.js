@@ -493,6 +493,36 @@ function parseClaudeSessionTokens(text) {
     : null;
 }
 
+const CLAUDE_TOKEN_KEYS_LIST = ['input', 'output', 'cacheRead', 'cacheWrite'];
+
+/**
+ * Computes the newly-consumed tokens between two successive `/usage` session
+ * readings.
+ *
+ * Only a drop in the TOTAL counts as a genuine restart (a new Claude Code
+ * session reusing the same tab) — an individual counter dipping is display
+ * rounding, not a real decrease: the K/M-suffixed values in `/usage` are
+ * rounded, so e.g. a true count moving 30,940 → 30,955 can display as
+ * "30.9K" → "30.9K" → "31.0K", occasionally rendering as a same-or-lower
+ * figure than the true previous value's rounding. Treating any single dip as
+ * a restart (an earlier version of this function did) discarded the entire
+ * round on nearly every reading — the bug that made the token history stay
+ * permanently empty in practice. A dipped individual key is clamped to 0
+ * instead of poisoning the whole delta.
+ * @param {{input:number,output:number,cacheRead:number,cacheWrite:number}} tokens - Current reading.
+ * @param {{input:number,output:number,cacheRead:number,cacheWrite:number}} prev - Previous reading.
+ * @returns {{delta:{input:number,output:number,cacheRead:number,cacheWrite:number}, restarted:boolean}}
+ */
+function computeClaudeTokenDelta(tokens, prev) {
+  const sumOf = (t) => CLAUDE_TOKEN_KEYS_LIST.reduce((s, k) => s + (Number(t[k]) || 0), 0);
+  if (sumOf(tokens) < sumOf(prev)) return { delta: null, restarted: true };
+  const delta = {};
+  for (const k of CLAUDE_TOKEN_KEYS_LIST) {
+    delta[k] = Math.max(0, (Number(tokens[k]) || 0) - (Number(prev[k]) || 0));
+  }
+  return { delta, restarted: false };
+}
+
 /** Length of a Claude subscription limit window, in seconds. */
 const CLAUDE_WINDOW_SECONDS = 5 * 3600;
 
@@ -1248,6 +1278,7 @@ const _api = {
   parseTokenCount,
   parseClaudeSessionTokens,
   buildTokenWindows,
+  computeClaudeTokenDelta,
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,

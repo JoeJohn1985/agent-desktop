@@ -29,6 +29,7 @@ const {
   parseTokenCount,
   parseClaudeSessionTokens,
   buildTokenWindows,
+  computeClaudeTokenDelta,
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,
@@ -1567,6 +1568,51 @@ describe('buildTokenWindows', () => {
   it('robust bei ungültiger Eingabe', () => {
     expect(buildTokenWindows(null)).toEqual([]);
     expect(buildTokenWindows([])).toEqual([]);
+  });
+});
+
+describe('computeClaudeTokenDelta', () => {
+  // Regression: Die Token-Historie war nach dem Einbau dauerhaft leer. Ursache:
+  // die frühere Implementierung verwarf die GESAMTE Runde, sobald auch nur EIN
+  // einzelner Wert gegenüber dem letzten Lesen nicht gestiegen war — und genau
+  // das passiert bei den gerundeten K/M-Anzeigewerten aus /usage regelmäßig,
+  // ohne dass ein echter Session-Neustart stattfand.
+
+  it('berechnet die Differenz aller vier Werte', () => {
+    const prev = { input: 100, output: 50, cacheRead: 10, cacheWrite: 5 };
+    const tokens = { input: 150, output: 80, cacheRead: 10, cacheWrite: 25 };
+    expect(computeClaudeTokenDelta(tokens, prev)).toEqual({
+      delta: { input: 50, output: 30, cacheRead: 0, cacheWrite: 20 },
+      restarted: false,
+    });
+  });
+
+  it('ein einzelner gesunkener Wert bei steigender Gesamtsumme ist kein Neustart', () => {
+    // Cache-write sinkt scheinbar (Rundungsartefakt eines K-Anzeigewerts:
+    // 30900 → 30800), aber input+output gleichen das mehr als aus — die
+    // Gesamtsumme steigt (31050 → 32100). Die alte, fehlerhafte Implementierung
+    // hätte hier fälschlich "Neustart" gemeldet und die ganze Runde verworfen.
+    const prev = { input: 100, output: 50, cacheRead: 0, cacheWrite: 30900 };
+    const tokens = { input: 900, output: 400, cacheRead: 0, cacheWrite: 30800 };
+    const r = computeClaudeTokenDelta(tokens, prev);
+    expect(r.restarted).toBe(false);
+    expect(r.delta.cacheWrite).toBe(0); // geklemmt, nicht negativ
+    expect(r.delta.input).toBe(800);
+    expect(r.delta.output).toBe(350);
+  });
+
+  it('erkennt einen echten Neustart nur an einer sinkenden GESAMTSUMME', () => {
+    const prev = { input: 10000, output: 5000, cacheRead: 1000, cacheWrite: 30900 };
+    const tokens = { input: 50, output: 20, cacheRead: 0, cacheWrite: 0 }; // neue, kleine Session
+    expect(computeClaudeTokenDelta(tokens, prev)).toEqual({ delta: null, restarted: true });
+  });
+
+  it('unveränderte Werte ergeben eine Nulldifferenz, keinen Neustart', () => {
+    const same = { input: 100, output: 50, cacheRead: 10, cacheWrite: 5 };
+    expect(computeClaudeTokenDelta(same, same)).toEqual({
+      delta: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      restarted: false,
+    });
   });
 });
 

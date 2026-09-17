@@ -3617,8 +3617,12 @@ async function refreshUsageDisplay(tabId) {
  * land in the current window as if it had just been used (the same reasoning as
  * `_usageBaselinePending` on the Copilot path).
  *
- * A negative delta means the counter restarted (new session in the same tab);
- * that resets the baseline instead of booking a nonsensical amount.
+ * A drop in the TOTAL means the counter restarted (new session in the same
+ * tab); that resets the baseline instead of booking a nonsensical amount. See
+ * computeClaudeTokenDelta() for why a single key dipping is NOT treated as a
+ * restart — that used to be the case and is why this history stayed
+ * permanently empty: the K/M-suffixed values in /usage are rounded, so
+ * individual counters routinely appear to dip between two readings.
  * @param {Object} tab
  * @param {string} usageText - Raw `/usage` output.
  */
@@ -3629,14 +3633,9 @@ function recordClaudeTokenDelta(tab, usageText) {
   tab._lastClaudeTokens = tokens;
   if (!prev) return; // baseline only
 
-  const keys = ['input', 'output', 'cacheRead', 'cacheWrite'];
-  if (keys.some(k => tokens[k] < prev[k])) return; // counter restarted → new baseline
-  const delta = {};
-  let sum = 0;
-  for (const k of keys) {
-    delta[k] = tokens[k] - prev[k];
-    sum += delta[k];
-  }
+  const { delta, restarted } = window.RendererLogic.computeClaudeTokenDelta(tokens, prev);
+  if (restarted) return;
+  const sum = delta.input + delta.output + delta.cacheRead + delta.cacheWrite;
   if (sum <= 0) return;
 
   // The window these tokens count against: the 5-hour limit reported right now.
