@@ -4613,3 +4613,42 @@ mark.chat-search-highlight--active {
   border-top: none;
   right: auto;
 }
+
+/* Claude token usage per 5-hour limit window (costs page, below the breakdown) */
+.costs-tokens__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.costs-tokens__row:last-child { border-bottom: none; }
+.costs-tokens__range {
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.costs-tokens__badge {
+  color: var(--accent);
+  font-size: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.costs-tokens__detail {
+  color: var(--text-primary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.costs-tokens__empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px 0;
+  line-height: 1.5;
+}

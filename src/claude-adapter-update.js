@@ -20,12 +20,21 @@ const PACKAGE_NAME = '@agentclientprotocol/claude-agent-acp';
 /**
  * Last version verified end-to-end (see main.js claudeCodeClientOptions).
  *
- * Verified on 2026-09-10 against a live adapter: process start, `session/new`,
+ * Verified on 2026-09-15 against a live adapter: process start, `session/new`,
  * 5 session modes and 5 models reported, `/usage` parsed into 2 plan windows,
- * `/context` parsed to a percentage. Only applies to fresh installs — an
- * existing `claudeCodeAdapterVersion` preference wins over this.
+ * `/context` parsed to a percentage — identical results to 0.76.0.
+ *
+ * 0.77.0's breaking change (the `agent` config option is no longer forwarded,
+ * `DEFAULT_AGENT_ID`/`AGENT_CONFIG_ID`/`discoverCustomAgents` removed) does not
+ * affect this app: it only ever sets the `model`, `mode` and `effort` config
+ * options, never `agent`. Its permission fix concerns the host-level
+ * `allowDangerouslySkipPermissions` opt-out, which this app doesn't pass
+ * either — approvals run app-side off `session/request_permission`.
+ *
+ * Only applies to fresh installs — an existing `claudeCodeAdapterVersion`
+ * preference wins over this.
  */
-const DEFAULT_VERSION = '0.76.0';
+const DEFAULT_VERSION = '0.77.0';
 const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const FETCH_TIMEOUT_MS = 10_000;
 

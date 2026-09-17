@@ -10,12 +10,45 @@
 // depend on app.js destructuring them.
 'use strict';
 
-const { buildCostBuckets, aggregateCostBySession, trimCostLog, costPeriod } = window.RendererLogic;
+const { buildCostBuckets, aggregateCostBySession, trimCostLog, costPeriod, buildTokenWindows } = window.RendererLogic;
 
 // ── Cost Log ─────────────────────────────────────────────────
 
 const COST_LOG_KEY = 'costLog';
 const COST_LOG_MAX_ENTRIES = 50000; // ~1 year of entries; keep past-period views usable
+
+// ── Claude Token Log ─────────────────────────────────────────
+// Separate from the cost log on purpose: that one accounts in USD (entryUsd,
+// the chart, the USD migration) and deliberately records nothing for
+// subscription providers. Token counts per limit window are a different
+// dimension with its own retention, so mixing them would complicate both.
+//
+// Claude exposes no consumption history at all — this log IS the history, built
+// from the deltas between successive `/usage` reads. It therefore starts empty
+// and only covers usage since the feature was installed.
+
+const TOKEN_LOG_KEY = 'claudeTokenLog';
+const TOKEN_LOG_MAX_ENTRIES = 20000;
+
+function getTokenLog() {
+  return getPref(TOKEN_LOG_KEY, []);
+}
+
+/**
+ * Append one consumption delta. `resetsAt` identifies the limit window the
+ * tokens fell into (epoch seconds, as reported by /usage at that moment).
+ * @param {{resetsAt:number, sessionId:string|null, input:number, output:number, cacheRead:number, cacheWrite:number}} delta
+ */
+function recordTokenDelta(delta) {
+  const log = getTokenLog();
+  log.push({ ts: Date.now(), ...delta });
+  trimCostLog(log, TOKEN_LOG_MAX_ENTRIES); // same trim helper, same semantics
+  setPref(TOKEN_LOG_KEY, log);
+}
+
+function clearTokenLog() {
+  setPref(TOKEN_LOG_KEY, []);
+}
 
 function getCostLog() {
   return getPref(COST_LOG_KEY, []);
@@ -93,8 +126,9 @@ function initCostsPanel() {
     renderCostsPanel();
   });
   document.getElementById('btnClearCostLog')?.addEventListener('click', () => {
-    if (confirm('Kostenverlauf wirklich löschen?')) {
+    if (confirm('Kostenverlauf und Token-Historie wirklich löschen?')) {
       clearCostLog();
+      clearTokenLog();
       renderCostsPanel();
     }
   });
@@ -140,6 +174,10 @@ function renderCostsPanel() {
 
   drawCostsChart(buckets, sessionMap, bucketCount, range, startMs, bucketMs);
   renderCostsBreakdown(entries, sessionMap, groupBy);
+  // Deliberately NOT filtered by the period/provider controls above: the limit
+  // windows are Claude's own 5-hour buckets, not calendar periods, and mapping
+  // one onto the other would only invite misreading.
+  renderTokenWindows();
 }
 
 /** Fill the provider filter dropdown with "Alle" + the providers present in the log. */
@@ -275,4 +313,46 @@ function renderCostsBreakdown(entries, sessionMap, groupBy) {
   </div>`;
 
   el.innerHTML = html;
+}
+
+// ── Claude Token Windows ─────────────────────────────────────
+
+/** "15.09., 16:10 – 21:10" for one limit window. */
+function formatWindowRange(startMs, endMs) {
+  const d = new Date(startMs);
+  const e = new Date(endMs);
+  const day = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+  const t = (x) => x.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return `${day}, ${t(d)} – ${t(e)}`;
+}
+
+/** Compact token count: 1234 → "1.234", 1234567 → "1,23 Mio." */
+function formatTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Mio.`;
+  return n.toLocaleString('de-DE');
+}
+
+/**
+ * Renders the per-window token list. Lives below the cost breakdown because it
+ * answers a related but different question ("how much did I consume against my
+ * limit") than the USD chart above it.
+ */
+function renderTokenWindows() {
+  const el = document.getElementById('tokenWindows');
+  if (!el) return;
+
+  const windows = buildTokenWindows(getTokenLog());
+  if (!windows.length) {
+    el.innerHTML = '<div class="costs-tokens__empty">Noch keine Daten. Claude liefert keinen Verbrauch aus der Vergangenheit — die Aufzeichnung beginnt mit der nächsten Anfrage an Claude Code.</div>';
+    return;
+  }
+
+  const now = Date.now();
+  el.innerHTML = windows.map((w) => {
+    const current = now < w.endMs;
+    return `<div class="costs-tokens__row">
+      <span class="costs-tokens__range">${escapeHtml(formatWindowRange(w.startMs, w.endMs))}${current ? ' <span class="costs-tokens__badge">laufend</span>' : ''}</span>
+      <span class="costs-tokens__detail" data-tooltip="Eingabe ${formatTokens(w.input)} · Ausgabe ${formatTokens(w.output)} · Cache gelesen ${formatTokens(w.cacheRead)} · Cache geschrieben ${formatTokens(w.cacheWrite)}">${escapeHtml(formatTokens(w.total))}</span>
+    </div>`;
+  }).join('');
 }

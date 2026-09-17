@@ -127,6 +127,14 @@ class GeminiProvider extends ApiAgentClient {
 
   async #getClient() {
     if (this.#client) return this.#client;
+    // Injection seam: @google/genai is ESM-only and loaded via dynamic import,
+    // which makes the request-building below (tools, toolConfig) awkward to
+    // reach from a CommonJS test. Passing a stand-in client keeps that path
+    // verifiable without mocking the module loader.
+    if (this.options.genAiClient) {
+      this.#client = this.options.genAiClient;
+      return this.#client;
+    }
     const { GoogleGenAI } = await import('@google/genai');
     this.#client = new GoogleGenAI({ apiKey: this.options.apiKey });
     return this.#client;
@@ -146,6 +154,12 @@ class GeminiProvider extends ApiAgentClient {
       config: {
         systemInstruction: buildSystemPrompt(this.options.cwd || process.cwd(), this.#mode, this.#combinesTools),
         tools: this.#tools,
+        // Mixing a built-in tool (googleSearch) with our own function
+        // declarations is rejected outright without this flag:
+        // "Please enable tool_config.include_server_side_tool_invocations to
+        // use Built-in tools with Function calling." Only set when actually
+        // combining — a single-tool-kind request doesn't need it.
+        ...(this.#combinesTools ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
         abortSignal: signal,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       },
@@ -162,6 +176,13 @@ class GeminiProvider extends ApiAgentClient {
       const calls = chunk.functionCalls;
       if (calls && calls.length) {
         for (const fc of calls) {
+          // With includeServerSideToolInvocations the response also carries the
+          // model's *own* built-in tool calls (googleSearch), and the SDK's
+          // functionCalls getter doesn't separate them from ours — it returns
+          // every part with a functionCall. Executing those locally would fail
+          // (we have no such tool) and answering them would corrupt the turn:
+          // the server already ran them. Only our declared tools are ours to run.
+          if (!GEMINI_TOOL_NAMES.includes(fc.name)) continue;
           const key = `${fc.name}:${JSON.stringify(fc.args || {})}`;
           if (!callsByKey.has(key)) callsByKey.set(key, fc);
         }

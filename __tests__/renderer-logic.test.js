@@ -22,9 +22,13 @@ const {
   tierForDiscoveredModel,
   filterGeminiModels,
   keepNewestGeminiPerFamily,
+  seedReasoningForNewTab,
   isGemini3Model,
   parseTokenK,
   parseUsageTokens,
+  parseTokenCount,
+  parseClaudeSessionTokens,
+  buildTokenWindows,
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,
@@ -1446,5 +1450,148 @@ describe('costPeriod', () => {
     expect(p.startMs).toBe(new Date(2026, 5, 1, 0, 0, 0).getTime());
     expect(p.label).toBe('Juni 2026');
     expect(p.isCurrent).toBe(false);
+  });
+});
+
+// ── Claude-Token-Historie ────────────────────────────────────
+// Claude liefert keinen Verbrauch aus der Vergangenheit — die Historie entsteht
+// nur aus Deltas aufeinanderfolgender /usage-Lesungen, deshalb hängt alles an
+// diesen beiden Funktionen.
+
+describe('parseTokenCount', () => {
+  it('liest schlichte Zahlen', () => {
+    expect(parseTokenCount('0')).toBe(0);
+    expect(parseTokenCount('1234')).toBe(1234);
+  });
+
+  it('entfernt Tausendertrennzeichen', () => {
+    expect(parseTokenCount('1,234')).toBe(1234);
+    expect(parseTokenCount('1.234')).toBe(1234);
+    expect(parseTokenCount('1 234 567')).toBe(1234567);
+  });
+
+  it('löst k/M-Suffixe auf — dort ist der Punkt ein Dezimaltrennzeichen', () => {
+    expect(parseTokenCount('1.2k')).toBe(1200);
+    expect(parseTokenCount('3M')).toBe(3000000);
+  });
+
+  it('gibt null bei Unlesbarem', () => {
+    expect(parseTokenCount('–')).toBeNull();
+    expect(parseTokenCount('')).toBeNull();
+    expect(parseTokenCount(null)).toBeNull();
+  });
+});
+
+describe('parseClaudeSessionTokens', () => {
+  // Echtes /usage-Format des Adapters (Markdown-Tabelle).
+  const SAMPLE = [
+    '## Usage', '',
+    '### This session', '',
+    '| Cost | API time | Active |',
+    '|:--|:--|:--|',
+    '| $0.12 | 4s | 2m |', '',
+    '| Breakdown | Tokens |',
+    '|:--|--:|',
+    '| Input | 1,234 |',
+    '| Output | 567 |',
+    '| Cache read | 89,000 |',
+    '| Cache write | 12 |',
+  ].join('\n');
+
+  it('liest alle vier Token-Arten aus der Tabelle', () => {
+    expect(parseClaudeSessionTokens(SAMPLE)).toEqual({
+      input: 1234, output: 567, cacheRead: 89000, cacheWrite: 12,
+    });
+  });
+
+  it('ergänzt fehlende Zeilen mit 0 statt undefined', () => {
+    const partial = '| Breakdown | Tokens |\n|:--|--:|\n| Input | 5 |';
+    expect(parseClaudeSessionTokens(partial)).toEqual({
+      input: 5, output: 0, cacheRead: 0, cacheWrite: 0,
+    });
+  });
+
+  it('gibt null, wenn der Block fehlt (alte Adapter-Version/anderes Format)', () => {
+    expect(parseClaudeSessionTokens('## Usage\n\n**5-hour limit** — **34%**')).toBeNull();
+    expect(parseClaudeSessionTokens('')).toBeNull();
+    expect(parseClaudeSessionTokens(null)).toBeNull();
+  });
+});
+
+describe('buildTokenWindows', () => {
+  const W1 = 1_800_000_000; // Reset-Zeitpunkt Fenster 1 (Epoch-Sekunden)
+  const W2 = W1 + 5 * 3600; // Fenster 2
+
+  it('summiert Einträge je Fenster und bildet die Gesamtsumme', () => {
+    const out = buildTokenWindows([
+      { ts: 1, resetsAt: W1, input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+      { ts: 2, resetsAt: W1, input: 3, output: 2, cacheRead: 100, cacheWrite: 1 },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ input: 13, output: 7, cacheRead: 100, cacheWrite: 1, total: 121 });
+  });
+
+  it('trennt verschiedene Fenster und sortiert das neueste nach oben', () => {
+    const out = buildTokenWindows([
+      { ts: 1, resetsAt: W1, input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { ts: 2, resetsAt: W2, input: 2, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ]);
+    expect(out.map(w => w.resetsAt)).toEqual([W2, W1]);
+  });
+
+  it('führt dasselbe Fenster aus verschiedenen Sessions zusammen', () => {
+    const out = buildTokenWindows([
+      { ts: 1, resetsAt: W1, sessionId: 'a', input: 10, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { ts: 2, resetsAt: W1, sessionId: 'b', input: 5, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].total).toBe(15);
+  });
+
+  it('leitet den Fensterzeitraum aus dem Reset-Zeitpunkt ab (5 Stunden davor)', () => {
+    const out = buildTokenWindows([{ ts: 1, resetsAt: W1, input: 1, output: 0, cacheRead: 0, cacheWrite: 0 }]);
+    expect(out[0].endMs).toBe(W1 * 1000);
+    expect(out[0].startMs).toBe((W1 - 5 * 3600) * 1000);
+  });
+
+  it('überspringt Einträge ohne Fensterzuordnung, statt ein Fenster zu erfinden', () => {
+    const out = buildTokenWindows([
+      { ts: 1, input: 99, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { ts: 2, resetsAt: null, input: 99, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { ts: 3, resetsAt: W1, input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].total).toBe(1);
+  });
+
+  it('robust bei ungültiger Eingabe', () => {
+    expect(buildTokenWindows(null)).toEqual([]);
+    expect(buildTokenWindows([])).toEqual([]);
+  });
+});
+
+describe('seedReasoningForNewTab', () => {
+  it('setzt die Standardstufe auf das Startmodell eines frischen Tabs', () => {
+    expect(seedReasoningForNewTab(undefined, 'claude-sonnet-4.6', 'high'))
+      .toEqual({ 'claude-sonnet-4.6': 'high' });
+  });
+
+  it('lässt eine mitgebrachte Zuordnung unangetastet (wiederhergestellter Tab gewinnt)', () => {
+    const restored = { 'claude-sonnet-4.6': 'low' };
+    expect(seedReasoningForNewTab(restored, 'claude-sonnet-4.6', 'max')).toBe(restored);
+  });
+
+  it('auch eine leere mitgebrachte Zuordnung gewinnt — sie bedeutet „bewusst nichts gesetzt"', () => {
+    const restored = {};
+    expect(seedReasoningForNewTab(restored, 'claude-sonnet-4.6', 'max')).toBe(restored);
+  });
+
+  it('speichert „Standard" (null) als nichts, damit der Anbieter entscheidet', () => {
+    expect(seedReasoningForNewTab(undefined, 'claude-sonnet-4.6', null)).toEqual({});
+  });
+
+  it('ohne Startmodell gibt es nichts, woran die Stufe hängen könnte', () => {
+    expect(seedReasoningForNewTab(undefined, '', 'high')).toEqual({});
+    expect(seedReasoningForNewTab(undefined, null, 'high')).toEqual({});
   });
 });

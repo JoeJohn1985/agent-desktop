@@ -380,6 +380,13 @@ model, no per-model or per-session lookup needed.
 Direct API providers (Anthropic, OpenAI, GLM, Ollama, Gemini) keep their
 existing model selection without a reasoning submenu.
 
+**Defaults per provider.** Settings → the provider's own tab has both a
+*Standard-Modell* and a *Standard-Reasoning*. A newly opened tab of that
+provider starts on that combination; the 🧠 menu still overrides it per tab and
+model at any time. `Standard` means no override is sent at all, leaving the
+choice to the backend. Reopened or resumed tabs are unaffected — the levels
+they already carry per model are the more specific answer and keep priority.
+
 #### 🤖 Mode
 
 Selects the mode/agent for the active tab (e.g. Agent, Autopilot).
@@ -426,6 +433,28 @@ The **📈 icon** next to it opens the **cost page** — a dedicated full-screen
 ### Session resume
 
 Reopening a saved session restores its full history in the tab and scrolls to the latest message — for every provider, each reading from that provider's own history store (Copilot's `events.jsonl`, Claude Code's own transcript, or the direct-API session store).
+
+### Costs and token usage
+
+The costs page (💰 in the session-actions bar) charts spend in USD per period,
+broken down by provider or by session.
+
+Below that, **Claude tokens per 5-hour window** lists how many tokens were
+consumed in each of Claude's subscription limit windows. Hover a row for the
+split into input, output, cache read and cache write.
+
+Two things worth knowing about that list:
+
+- **It only covers usage since this feature was installed.** Claude's `/usage`
+  reports the *current* window and the running session's totals — there is no
+  history to fetch, so the app builds one by recording what it observes after
+  each turn. It starts empty.
+- **Windows are grouped by the reset time Claude reported**, not by counting
+  back in 5-hour blocks. Claude's windows start with your first message and so
+  don't tile the clock without gaps; computing boundaries would invent windows
+  that never existed.
+
+Clearing the cost log (🗑️) clears this list too.
 
 ### Settings
 

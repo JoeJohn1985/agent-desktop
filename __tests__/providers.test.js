@@ -434,6 +434,79 @@ describe('Gemini-Provider', () => {
   });
 });
 
+// Regression: Beide Fehler hier sind in Produktion aufgetreten, weil dieser
+// Pfad (Request-Aufbau + Antwort-Auswertung) nicht getestet war.
+describe('Gemini-Provider — Tool-Kombination (Gemini 3.x)', () => {
+  /** Stand-in für den @google/genai-Client: zeichnet den Request auf und liefert Chunks. */
+  function fakeClient(chunks = []) {
+    const calls = [];
+    return {
+      calls,
+      models: {
+        generateContentStream: async (req) => {
+          calls.push(req);
+          return (async function* () { for (const c of chunks) yield c; })();
+        },
+      },
+    };
+  }
+
+  async function runTurn(model, chunks = [], extraOpts = {}) {
+    const client = fakeClient(chunks);
+    const b = createApiBackend('gemini', 1, () => {}, {
+      model, apiKey: 'x', genAiClient: client, ...extraOpts,
+    });
+    b._pushUserText('hallo');
+    const result = await b._streamAssistantTurn({ emit: { text: () => {} }, signal: undefined });
+    return { req: client.calls[0], result };
+  }
+
+  it('setzt bei 3.x beide Tool-Sets UND das nötige toolConfig-Flag', async () => {
+    // Ohne includeServerSideToolInvocations lehnt Gemini die Kombination mit
+    // HTTP 400 ab ("Please enable tool_config.include_server_side_tool_invocations").
+    const { req } = await runTurn('gemini-3.5-flash');
+    const toolKinds = req.config.tools.map(t => (t.googleSearch ? 'search' : 'functions'));
+    expect(toolKinds).toContain('search');
+    expect(toolKinds).toContain('functions');
+    expect(req.config.toolConfig).toEqual({ includeServerSideToolInvocations: true });
+  });
+
+  it('setzt das Flag NICHT bei 2.5 (dort nur ein Tool-Set, Flag unnötig)', async () => {
+    const { req } = await runTurn('gemini-2.5-pro', [], { geminiMode: 'search' });
+    expect(req.config.tools).toHaveLength(1);
+    expect(req.config.tools[0].googleSearch).toBeDefined();
+    expect(req.config.toolConfig).toBeUndefined();
+  });
+
+  it('2.5 im Datei-Modus nutzt weiterhin ausschließlich die Datei-Tools', async () => {
+    const { req } = await runTurn('gemini-2.5-pro', [], { geminiMode: 'files' });
+    expect(req.config.tools[0].functionDeclarations).toBeDefined();
+    expect(req.config.toolConfig).toBeUndefined();
+  });
+
+  it('führt serverseitige Tool-Aufrufe (googleSearch) NICHT lokal aus', async () => {
+    // Mit dem Flag liefert die Antwort auch die eigenen Aufrufe des Modells;
+    // der functionCalls-Getter des SDK trennt sie nicht von unseren. Würden wir
+    // sie ausführen, liefe die Runde in einen unbekannten Tool-Namen.
+    const { result } = await runTurn('gemini-3.5-flash', [{
+      functionCalls: [
+        { name: 'googleSearch', args: { query: 'x' } },
+        { name: 'read_file', args: { path: 'a.txt' } },
+      ],
+    }]);
+    expect(result.toolUses.map(t => t.name)).toEqual(['read_file']);
+  });
+
+  it('schreibt serverseitige Aufrufe auch nicht in die Historie', async () => {
+    const client = fakeClient([{ functionCalls: [{ name: 'googleSearch', args: {} }] }]);
+    const b = createApiBackend('gemini', 1, () => {}, { model: 'gemini-3.5-flash', apiKey: 'x', genAiClient: client });
+    b._pushUserText('hallo');
+    await b._streamAssistantTurn({ emit: { text: () => {} }, signal: undefined });
+    const history = JSON.stringify(b._serializeHistory());
+    expect(history).not.toMatch(/googleSearch/);
+  });
+});
+
 describe('API-Modell-Pricing', () => {
   it('hat USD-Preise für Anthropic-API-Modelle', () => {
     expect(MODEL_PRICING['claude-opus-4-8']).toEqual({ input: 5, cache: 0.5, output: 25 });

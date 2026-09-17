@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.19.0] - 2026-09-17
+
+### Added
+- **Claude-Token-Historie je 5-Stunden-Limitfenster**, integriert in die
+  bestehende Kostenübersicht. Claude liefert keinen Verbrauch aus der
+  Vergangenheit — die Historie wird aus den Deltas aufeinanderfolgender
+  `/usage`-Lesungen aufgebaut und beginnt deshalb leer. Fenster werden nicht
+  in festen 5-Stunden-Schritten zurückgerechnet (Claudes Fenster starten mit
+  der ersten Nachricht und liegen dadurch nicht lückenlos aneinander),
+  sondern über den bei jeder Messung mitgemeldeten Reset-Zeitpunkt
+  identifiziert. Zeigt nur die Tokenmenge; Aufschlüsselung nach
+  Eingabe/Ausgabe/Cache im Tooltip.
+- **Standard-Reasoning pro Provider.** Neben dem bestehenden Standard-Modell
+  gibt es jetzt in den Provider-Einstellungen (Copilot, Claude Code lokal und
+  SSH) eine Standard-Reasoning-Stufe. Ein neuer Tab startet mit dieser
+  Kombination; das 🧠-Menü überschreibt sie weiterhin pro Tab und Modell.
+  Wiederhergestellte oder fortgesetzte Sessions bringen ihre eigene,
+  speziellere Zuordnung mit und werden nie überschrieben.
+
+### Fixed
+- **Gemini 3.x lehnte jede Anfrage mit HTTP 400 ab**
+  (`Please enable tool_config.include_server_side_tool_invocations`), sobald
+  Websuche und Datei-Tools kombiniert wurden — eine Regression aus der
+  letzten Version. Das nötige `toolConfig`-Flag wird jetzt gesetzt. Da die
+  Antwort damit auch die serverseitigen Tool-Aufrufe des Modells (die
+  Google-Suche selbst) enthält und das SDK sie nicht von eigenen Aufrufen
+  trennt, werden nur die selbst deklarierten Tools ausgeführt — die übrigen
+  landen weder in der Ausführung noch in der Historie. 5 Regressionstests
+  über eine neue Injektionsstelle für den API-Client ergänzt, da dieser Pfad
+  zuvor komplett ungetestet war.
+
+### Changed
+- Adapter-Standardversion auf **0.77.0** angehoben (war 0.76.0) — gegen einen
+  echten Adapter verifiziert, keine der Änderungen betrifft diese App (Fokus
+  auf einer entfernten `agent`-Konfigurationsoption, die hier nie genutzt
+  wurde, und einem Permissions-Fix für ein Flag, das diese App nicht setzt).
+  Gilt nur für Neuinstallationen.
+- Ein weiterer Plan unter `plans/` ergänzt (Token-Verbrauchshistorie).
+
 ## [1.18.0] - 2026-09-15
 
 ### Added

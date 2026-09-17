@@ -885,6 +885,15 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
   statusEl.className = 'stream-status-line';
   streamEl.appendChild(statusEl);
 
+  const startModel = initialModel || getDefaultModelForProvider(tabProvider);
+  // A brand-new tab starts on the provider's configured default reasoning;
+  // restored/resumed tabs keep their own map (see seedReasoningForNewTab).
+  const seededReasoning = window.RendererLogic.seedReasoningForNewTab(
+    initialReasoningByModel,
+    startModel,
+    providerHasReasoning(tabProvider) ? getDefaultReasoningForProvider(tabProvider) : null,
+  );
+
   tabs.set(tabId, {
     streamEl,
     statusEl,
@@ -909,10 +918,10 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
     _costUsd: 0,
     _sessionName: null,
     provider: tabProvider,
-    reasoningByModel: normalizeReasoningByModel(initialReasoningByModel),
+    reasoningByModel: normalizeReasoningByModel(seededReasoning),
     // Per-tab manual-approval toggle; new tabs inherit the global default.
     manualApproval: getSettings().manualApproval === true,
-    selectedModel: initialModel || getDefaultModelForProvider(tabProvider),
+    selectedModel: startModel,
     context: { model: null, mcp: null, skills: null, instructions: null, cwd: null, files: new Set() },
     inputText: '',
     inputRichHtml: '',
@@ -2515,6 +2524,25 @@ function saveDefaultModelForProvider(provider, modelId) {
 }
 
 /**
+ * Reasoning effort a new tab of this provider starts on. One value per
+ * provider rather than per model: there is only ever one default model per
+ * provider, and the effort set is the same fixed list for every model — so a
+ * per-model map would store the same answer under many keys.
+ * @param {string} provider
+ * @returns {string|null} null = "Standard" (backend's own default)
+ */
+function getDefaultReasoningForProvider(provider) {
+  const map = getSettings().defaultReasoning || {};
+  return normalizeKnownReasoningEffort(map[provider]);
+}
+
+function saveDefaultReasoningForProvider(provider, effort) {
+  const map = { ...(getSettings().defaultReasoning || {}) };
+  map[provider] = normalizeKnownReasoningEffort(effort);
+  saveSetting('defaultReasoning', map);
+}
+
+/**
  * The mode a provider was last set to, remembered across restarts. Validated
  * against the provider's known modes (an ACP provider whose modes aren't
  * discovered yet trusts the saved id — modes_available corrects an invalid one).
@@ -2554,6 +2582,22 @@ function renderDefaultModelSettings() {
  * @param {string} provider
  * @param {HTMLSelectElement} sel
  */
+/**
+ * Fills one provider's "default reasoning" <select>. Shared by Copilot's static
+ * settings tab and the dynamically generated provider tabs, so both offer the
+ * same options and persist them the same way.
+ * @param {string} provider
+ * @param {HTMLSelectElement|null} sel
+ */
+function renderProviderReasoningSelect(provider, sel) {
+  if (!sel) return;
+  sel.innerHTML = REASONING_EFFORTS
+    .map(o => `<option value="${escapeAttr(o.value || '')}">${escapeHtml(o.label)}</option>`)
+    .join('');
+  sel.value = getDefaultReasoningForProvider(provider) || '';
+  sel.addEventListener('change', () => saveDefaultReasoningForProvider(provider, sel.value || null));
+}
+
 function renderProviderModelSelect(provider, sel) {
   if (!sel) return;
   sel.innerHTML = getModelsForProvider(provider)
@@ -2747,7 +2791,7 @@ function selectModelForTab(tabId, modelId, effort) {
   tab.selectedModel = modelId;
   tab.reasoningByModel = normalizeReasoningByModel(tab.reasoningByModel);
   const provider = getTabProvider(tab);
-  if (provider === 'copilot' || isClaudeCodeProvider(provider)) {
+  if (providerHasReasoning(provider)) {
     const selectedEffort = effort === undefined
       ? getReasoningForModel(tab, modelId)
       : normalizeKnownReasoningEffort(effort);
@@ -2796,6 +2840,16 @@ function getClaudeCodeSshCwd() {
 
 /** ACP-based backends (CLI/adapter over stdio), as opposed to direct-API providers. */
 function isAcpProvider(provider) {
+  return provider === 'copilot' || isClaudeCodeProvider(provider);
+}
+
+/**
+ * Whether a provider offers a reasoning-effort choice. Currently the same set
+ * as isAcpProvider(), but deliberately its own predicate: that one is about
+ * *how* a backend is driven, this one about a model capability — the direct-API
+ * providers could gain reasoning without becoming ACP backends.
+ */
+function providerHasReasoning(provider) {
   return provider === 'copilot' || isClaudeCodeProvider(provider);
 }
 
@@ -3038,7 +3092,7 @@ function updateModelSelectBtn(tabId) {
   const modelLabel = found ? found.short : modelId;
   // Claude Code shows the same 🧠-badge as Copilot — same fixed reasoning set
   // for both, no per-model discovery needed.
-  const hasEffortUi = provider === 'copilot' || isClaudeCodeProvider(provider);
+  const hasEffortUi = providerHasReasoning(provider);
   const effort = hasEffortUi ? getReasoningForModel(tab, tab?.selectedModel || modelId) : null;
   const effortLabel = reasoningEffortLabel(effort);
   btn.innerHTML = `🧠 ${escapeHtml(modelLabel)}${hasEffortUi ? ` <span class="model-select__reasoning">${escapeHtml(effortLabel)}</span>` : ''}`;
@@ -3139,7 +3193,7 @@ function initTabModelSelector() {
     const tab = tabs.get(openedForTabId);
     const currentModel = tab?.selectedModel || '';
     const provider = getTabProvider(tab);
-    const hasReasoning = provider === 'copilot' || isClaudeCodeProvider(provider);
+    const hasReasoning = providerHasReasoning(provider);
     const models = getModelsForProvider(provider);
 
     const dropdown = document.createElement('div');
@@ -3553,6 +3607,44 @@ async function refreshUsageDisplay(tabId) {
  * — the same the official app shows. Runs after each turn for subscription tabs.
  * @param {number} tabId
  */
+/**
+ * Books the tokens consumed since this tab's last `/usage` read into the token
+ * history, tagged with the limit window they fell into.
+ *
+ * The table in `/usage` is cumulative per Claude Code session, so only the
+ * delta is new consumption. The first read of a resumed session establishes the
+ * baseline WITHOUT booking it — otherwise the whole pre-existing total would
+ * land in the current window as if it had just been used (the same reasoning as
+ * `_usageBaselinePending` on the Copilot path).
+ *
+ * A negative delta means the counter restarted (new session in the same tab);
+ * that resets the baseline instead of booking a nonsensical amount.
+ * @param {Object} tab
+ * @param {string} usageText - Raw `/usage` output.
+ */
+function recordClaudeTokenDelta(tab, usageText) {
+  const tokens = window.RendererLogic.parseClaudeSessionTokens(usageText);
+  if (!tokens) return; // older adapter or changed format — nothing to book
+  const prev = tab._lastClaudeTokens;
+  tab._lastClaudeTokens = tokens;
+  if (!prev) return; // baseline only
+
+  const keys = ['input', 'output', 'cacheRead', 'cacheWrite'];
+  if (keys.some(k => tokens[k] < prev[k])) return; // counter restarted → new baseline
+  const delta = {};
+  let sum = 0;
+  for (const k of keys) {
+    delta[k] = tokens[k] - prev[k];
+    sum += delta[k];
+  }
+  if (sum <= 0) return;
+
+  // The window these tokens count against: the 5-hour limit reported right now.
+  const five = (tab._subUsageWindows || []).find(w => w.rateLimitType === 'five_hour');
+  if (!five || typeof five.resetsAt !== 'number') return; // no window → nothing to group by
+  recordTokenDelta({ resetsAt: five.resetsAt, sessionId: tab.sessionId || null, ...delta });
+}
+
 async function refreshSubscriptionUsage(tabId) {
   try {
     const result = await window.desktop.chat.silentCommand(tabId, '/usage');
@@ -3570,6 +3662,7 @@ async function refreshSubscriptionUsage(tabId) {
       console.warn('[usage] /usage lieferte Text, aber kein bekanntes Limit-Format — Parser veraltet?',
         (result.text || '').slice(0, 200));
     }
+    recordClaudeTokenDelta(tab, result.text);
     if (tabId === activeTabId) updateSubscriptionUsageDisplay(tab);
   } catch (e) {
     console.warn('[usage] refreshSubscriptionUsage fehlgeschlagen:', e?.message);
@@ -5777,8 +5870,9 @@ function initSettings() {
 
   // Default provider (App tab).
   renderDefaultModelSettings();
-  // Copilot's own default-model select lives in its static provider tab.
+  // Copilot's own default-model/-reasoning selects live in its static provider tab.
   renderProviderModelSelect('copilot', document.getElementById('settProviderModel-copilot'));
+  renderProviderReasoningSelect('copilot', document.getElementById('settProviderReasoning-copilot'));
   // Claude Code / Anthropic / OpenAI / GLM / Ollama / Gemini each get their own
   // tab only when actually connected (CLI installed / key stored) — built
   // dynamically since that set changes at runtime (a key can be added while
@@ -6221,6 +6315,16 @@ function buildProviderConfigPanelHtml(providerId) {
     </div>
   `);
 
+  if (providerHasReasoning(providerId)) {
+    parts.push(`
+      <div class="settings__group">
+        <label class="settings__label">Standard-Reasoning</label>
+        <div class="settings__hint">Stufe, mit der ein neuer ${escapeHtml(label)}-Tab startet. „Standard" überlässt die Wahl dem Anbieter. Pro Tab und Modell über das 🧠-Menü überschreibbar.</div>
+        <select class="settings__select" data-provider-reasoning-select="${escapeAttr(providerId)}"></select>
+      </div>
+    `);
+  }
+
   // Gemini-only: the one provider where the discovered list mixes free and
   // paid models, and iterates fast enough (a new Flash point release every
   // few weeks) that several near-identical versions pile up at once.
@@ -6453,6 +6557,8 @@ function wireClaudeCodeSshPanel(panel) {
  */
 async function wireProviderConfigPanel(providerId, panel) {
   renderProviderModelSelect(providerId, panel.querySelector(`[data-provider-model-select="${providerId}"]`));
+
+  renderProviderReasoningSelect(providerId, panel.querySelector(`[data-provider-reasoning-select="${providerId}"]`));
 
   if (providerSupports(providerId, 'denylist')) {
     renderDeniedTools(providerId);

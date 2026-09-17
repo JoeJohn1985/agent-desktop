@@ -348,6 +348,26 @@ const GEMINI_VERSION_FAMILY_RE = /^gemini-(\d+(?:\.\d+)*)-(.+)$/;
  * @param {Array<{id:string}>} models
  * @returns {Array} same objects, original relative order preserved
  */
+/**
+ * The per-model reasoning map a newly created tab starts with.
+ *
+ * A restored or resumed tab brings its own map — that is the more specific
+ * answer (a choice the user made for those exact models) and always wins over
+ * the provider-wide default. Only a genuinely fresh tab is seeded, and only
+ * when there is both a model to attach the value to and a configured default;
+ * "Standard" (null) is deliberately stored as nothing at all, so the backend's
+ * own default keeps applying.
+ * @param {Object|undefined} existingMap - Map from a restored/resumed tab, if any.
+ * @param {string} modelId - The model the new tab starts on.
+ * @param {string|null} defaultEffort - Provider default, already validated.
+ * @returns {Object}
+ */
+function seedReasoningForNewTab(existingMap, modelId, defaultEffort) {
+  if (existingMap) return existingMap;
+  if (!modelId || !defaultEffort) return {};
+  return { [modelId]: defaultEffort };
+}
+
 function keepNewestGeminiPerFamily(models) {
   const winnerIdByFamily = new Map(); // family -> {id, version}
   for (const m of models) {
@@ -419,6 +439,102 @@ function parseUsageTokens(text) {
   // Copilot's /usage line has no such field, so the key is only added when present.
   if (m[4] !== undefined) tokens.cacheWrite = parseTokenK(m[4]);
   return tokens;
+}
+
+/**
+ * Parses a single token count out of Claude's `/usage` table cell.
+ * Handles plain digits ("1234"), thousands separators ("1,234" / "1 234") and
+ * a k/M suffix ("1.2k") — a decimal point only ever appears together with such
+ * a suffix, so it must not be stripped as a separator in that case.
+ * @param {string} raw
+ * @returns {number|null}
+ */
+function parseTokenCount(raw) {
+  const m = String(raw == null ? '' : raw).trim().match(/^([\d.,\s]+?)\s*([kKmM])?$/);
+  if (!m) return null;
+  const num = m[2]
+    ? parseFloat(m[1].replace(/[,\s]/g, ''))
+    : parseInt(m[1].replace(/[.,\s]/g, ''), 10);
+  if (!Number.isFinite(num)) return null;
+  const mult = m[2] ? ({ k: 1e3, m: 1e6 }[m[2].toLowerCase()] || 1) : 1;
+  return Math.round(num * mult);
+}
+
+/** Row shape of Claude's `/usage` token table: `| Input | 1,234 |`. */
+const CLAUDE_TOKEN_ROW_RE = /^\|\s*(Input|Output|Cache read|Cache write)\s*\|\s*([^|]+?)\s*\|/gim;
+const CLAUDE_TOKEN_KEYS = {
+  'input': 'input', 'output': 'output', 'cache read': 'cacheRead', 'cache write': 'cacheWrite',
+};
+
+/**
+ * Cumulative token counts of the CURRENT Claude Code session, read from the
+ * `| Breakdown | Tokens |` table in `/usage`.
+ *
+ * Claude exposes no consumption history, so this is the only token source —
+ * the app builds its own history from the deltas between successive reads
+ * (see the token log in modules/costs.js). Returns null when the block is
+ * missing (older adapter, changed format); callers treat that as "no data",
+ * never as an error, the same way the usage-window parser does.
+ * @param {string} text - Raw `/usage` output.
+ * @returns {{input:number, output:number, cacheRead:number, cacheWrite:number}|null}
+ */
+function parseClaudeSessionTokens(text) {
+  if (typeof text !== 'string' || !text) return null;
+  const out = {};
+  CLAUDE_TOKEN_ROW_RE.lastIndex = 0;
+  let m;
+  while ((m = CLAUDE_TOKEN_ROW_RE.exec(text)) !== null) {
+    const key = CLAUDE_TOKEN_KEYS[m[1].toLowerCase()];
+    const n = parseTokenCount(m[2]);
+    if (key && n != null) out[key] = n;
+  }
+  return Object.keys(out).length
+    ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...out }
+    : null;
+}
+
+/** Length of a Claude subscription limit window, in seconds. */
+const CLAUDE_WINDOW_SECONDS = 5 * 3600;
+
+/**
+ * Groups recorded token deltas into the 5-hour limit windows they belong to.
+ *
+ * Windows are identified by the reset timestamp that was reported while the
+ * tokens were consumed, NOT by stepping back in 5-hour blocks: Claude's windows
+ * start with the first message and therefore don't tile the timeline without
+ * gaps, so computed boundaries would be fiction for anything but the current
+ * one. Entries without a reset timestamp are skipped rather than lumped into a
+ * made-up window.
+ * @param {Array<Object>} log - Entries {ts, resetsAt, input, output, cacheRead, cacheWrite}
+ * @returns {Array<Object>} newest window first
+ */
+function buildTokenWindows(log) {
+  if (!Array.isArray(log)) return [];
+  const byWindow = new Map();
+  for (const e of log) {
+    if (!e || typeof e.resetsAt !== 'number' || !Number.isFinite(e.resetsAt)) continue;
+    let w = byWindow.get(e.resetsAt);
+    if (!w) {
+      w = {
+        resetsAt: e.resetsAt,
+        startMs: (e.resetsAt - CLAUDE_WINDOW_SECONDS) * 1000,
+        endMs: e.resetsAt * 1000,
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0,
+        firstTs: e.ts, lastTs: e.ts,
+      };
+      byWindow.set(e.resetsAt, w);
+    }
+    for (const k of ['input', 'output', 'cacheRead', 'cacheWrite']) {
+      const v = Number(e[k]) || 0;
+      w[k] += v;
+      w.total += v;
+    }
+    if (typeof e.ts === 'number') {
+      w.firstTs = Math.min(w.firstTs ?? e.ts, e.ts);
+      w.lastTs = Math.max(w.lastTs ?? e.ts, e.ts);
+    }
+  }
+  return [...byWindow.values()].sort((a, b) => b.resetsAt - a.resetsAt);
 }
 
 function parseUsageRequests(text) {
@@ -1125,9 +1241,13 @@ const _api = {
   tierForDiscoveredModel,
   filterGeminiModels,
   keepNewestGeminiPerFamily,
+  seedReasoningForNewTab,
   isGemini3Model,
   parseTokenK,
   parseUsageTokens,
+  parseTokenCount,
+  parseClaudeSessionTokens,
+  buildTokenWindows,
   parseUsageRequests,
   estimateCredits,
   estimateCreditsDelta,

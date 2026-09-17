@@ -196,6 +196,10 @@
             <div class="costs-view__breakdown-title">Aufschlüsselung</div>
             <div id="costsBreakdown"></div>
           </div>
+          <div class="costs-view__breakdown-section">
+            <div class="costs-view__breakdown-title">Claude-Tokens je 5-Stunden-Fenster</div>
+            <div id="tokenWindows"></div>
+          </div>
         </div>
       </div>
       <!-- Session Actions (slash command buttons, under tabs) -->
@@ -421,6 +425,11 @@
             <label class="settings__label">Standard-Modell</label>
             <div class="settings__hint">Modell, mit dem ein neuer Copilot-Tab startet. Pro Tab über das 🧠-Menü überschreibbar.</div>
             <select class="settings__select" id="settProviderModel-copilot"></select>
+          </div>
+          <div class="settings__group">
+            <label class="settings__label">Standard-Reasoning</label>
+            <div class="settings__hint">Stufe, mit der ein neuer Copilot-Tab startet. „Standard" überlässt die Wahl dem Anbieter. Pro Tab und Modell über das 🧠-Menü überschreibbar.</div>
+            <select class="settings__select" id="settProviderReasoning-copilot"></select>
           </div>
           <div class="settings__separator"></div>
           <div class="settings__group">
