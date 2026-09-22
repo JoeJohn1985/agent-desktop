@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.21.0] - 2026-09-22
+
+### Added
+- **Passwort-Anmeldung für Claude Code (SSH)**, als Alternative zum
+  SSH-Key. Bisher verlangte dieser Provider zwingend einen passwortlos
+  funktionierenden SSH-Zugang — auf Rechnern ohne Admin-Rechte für den
+  `ssh-agent`-Dienst (typisch auf verwalteten Arbeitsrechnern) war das ohne
+  Zweckentfremdung fremder Tools nicht einrichtbar. Neu im Settings-Tab
+  „CC (SSH)": ein Passwortfeld, verschlüsselt gespeichert über dieselbe
+  `safeStorage`-Infrastruktur wie die API-Keys der anderen Anbieter (an das
+  Windows-Benutzerkonto gebunden) und nur beim Verbindungsaufbau kurz im
+  Speicher der App entschlüsselt — landet nie unverschlüsselt auf der
+  Platte. Technisch über einen lokalen `SSH_ASKPASS`-Helfer (`assets/
+  ssh-askpass.cmd`), den `ssh.exe` selbst aufruft; kein neuer Dependency,
+  keine Änderung an der bestehenden Verbindungsarchitektur. Key- und
+  Passwort-Auth können gleichzeitig konfiguriert sein — SSH probiert Pubkey
+  zuerst, fällt erst bei Fehlschlag auf das Passwort zurück.
+
+### Fixed
+- **Die SSH-Einstellungen für Claude Code (SSH) waren beim allerersten
+  Einrichten unerreichbar.** Der zugehörige Settings-Tab (mit den Feldern
+  für Host/Arbeitsverzeichnis) erschien erst, nachdem bereits ein Host
+  gespeichert war — ein Henne-Ei-Problem. Die Provider-Zeile in der
+  allgemeinen Liste fiel mangels eigener Behandlung zusätzlich auf eine
+  irreführende Copilot-Login-Anzeige zurück. Der Tab existiert jetzt immer;
+  die Provider-Zeile zeigt einen korrekten Status.
+- **Erster Verbindungsaufbau zu einem neuen SSH-Host konnte hängen
+  bleiben**, weil die Bestätigung eines unbekannten Host-Fingerprints eine
+  TTY voraussetzt, die keiner der SSH-Aufrufe der App bereitstellt. Alle
+  drei SSH-Spawn-Stellen nutzen jetzt `StrictHostKeyChecking=accept-new`
+  (vertraut einem neuen Host beim ersten Kontakt, verweigert aber weiterhin
+  bei einem später geänderten Schlüssel).
+
 ## [1.20.0] - 2026-09-22
 
 ### Changed

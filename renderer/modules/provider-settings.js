@@ -151,11 +151,20 @@ async function getConnectedProviders() {
  * Providers that get their own dynamically-generated settings tab. Copilot is
  * static HTML (always present, handled separately by the Settings dialog), so
  * it's excluded here.
+ *
+ * Claude Code (SSH) is force-included even when not yet "connected" (unlike
+ * every other entry here, sourced from getConnectedProviders()): its tab is
+ * the ONLY place to type in a host in the first place, so gating it behind
+ * already having one would make it permanently unreachable from a cold start.
  * @returns {Promise<Array<{id: string, label: string}>>}
  */
 async function getConnectedProviderConfigs() {
   const providers = await getConnectedProviders();
-  return providers.filter(p => p.id !== 'copilot');
+  const configs = providers.filter(p => p.id !== 'copilot');
+  if (!configs.some((p) => p.id === 'claude-code-ssh')) {
+    configs.push({ id: 'claude-code-ssh', label: SETTINGS_TAB_LABELS['claude-code-ssh'] || PROVIDER_LABELS['claude-code-ssh'] });
+  }
+  return configs;
 }
 
 /**
@@ -177,7 +186,7 @@ function buildProviderConfigPanelHtml(providerId) {
     parts.push(`
       <div class="settings__group">
         <label class="settings__label">🖧 SSH-Ziel</label>
-        <div class="settings__hint">Wie hinter <code>ssh</code> eingegeben — z.B. <code>pi@192.168.1.50</code> oder ein Alias aus deiner <code>~/.ssh/config</code>. Der Zugang muss ohne Passwortabfrage funktionieren (SSH-Key).</div>
+        <div class="settings__hint">Wie hinter <code>ssh</code> eingegeben — z.B. <code>pi@192.168.1.50</code> oder ein Alias aus deiner <code>~/.ssh/config</code>. Anmeldung per SSH-Key oder per Passwort (siehe unten) — ohne eines von beiden kann die App keine interaktive Abfrage anzeigen.</div>
         <input type="text" class="settings__input" id="settClaudeCodeSshHost" placeholder="pi@raspberrypi.local" value="${escapeAttr(getClaudeCodeSshHost())}" />
       </div>
       <div class="settings__group">
@@ -187,6 +196,16 @@ function buildProviderConfigPanelHtml(providerId) {
           <input type="text" class="settings__folder-input" id="settClaudeCodeSshCwd" placeholder="/home/pi/projekt" value="${escapeAttr(getClaudeCodeSshCwd())}" />
           <button class="action-btn" id="btnBrowseClaudeCodeSshCwd" data-tooltip="Auf dem Zielrechner durchsuchen">📁</button>
         </div>
+      </div>
+      <div class="settings__group">
+        <label class="settings__label">🔑 Passwort (Alternative zum SSH-Key)</label>
+        <div class="settings__hint">Wird verschlüsselt über dein Windows-Benutzerkonto gespeichert (wie die API-Keys der anderen Anbieter) und nur beim Verbindungsaufbau kurz entschlüsselt — landet nie unverschlüsselt auf der Platte. Leer lassen, wenn bereits ein SSH-Key eingerichtet ist.</div>
+        <div class="settings__folder-row">
+          <input type="password" class="settings__input" id="settClaudeCodeSshPassword" placeholder="Passwort" autocomplete="off" />
+          <button class="action-btn" id="btnSaveClaudeCodeSshPassword">Speichern</button>
+          <button class="action-btn" id="btnDeleteClaudeCodeSshPassword">Löschen</button>
+        </div>
+        <span class="providers-row__hint" id="claudeCodeSshPasswordStatus"></span>
       </div>
       <div class="settings__group">
         <button class="action-btn" id="btnTestClaudeCodeSsh">Verbindung testen</button>
@@ -390,6 +409,40 @@ function wireClaudeCodeSshPanel(panel) {
   const cwdInput = panel.querySelector('#settClaudeCodeSshCwd');
   const testBtn = panel.querySelector('#btnTestClaudeCodeSsh');
   const statusEl = panel.querySelector('#claudeCodeSshTestStatus');
+  const pwInput = panel.querySelector('#settClaudeCodeSshPassword');
+  const pwSaveBtn = panel.querySelector('#btnSaveClaudeCodeSshPassword');
+  const pwDeleteBtn = panel.querySelector('#btnDeleteClaudeCodeSshPassword');
+  const pwStatusEl = panel.querySelector('#claudeCodeSshPasswordStatus');
+
+  const refreshPasswordStatus = async () => {
+    if (!pwStatusEl) return;
+    try {
+      const { hasPassword } = await window.desktop.chat.sshHasPassword();
+      pwStatusEl.textContent = hasPassword ? '● Passwort hinterlegt' : '○ kein Passwort hinterlegt (SSH-Key wird genutzt)';
+      pwStatusEl.classList.toggle('is-set', hasPassword);
+    } catch (_) { /* old build */ }
+  };
+  refreshPasswordStatus();
+
+  pwSaveBtn?.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+    const pw = pwInput?.value || '';
+    if (!pw) { showNotification('Bitte ein Passwort eingeben.', 'warning'); return; }
+    const res = await window.desktop.chat.sshSetPassword(pw);
+    if (res.success) {
+      if (pwInput) pwInput.value = '';
+      showNotification('SSH-Passwort gespeichert.', 'success');
+      refreshPasswordStatus();
+    } else {
+      showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
+    }
+  }));
+
+  pwDeleteBtn?.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+    await window.desktop.chat.sshDeletePassword();
+    if (pwInput) pwInput.value = '';
+    showNotification('SSH-Passwort entfernt.', 'info');
+    refreshPasswordStatus();
+  }));
 
   hostInput?.addEventListener('change', () => setPref('claudeCodeSshHost', hostInput.value.trim()));
   cwdInput?.addEventListener('change', () => setPref('claudeCodeSshCwd', cwdInput.value.trim()));
@@ -664,6 +717,29 @@ async function renderCopilotProviderRow(list, p) {
     const recheck = document.createElement('button');
     recheck.className = 'action-btn';
     recheck.textContent = 'Status prüfen';
+    recheck.addEventListener('click', () => renderProvidersSettings());
+    controls.appendChild(recheck);
+    return;
+  }
+
+  // Claude Code (SSH): no local CLI/login to check — its setup (host, remote
+  // working directory, connection test) lives in its own tab (getConnectedProviderConfigs()
+  // force-includes it so that tab always exists). This row is just a status summary.
+  if (p.id === 'claude-code-ssh') {
+    const host = getClaudeCodeSshHost();
+    if (host) {
+      statusEl.textContent = `● SSH-Ziel: ${host}`;
+      statusEl.classList.add('is-set');
+    } else {
+      statusEl.textContent = '○ noch nicht eingerichtet';
+    }
+    const hint = document.createElement('span');
+    hint.className = 'providers-row__hint';
+    hint.textContent = 'SSH-Ziel, Arbeitsverzeichnis und Verbindungstest im eigenen Tab „CC (SSH)" oben in diesem Fenster.';
+    controls.appendChild(hint);
+    const recheck = document.createElement('button');
+    recheck.className = 'action-btn';
+    recheck.textContent = 'Aktualisieren';
     recheck.addEventListener('click', () => renderProvidersSettings());
     controls.appendChild(recheck);
     return;

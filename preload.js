@@ -112,6 +112,12 @@ contextBridge.exposeInMainWorld('desktop', {
     testClaudeCodeSsh: (host, cwd) => ipcRenderer.invoke('claudecode:testSsh', host, cwd),
     /** @ipc claudecode:sshListDir — Lists remote subdirectories (remote folder picker). @param {string} host @param {string} [dirPath] @returns {Promise<{ok:boolean, path?:string, dirs?:string[], error?:string}>} */
     sshListDir: (host, dirPath) => ipcRenderer.invoke('claudecode:sshListDir', host, dirPath),
+    /** @ipc claudecode:sshSetPassword — Stores an encrypted password for the SSH target (alternative to key-based auth). @param {string} password @returns {Promise<{success:boolean, error?:string}>} */
+    sshSetPassword: (password) => ipcRenderer.invoke('claudecode:sshSetPassword', password),
+    /** @ipc claudecode:sshHasPassword — Whether a password is currently stored. @returns {Promise<{hasPassword:boolean}>} */
+    sshHasPassword: () => ipcRenderer.invoke('claudecode:sshHasPassword'),
+    /** @ipc claudecode:sshDeletePassword — Removes the stored password. @returns {Promise<{success:boolean}>} */
+    sshDeletePassword: () => ipcRenderer.invoke('claudecode:sshDeletePassword'),
     /** @ipc claudecode:checkAdapterUpdate @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>} */
     checkAdapterUpdate: () => ipcRenderer.invoke('claudecode:checkAdapterUpdate'),
     /** @ipc claudecode:applyAdapterUpdate — Pins & verifies the given adapter version. @returns {Promise<{ok:boolean, newVersion?:string, error?:string}>} */

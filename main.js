@@ -321,16 +321,23 @@ function claudeCodeClientOptions(cwd, { sshHost } = {}) {
       command: 'ssh',
       // -T: no TTY. The adapter speaks newline-delimited JSON-RPC over stdio,
       // and a TTY would inject terminal control sequences into that stream.
+      // StrictHostKeyChecking=accept-new: trust a never-before-seen host on
+      // first contact (like most GUI SSH tools), but still refuse a later
+      // *changed* key — the actual protection stays intact. Without this, a
+      // brand-new host would hang here forever (no TTY to answer "yes" on).
       // The remote cwd is applied with `cd` because SSH always starts in the
       // remote home directory; both it and the adapter spec are shell-quoted
       // since SSH concatenates its arguments into one remote shell command.
-      baseArgs: ['-T', sshHost, sshRemote.buildAdapterCommand(cwd, adapterSpec)],
+      baseArgs: ['-T', ...sshRemote.STRICT_HOST_KEY_OPT, sshHost, sshRemote.buildAdapterCommand(cwd, adapterSpec)],
       // ssh is a real executable (OpenSSH ships with Windows) — unlike npx,
       // which is a .cmd shim, so no shell wrapper is needed here.
       shell: false,
       localCommandStdout: true,
       useConfigOptions: true,
       mcpServers: [],
+      // Password auth (if configured) instead of a key — see sshPasswordEnv().
+      // Empty object when only a key is set up, so that path is unaffected.
+      env: sshPasswordEnv(),
       // No stripEnv/CLAUDE_CODE_EXECUTABLE: both target the LOCAL environment,
       // which the remote process doesn't inherit anyway.
     };
@@ -372,6 +379,32 @@ let _claudeExecutablePath;
 
 const claudeAdapterUpdate = require('./src/claude-adapter-update');
 const sshRemote = require('./src/ssh-remote');
+
+// Local helper that SSH_ASKPASS points ssh.exe at (see sshPasswordEnv below).
+// Just echoes AGENT_DESKTOP_SSH_PW back — never contains the password itself.
+const SSH_ASKPASS_HELPER = path.join(__dirname, 'assets', 'ssh-askpass.cmd');
+
+/**
+ * Env additions that let a spawned `ssh` authenticate with the stored
+ * password instead of a key. Empty object when none is stored, so the
+ * pre-existing key-only path is completely unaffected. Thin impure wrapper
+ * (secure-store lookup) around the pure builder in src/ssh-remote.js.
+ * @returns {Object<string,string>}
+ */
+function sshPasswordEnv() {
+  return sshRemote.buildPasswordEnv(secureStore.getKey('claude-code-ssh'), SSH_ASKPASS_HELPER);
+}
+
+/**
+ * Shared `ssh` args/env for the one-shot helper commands (connection probe,
+ * remote folder listing) — as opposed to the long-lived adapter connection,
+ * which goes through claudeCodeClientOptions() instead.
+ * @returns {{args: string[], env: Object<string,string>}}
+ */
+function sshOneShotOptions() {
+  const built = sshRemote.buildOneShotSshArgs(secureStore.getKey('claude-code-ssh'), SSH_ASKPASS_HELPER);
+  return { args: built.args, env: { ...process.env, ...built.env } };
+}
 
 /** The pinned adapter version to launch (user override from Settings, else the built-in default). */
 function getClaudeAdapterVersion() {
@@ -737,9 +770,12 @@ ipcMain.handle('claudecode:testSsh', async (_event, host, cwd) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     try {
-      // BatchMode: fail instead of blocking forever on a password prompt —
-      // there's no TTY here to type one into.
-      const proc = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, probe], { windowsHide: true });
+      // BatchMode (no stored password): fail instead of blocking forever on
+      // a password prompt there's no TTY to type into. With a stored
+      // password, sshOneShotOptions() drops BatchMode and wires up askpass
+      // instead — see its doc comment for why the two are mutually exclusive.
+      const { args, env } = sshOneShotOptions();
+      const proc = spawn('ssh', [...args, host, probe], { windowsHide: true, env });
       let out = '';
       let err = '';
       proc.stdout?.on('data', (d) => { out += d.toString(); });
@@ -777,7 +813,8 @@ ipcMain.handle('claudecode:sshListDir', async (_event, host, dirPath) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     try {
-      const proc = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, cmd], { windowsHide: true });
+      const { args, env } = sshOneShotOptions();
+      const proc = spawn('ssh', [...args, host, cmd], { windowsHide: true, env });
       let out = '';
       let err = '';
       proc.stdout?.on('data', (d) => { out += d.toString(); });
@@ -794,6 +831,33 @@ ipcMain.handle('claudecode:sshListDir', async (_event, host, dirPath) => {
       finish({ ok: false, error: e.message || String(e) });
     }
   });
+});
+
+/**
+ * @ipc claudecode:sshSetPassword — Stores an encrypted password for the SSH
+ * target, as an alternative to key-based auth (see sshPasswordEnv()). Reuses
+ * the same secure-store as provider API keys, under a dedicated key that
+ * isn't part of KNOWN_PROVIDERS (this isn't a provider API key).
+ * @param {string} password
+ */
+ipcMain.handle('claudecode:sshSetPassword', (_event, password) => {
+  try {
+    secureStore.setKey('claude-code-ssh', password);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+/** @ipc claudecode:sshHasPassword — Whether a password is currently stored (never returns the value). */
+ipcMain.handle('claudecode:sshHasPassword', () => {
+  return { hasPassword: secureStore.hasKey('claude-code-ssh') };
+});
+
+/** @ipc claudecode:sshDeletePassword — Removes the stored password (key-based auth keeps working unaffected). */
+ipcMain.handle('claudecode:sshDeletePassword', () => {
+  secureStore.deleteKey('claude-code-ssh');
+  return { success: true };
 });
 
 /**

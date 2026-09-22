@@ -16,6 +16,9 @@ const {
   parseProbeOutput,
   buildListDirCommand,
   parseListDirOutput,
+  STRICT_HOST_KEY_OPT,
+  buildPasswordEnv,
+  buildOneShotSshArgs,
 } = require('../src/ssh-remote');
 
 describe('shellQuote', () => {
@@ -172,5 +175,53 @@ describe('parseListDirOutput', () => {
 
   test('Verzeichnis ohne Unterordner ergibt eine leere Liste, keinen Fehler', () => {
     expect(parseListDirOutput('/home/pi/leer\n')).toEqual({ path: '/home/pi/leer', dirs: [] });
+  });
+});
+
+describe('buildPasswordEnv', () => {
+  test('ohne Passwort: leeres Objekt (Key-Weg bleibt unberührt)', () => {
+    expect(buildPasswordEnv(null, 'C:\\askpass.cmd')).toEqual({});
+    expect(buildPasswordEnv(undefined, 'C:\\askpass.cmd')).toEqual({});
+    expect(buildPasswordEnv('', 'C:\\askpass.cmd')).toEqual({});
+  });
+
+  test('mit Passwort: SSH_ASKPASS-Env-Set inkl. erzwungenem Askpass', () => {
+    expect(buildPasswordEnv('geheim123', 'C:\\askpass.cmd')).toEqual({
+      SSH_ASKPASS: 'C:\\askpass.cmd',
+      SSH_ASKPASS_REQUIRE: 'force',
+      AGENT_DESKTOP_SSH_PW: 'geheim123',
+    });
+  });
+
+  test('landet nie in einem Kommandozeilen-Argument o.ä. — nur als Env-Wert', () => {
+    const env = buildPasswordEnv('p@ss; rm -rf /', 'C:\\askpass.cmd');
+    expect(env.AGENT_DESKTOP_SSH_PW).toBe('p@ss; rm -rf /');
+    expect(Object.values(env).join(' ')).not.toContain('askpass.cmd p@ss');
+  });
+});
+
+describe('buildOneShotSshArgs', () => {
+  test('ohne Passwort: BatchMode=yes, kein Askpass-Env (heutiges Verhalten unverändert)', () => {
+    const { args, env } = buildOneShotSshArgs(null, 'C:\\askpass.cmd');
+    expect(args).toContain('BatchMode=yes');
+    expect(env).toEqual({});
+  });
+
+  test('mit Passwort: kein BatchMode (würde Askpass unterdrücken), Askpass-Env gesetzt', () => {
+    const { args, env } = buildOneShotSshArgs('geheim123', 'C:\\askpass.cmd');
+    expect(args.join(' ')).not.toContain('BatchMode');
+    expect(env.SSH_ASKPASS).toBe('C:\\askpass.cmd');
+    expect(env.AGENT_DESKTOP_SSH_PW).toBe('geheim123');
+  });
+
+  test('enthält in beiden Fällen StrictHostKeyChecking=accept-new', () => {
+    expect(buildOneShotSshArgs(null, 'x').args).toEqual(expect.arrayContaining(STRICT_HOST_KEY_OPT));
+    expect(buildOneShotSshArgs('pw', 'x').args).toEqual(expect.arrayContaining(STRICT_HOST_KEY_OPT));
+  });
+
+  test('enthält -T (kein TTY) und einen ConnectTimeout', () => {
+    const { args } = buildOneShotSshArgs(null, 'x');
+    expect(args).toContain('-T');
+    expect(args).toContain('ConnectTimeout=10');
   });
 });

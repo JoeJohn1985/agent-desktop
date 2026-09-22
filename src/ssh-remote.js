@@ -102,6 +102,63 @@ function parseListDirOutput(stdout) {
   return { path, dirs };
 }
 
+// Trusts a never-before-seen host on first contact (like most GUI SSH tools),
+// but still refuses a later *changed* key — the actual MITM protection stays
+// intact. Without this, a brand-new host hangs forever on the "yes/no"
+// fingerprint prompt, since none of our spawns have a TTY to answer it on.
+const STRICT_HOST_KEY_OPT = ['-o', 'StrictHostKeyChecking=accept-new'];
+
+/**
+ * Env additions that make a spawned `ssh` authenticate with a password
+ * instead of a key, via a local SSH_ASKPASS helper. Pure: the decrypted
+ * password and the helper's path are passed in rather than looked up here,
+ * since the actual lookup (secure-store, Electron safeStorage) isn't
+ * available outside the main process / under plain Jest.
+ *
+ * SSH_ASKPASS_REQUIRE=force makes ssh invoke the helper even without a real
+ * TTY (needs OpenSSH 8.4+). The password only ever lives in the env block of
+ * the short-lived `ssh` (and its askpass grandchild) process — never on
+ * disk in plaintext, never as a command-line argument.
+ * @param {string|null|undefined} password
+ * @param {string} askpassHelperPath
+ * @returns {Object<string,string>} Empty object when no password is given.
+ */
+function buildPasswordEnv(password, askpassHelperPath) {
+  if (!password) return {};
+  return {
+    SSH_ASKPASS: askpassHelperPath,
+    SSH_ASKPASS_REQUIRE: 'force',
+    AGENT_DESKTOP_SSH_PW: password,
+  };
+}
+
+/**
+ * Args/env for a one-shot ssh command (connection probe, remote folder
+ * listing) — as opposed to the long-lived adapter connection, which is
+ * built separately (buildAdapterCommand + buildPasswordEnv directly).
+ *
+ * BatchMode=yes fails fast instead of hanging when no password is given
+ * (there's no TTY to prompt on either way). With a password it's omitted:
+ * per ssh_config(5), BatchMode also suppresses SSH_ASKPASS, which would
+ * silently defeat the password path.
+ * @param {string|null|undefined} password
+ * @param {string} askpassHelperPath
+ * @returns {{args: string[], env: Object<string,string>}}
+ */
+function buildOneShotSshArgs(password, askpassHelperPath) {
+  const env = buildPasswordEnv(password, askpassHelperPath);
+  const hasPassword = Object.keys(env).length > 0;
+  return {
+    args: [
+      '-T',
+      ...STRICT_HOST_KEY_OPT,
+      '-o', 'ConnectTimeout=10',
+      ...(hasPassword ? [] : ['-o', 'BatchMode=yes']),
+    ],
+    env,
+  };
+}
+
 module.exports = {
   shellQuote,
   buildAdapterCommand,
@@ -109,4 +166,7 @@ module.exports = {
   parseProbeOutput,
   buildListDirCommand,
   parseListDirOutput,
+  STRICT_HOST_KEY_OPT,
+  buildPasswordEnv,
+  buildOneShotSshArgs,
 };
