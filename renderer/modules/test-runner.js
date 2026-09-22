@@ -2,6 +2,17 @@
 // Extracted from app.js — Test runner popup and result rendering
 'use strict';
 
+/**
+ * Wire the test-runner popup's open/close/run buttons.
+ */
+function initTestRunner() {
+  document.getElementById('btnTests')?.addEventListener('click', openTestRunner);
+  document.getElementById('btnCloseTestRunner')?.addEventListener('click', closeTestRunner);
+  document.getElementById('btnRunTests')?.addEventListener('click', runTests);
+  document.getElementById('btnRunE2E')?.addEventListener('click', runE2E);
+  document.getElementById('btnRunCoverage')?.addEventListener('click', runCoverage);
+}
+
 function openTestRunner() {
   let backdrop = document.getElementById('testRunnerBackdrop');
   if (!backdrop) {

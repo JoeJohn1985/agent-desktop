@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.20.0] - 2026-09-22
+
+### Changed
+- **`renderer/app.js` in 15 Module aufgeteilt** (8457 → 2640 Zeilen, -69 %),
+  damit Änderungen an der App mit weniger Kontext pro Session möglich sind.
+  Zwölf neue Dateien unter `renderer/modules/` (u.a. Tab-Verwaltung, der
+  zentrale Agent-IPC-Dispatcher, Modell-/Provider-Katalog, Onboarding,
+  Plugins/Marketplace, Sessions-Sidebar, Skills/Agents/MCP,
+  Provider-Settings, Keyboard-Shortcuts, Drag&Drop, Self-Update, Chat-Suche)
+  plus drei bereits bestehende Module vervollständigt (`dev-console.js`,
+  `test-runner.js`, `utils.js`). Verhalten unverändert — reine
+  Umstrukturierung, nach jedem einzelnen Extraktionsschritt gegen die volle
+  Test-Suite verifiziert.
+- **Neue `CLAUDE.md`** im Projekt-Root: kompakte Orientierung für neue
+  Sessions (Renderer-Modulmuster, wo welche Logik hingehört, Plan-Workflow,
+  Commit-Konventionen) — Ergänzung zum ausführlichen `docs/ARCHITECTURE.md`.
+- `docs/ARCHITECTURE.md` an die neue Modulstruktur angepasst (Diagramm,
+  Dateitabelle, Modulübersicht).
+
+### Fixed
+- Ein Regressionstest in `integrity.test.js` verwies noch per Datei-Pfad auf
+  `app.js` für Inhalte, die jetzt in `modules/keyboard-shortcuts.js` liegen.
+
 ## [1.19.1] - 2026-09-17
 
 ### Fixed

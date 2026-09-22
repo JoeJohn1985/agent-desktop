@@ -4,7 +4,7 @@
 
 const devConsoleLogs = [];
 const DEV_CONSOLE_MAX_ENTRIES = 1000;
-const devConsoleFilter = 'all';
+let devConsoleFilter = 'all';
 
 function addDevConsoleEntry(entry) {
   devConsoleLogs.push(entry);
@@ -66,4 +66,53 @@ function updateStatus(text, color) {
 function updateStatusbar(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+/**
+ * Initialize the developer console panel: log capture, filtering,
+ * and renderer console re-wiring for live log display.
+ * Relies on globals provided elsewhere: showNotification (modules/utils.js).
+ */
+function initDevConsole() {
+  document.getElementById('btnDevConsole')?.addEventListener('click', toggleDevConsole);
+  document.getElementById('devConsoleClose')?.addEventListener('click', () => {
+    document.getElementById('devConsolePanel').style.display = 'none';
+  });
+  document.getElementById('devConsoleClear')?.addEventListener('click', () => {
+    devConsoleLogs.length = 0;
+    document.getElementById('devConsoleBody').innerHTML = '';
+  });
+
+  document.getElementById('devConsoleCopy')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const text = formatDevConsoleForClipboard();
+    if (!text) {
+      showNotification('Konsole ist leer', 'info');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      const original = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+      showNotification('Konsole kopiert', 'success');
+    } catch (err) {
+      showNotification(`Kopieren fehlgeschlagen: ${err.message}`, 'error');
+    }
+  });
+
+  document.querySelectorAll('.dev-console__filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.dev-console__filter').forEach(b => b.classList.remove('dev-console__filter--active'));
+      btn.classList.add('dev-console__filter--active');
+      devConsoleFilter = btn.dataset.level;
+      renderDevConsole();
+    });
+  });
+
+  if (desktop.devConsole) {
+    desktop.devConsole.onLog((entry) => addDevConsoleEntry(entry));
+  }
+  // Renderer logs already flow into addDevConsoleEntry via the single console
+  // override at the top of app.js — no replay or re-override needed here.
 }

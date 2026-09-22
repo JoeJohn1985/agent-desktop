@@ -133,8 +133,7 @@
 │  renderer/index.html  ─►  renderer/app.js  (chat, tab, settings logic)      │
 │                                                                              │
 │           ┌──────────────────── renderer/modules/ ──────────────────┐        │
-│           │ session-tools.js  images.js  todos.js  test-runner.js   │        │
-│           │ dev-console.js  costs.js  utils.js                      │        │
+│           │  16 files, one per concern — see §5.5 for the full list │        │
 │           └─────────────────────────────────────────────────────────┘        │
 │                              │                                               │
 │                              ▼ window.copilot.* / window.markdown.render     │
@@ -185,9 +184,9 @@
 | `main.js` | **Electron main process** — window creation, AcpClient management, IPC glue |
 | `preload.js` | **Context bridge** — exposes `window.copilot` and `window.markdown` |
 | `renderer/index.html` | **App shell** — custom titlebar, sidebar, chat area, settings overlay |
-| `renderer/app.js` | **Frontend logic** — chat UI, tab management, settings, cost visualization |
+| `renderer/app.js` | **Frontend logic** — tab management, agent-IPC event dispatch, model/provider catalog, settings init, usage/cost display glue (what hasn't been extracted into `renderer/modules/` yet — see §5.5 and `plans/app-js-modularization.md`) |
 | `renderer/styles.css` | **All styles** — CSS variables, 2 themes (Light/Dark) |
-| `renderer/modules/*.js` | **UI modules** — images, todos, test runner, session tools, dev console, cost panel |
+| `renderer/modules/*.js` | **UI modules**, one per concern — see §5.5 for the full list |
 | `src/acp-client.js` | **AcpClient** (Copilot backend) — JSON-RPC over NDJSON stdio, session management, silentCommand |
 | `src/providers/*.js` | **Direct-API backends** — registry, `ApiAgentClient` (agent loop), Anthropic adapter, tool runtime, session store, system context |
 | `src/secure-store.js` | **Encrypted API-key storage** (Electron `safeStorage`) |
@@ -252,15 +251,33 @@ API keys are stored encrypted in the OS keychain (`src/secure-store.js`); the pl
 
 ### 5.5 Renderer modules
 
+All flat classic scripts, no bundler — see the renderer-structure note at
+the top of the project's `CLAUDE.md` for the load-order/global-scope
+mechanics. Loaded before `app.js`, in this order:
+
 | Module | Purpose |
 |---|---|
-| `session-tools.js` | UI for session-specific denied tools (popup, toggle, process restart) |
-| `costs.js` | Cost-log persistence and the "Cost" page (stacked bar chart + breakdown) |
-| `images.js` | Image thumbnails, lightbox, drag&drop into the chat |
+| `utils.js` | Shared UI constants + generic helpers (tags, button-busy, empty-state, toasts, notification sound, date formatting, tooltips) |
+| `dev-console.js` | UI counterpart to the browser dev console (log capture, filter, copy) |
 | `todos.js` | Per-session task list with IPC backend |
+| `images.js` | Image thumbnails, lightbox, drag&drop into the chat |
 | `test-runner.js` | Frontend for Jest/Playwright/coverage |
-| `dev-console.js` | UI counterpart to the browser dev console |
-| `utils.js` | DOM helpers |
+| `session-tools.js` | UI for session-specific denied tools (popup, toggle, process restart) |
+| `costs.js` | Cost-log persistence and the "Cost" page (stacked bar chart + breakdown + Claude token-history) |
+| `skills-mcp.js` | Skills/Agents/MCP sidebar rendering, per-tab context loading, MCP status probing |
+| `sessions-sidebar.js` | Named-session list: search, rename, resume, delete, history-bubble rendering on resume |
+| `keyboard-shortcuts.js` | Configurable shortcut definitions, rebind settings panel, global keydown dispatch |
+| `drag-drop.js` | Whole-window file-drop handling |
+| `self-update.js` | Git-based app self-update + Claude Code ACP adapter update checker |
+| `provider-settings.js` | API-provider key/base-URL settings, dynamically-generated per-provider config tabs, Claude Code (SSH) remote-folder picker |
+| `chat-search.js` | In-chat search bar (Ctrl+F) |
+| `plugins.js` | Plugin/marketplace manager + chat/plugins/costs main-view switching |
+| `onboarding.js` | First-run wizard (cwd/provider/folders/role) + post-onboarding tutorial popups |
+
+The last nine were extracted from `renderer/app.js` in one pass (see
+`plans/app-js-modularization.md`); tab management, the agent-IPC event
+dispatcher, and the model/provider catalog remain in `app.js` on purpose —
+too tightly coupled for a mechanical split.
 
 ### 5.6 `src/renderer-logic.js` — pure logic
 
@@ -665,7 +682,7 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 
 | # | Risk / debt | Impact | Mitigation |
 |---|---|---|---|
-| R-1 | **`renderer/app.js` is ~2.5k lines, procedural** | Hard to navigate | Gradual modularization into `renderer/modules/` started |
+| R-1 | **`renderer/app.js` is ~4.7k lines, procedural** (was ~8.5k before the Phase-1 modularization pass) | Hard to navigate | Phase 1 done — 9 self-contained clusters moved to `renderer/modules/`. Remaining: tab management, `initAgentIPC`, model/provider catalog, `initSettings` — deferred (Phase 2) as too tightly coupled for a mechanical split. See `plans/app-js-modularization.md`. |
 | R-2 | **ACP is an unofficial API** | A CLI update can change the protocol | `acp-client.js` encapsulates all ACP details; changes stay localized |
 | R-3 | **`/usage` reports "AI Units" instead of "AI Credits"** | The credit display is based on token calculation, not the official number | Track whether ACP will provide credits in the future; token calculation as fallback |
 | R-4 | **No automated E2E smoke test for the chat roundtrip** | Regressions surface only manually | Playwright stub present in `e2e/` |

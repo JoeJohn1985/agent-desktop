@@ -306,7 +306,7 @@ describe('Projektstruktur', () => {
 // ── Keyboard-Shortcuts: HTML/CSS-Integrität ─────────────────
 
 describe('Keyboard-Shortcuts UI-Integrität', () => {
-  const rendererAppJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf-8');
+  const rendererShortcutsJs = fs.readFileSync(path.join(ROOT, 'renderer', 'modules', 'keyboard-shortcuts.js'), 'utf-8');
 
   // HTML-Elemente die der Shortcuts-Code anspricht
   // Note: btnShortcutsHelp was intentionally removed from the sidebar;
@@ -352,16 +352,16 @@ describe('Keyboard-Shortcuts UI-Integrität', () => {
     expect(css).toMatch(regex);
   });
 
-  test('renderer/app.js initialisiert Shortcuts-System', () => {
-    expect(rendererAppJs).toContain('initKeyboardShortcuts');
-    expect(rendererAppJs).toContain('renderShortcutsHelp');
-    expect(rendererAppJs).toContain('initShortcutsSettings');
+  test('modules/keyboard-shortcuts.js definiert Shortcuts-System', () => {
+    expect(rendererShortcutsJs).toContain('initKeyboardShortcuts');
+    expect(rendererShortcutsJs).toContain('renderShortcutsHelp');
+    expect(rendererShortcutsJs).toContain('initShortcutsSettings');
   });
 
-  test('renderer/app.js und src/shortcuts.js bleiben in Sync (SHORTCUT_DEFS-IDs)', () => {
+  test('modules/keyboard-shortcuts.js und src/shortcuts.js bleiben in Sync (SHORTCUT_DEFS-IDs)', () => {
     const { SHORTCUT_DEFS } = require('../src/shortcuts');
     for (const def of SHORTCUT_DEFS) {
-      expect(rendererAppJs).toMatch(new RegExp(`id:\\s*['"]${def.id}['"]`));
+      expect(rendererShortcutsJs).toMatch(new RegExp(`id:\\s*['"]${def.id}['"]`));
     }
   });
 });
