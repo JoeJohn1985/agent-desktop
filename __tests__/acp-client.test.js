@@ -270,6 +270,25 @@ describe('AcpClient', () => {
       await flushPromises();
     });
 
+    it('spawnt mit options.cwd als lokalem Arbeitsverzeichnis, wenn kein spawnCwd gesetzt ist', async () => {
+      client = new AcpClient('tab-1', mockSendToRenderer, { cwd: '/some/local/dir' });
+      client.start();
+      await flushPromises();
+
+      expect(mockSpawnFn.mock.calls[0][2]).toMatchObject({ cwd: '/some/local/dir' });
+    });
+
+    it('spawnt mit options.spawnCwd statt options.cwd, wenn gesetzt — cwd bleibt für session/new der Remote-Pfad (Claude Code SSH), spawnCwd ist ein echtes lokales Verzeichnis für den ssh-Prozess selbst', async () => {
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        cwd: '/home/pi/projekt',
+        spawnCwd: 'C:\\local\\dir',
+      });
+      client.start();
+      await flushPromises();
+
+      expect(mockSpawnFn.mock.calls[0][2]).toMatchObject({ cwd: 'C:\\local\\dir' });
+    });
+
     it.each(['low', 'medium', 'high', 'xhigh', 'max'])(
       'übergibt die gültige Reasoning-Stufe "%s" beim Prozessstart',
       async (effort) => {

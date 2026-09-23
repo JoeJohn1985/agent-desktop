@@ -143,5 +143,148 @@ Klartext auf der Platte, nie als Kommandozeilen-Argument.
 ## Status
 
 Umsetzung fertig, automatisiert verifiziert (Tests, Lint, plus ein manueller
-Exploit-Test des Askpass-Helpers mit Sonderzeichen). **Noch nicht gegen den
-echten Pi getestet** — das ist der nächste Schritt mit dem Nutzer.
+Exploit-Test des Askpass-Helpers mit Sonderzeichen).
+
+### Nachtrag: UI-Restrukturierung + Styling (nach erstem Screenshot-Feedback)
+
+- SSH-Ziel wird jetzt in der Provider-Zeile "Claude Code (SSH)" eingegeben
+  (wie API-Keys anderer Provider), nicht mehr im eigenen Tab. Der "CC (SSH)"-
+  Tab erscheint wieder erst, sobald dort ein Host gespeichert ist (Rückbau
+  des Force-Includes von vorhin — das eigentliche Henne-Ei-Problem ist durch
+  die Zeile gelöst, nicht durch einen immer sichtbaren Tab).
+- Styling-Bug behoben: `settings__input` existierte gar nicht in
+  `styles.css` → Browser-Default (weiße Boxen). Neu definiert, plus
+  `-webkit-autofill`-Override gegen Chromiums Login-Formular-Heuristik.
+  Live in der laufenden App verifiziert (Playwright/`_electron`, isolierte
+  `preferences.test.json` — nichts an echten Nutzereinstellungen verändert).
+
+### Nachtrag: erster echter Test gegen den Pi — `spawn ssh ENOENT`
+
+Erster Test des Nutzers (SSH manuell eingerichtet, Terminal-Login
+funktioniert) schlug in der App fehl: `spawn ssh ENOENT`. Ursache:
+`spawn('ssh', …, { shell: false })` verlässt sich auf Node/Windows'
+PATH-Auflösung des *aufrufenden* Prozesses — bei einem über Explorer/
+Startmenü gestarteten Prozess kann das ein anderer (älterer) PATH-Stand
+sein als in einem frisch geöffneten Terminal, das PATH bei jedem Start neu
+liest. Eigene Stichprobe bestätigt zusätzlich, dass der aufgelöste
+`ssh`-Pfad je nach Prozess/Shell unterschiedlich ausfallen kann (Git's
+eigenes `ssh.exe` vs. das von Windows) — reine PATH-Auflösung ist hier
+grundsätzlich nicht robust genug.
+
+**Fix:** `resolveSshExecutable()` (main.js, Zwilling von
+`resolveClaudeExecutable()`) löst den absoluten Pfad einmalig über
+`where`/`which` auf (das selbst über eine Shell läuft — sicher, da feste,
+nicht nutzergesteuerte Argumente) und cacht ihn. Fällt `where` leer aus,
+zusätzlicher Fallback auf den Standard-Installationspfad
+`C:\Windows\System32\OpenSSH\ssh.exe` (Existenzprüfung). Der eigentliche
+SSH-Aufruf bleibt bewusst `shell: false` — der schon POSIX-shell-quotierte
+Remote-Befehl darf nicht noch einmal von einer lokalen `cmd.exe` geparst
+werden (`&&` würde sonst als lokaler Verkettungsoperator gelesen).
+Betrifft alle drei SSH-Spawn-Stellen (Adapter-Start, Verbindungstest,
+Ordner-Browser) — `claudeCodeClientOptions()` und `sshOneShotOptions()`
+mussten dafür async werden (ein Aufrufer je Funktion, beide bereits async).
+
+**Diese Erklärung war unvollständig.** Der Nutzer fragte zurecht nach, wieso
+der Ordner-Browser (derselbe `spawn('ssh', …)`) funktionierte, der
+Chat-Start aber nicht — mit obigem Fix allein nicht erklärbar, da beide
+denselben PATH sehen. Eigene Nachprüfung (zunächst mit einem eigenen
+Bash-Escaping-Fehler in die falsche Richtung gelaufen, dann mit einem
+sauberen Testskript korrekt reproduziert) fand die eigentliche Ursache:
+`AcpClient` übergibt `cwd` sowohl als ACP-Protokoll-Parameter (`session/new`)
+als auch **eins zu eins als lokale Node-`spawn()`-cwd**. Für
+`claude-code-ssh` ist `cwd` aber ein Remote-Pfad (z.B. `/home/pi/projekt`)
+— kein gültiges lokales Windows-Verzeichnis. Sauber reproduziert:
+`spawn('ssh', ['-V'], { cwd: '/home/pi/projekt' })` scheitert exakt mit
+`spawn ssh ENOENT`, Wort für Wort die Meldung des Nutzers; ohne diese cwd
+oder mit einem echten lokalen Pfad läuft derselbe Aufruf sauber durch. Der
+Ordner-Browser (`claudecode:sshListDir`) setzt gar kein `cwd` beim Spawn —
+deshalb funktionierte er, während der Chat-Start (der `cwd` durchreicht)
+scheiterte.
+
+**Zweiter, eigentlicher Fix:** `AcpClient` (`src/acp-client.js`) trennt jetzt
+`#cwd` (ACP-Protokoll-Wert, bleibt der Remote-Pfad) von `#spawnCwd` (lokales
+Verzeichnis für den `spawn()`-Aufruf selbst, Default weiterhin `#cwd` —
+unverändertes Verhalten für Copilot/lokales Claude Code). `main.js`s
+`claudeCodeClientOptions()` setzt für die SSH-Variante explizit
+`spawnCwd: process.cwd()`. Zwei neue Tests in `__tests__/acp-client.test.js`
+sichern beide Fälle ab (mit/ohne `spawnCwd`).
+
+`resolveSshExecutable()` bleibt trotzdem sinnvoll (adressiert ein reales,
+wenn auch selteneres PATH-Problem bei Explorer-gestarteten Prozessen) — war
+in diesem konkreten Fall aber nicht die eigentliche Ursache.
+
+### Nachtrag: nach dem `spawnCwd`-Fix — `Process exited (code=127)`
+
+Nächster Fehler nach dem `spawnCwd`-Fix: `code=127`, die Unix-Konvention für
+"Befehl nicht gefunden" — diesmal auf dem **Pi**, nicht lokal. Mit dem
+Nutzer eingegrenzt: `ssh <ziel> "npx --version"` lief zunächst unklar durch,
+aber der exakte, von der App gebaute Befehl
+(`ssh <ziel> "cd '<cwd>' && npx -y '<paket>'"`) lieferte reproduzierbar
+`bash: line 1: npx: command not found`.
+
+**Ursache:** SSH führt einen mitgegebenen Befehl standardmäßig in einer
+nicht-interaktiven, nicht-Login-Shell aus. Viele Node-Installationen (allen
+voran `nvm`, mit Abstand am häufigsten) tragen ihren PATH-Eintrag nur in
+`~/.bashrc` ein — die aber von bash für nicht-interaktive Shells übersprungen
+wird. Deshalb funktioniert `npx` beim normalen, interaktiven Einloggen
+klaglos, aber nicht bei einem einzelnen SSH-Befehl wie diesem.
+
+**Fix:** `SOURCE_NVM_PREFIX` (`src/ssh-remote.js`) — lädt `~/.nvm/nvm.sh`
+still nach (`[ -s ... ] && . ... >/dev/null 2>&1`), falls vorhanden, bevor
+der eigentliche Befehl läuft. Bewusst **nicht** über eine Login-/interaktive
+Shell (`bash -lic`) gelöst, obwohl das Quoting dafür geprüft und funktional
+bestätigt wurde (verschachteltes `shellQuote()` übersteht auch Pfade mit
+eingebetteten Anführungszeichen, per echtem Bash-Test verifiziert) — das
+Risiko, dass irgendein Login-Banner/`.bashrc`-Echo den JSON-RPC-Stream des
+Adapters auf stdout verunreinigt, wog schwerer als der Vorteil, auch andere
+Versionsmanager (asdf etc.) automatisch abzudecken. Betrifft
+`buildAdapterCommand()` und `buildProbeCommand()` (der Verbindungstest nutzt
+`node`/`claude` genauso) — `buildListDirCommand()` bewusst unverändert, da
+`cd`/`pwd`/`ls` nie von `nvm` abhängen.
+
+Fünf neue/angepasste Tests in `__tests__/ssh-remote.test.js`. Volle Suite:
+51/51 Suiten, 1847/1847 Tests grün, ESLint unverändert.
+
+**Falls das nicht reicht** (z.B. weil der Nutzer `asdf` statt `nvm` nutzt,
+oder Node an einem ganz anderen Ort liegt): nächster Schritt wäre, den
+Nutzer nach dem Ergebnis von `ssh <ziel> "which npx"` zu fragen und den
+tatsächlichen Pfad direkt in `PATH` einzuhängen, statt zu raten.
+
+### Nachtrag: eigentliche Ursache — Node.js war auf dem Pi gar nicht installiert
+
+Der `SOURCE_NVM_PREFIX`-Fix lief ins Leere. Eingrenzung mit dem Nutzer:
+interaktiver und nicht-interaktiver `PATH` waren identisch (keine
+PATH-Diskrepanz), `which npx` blieb stumm, und `npx --version` direkt in
+einer normalen interaktiven SSH-Sitzung ergab ebenfalls
+`-bash: npx: command not found`. `node --version` bestätigte es endgültig:
+`-bash: node: command not found`. `claude --version` lief trotzdem
+(`2.1.280`) — die Claude-Code-CLI ist ein eigenständiges Binary ohne
+Node.js-Laufzeitabhängigkeit, weshalb dieser eine Teilcheck fälschlich
+"alles ok" suggerierte.
+
+**Es war also nie ein App- oder Quoting-Bug** — auf dem Pi fehlte
+Node.js/npm/npx schlicht komplett. Alle Code-Fixes dieser Session
+(`resolveSshExecutable`, `spawnCwd`-Trennung, `SOURCE_NVM_PREFIX`) bleiben
+sinnvolle, korrekte Härtungen für andere Fälle, waren aber für **dieses**
+Problem nicht die Lösung.
+
+Zusätzlich geprüft (npm-Registry): der ACP-Adapter
+(`@agentclientprotocol/claude-agent-acp@0.79.0`) verlangt `engines.node:
+">=22"` — eine bloße Nachinstallation hätte also nicht gereicht, es musste
+mindestens Node 22 sein.
+
+**Lösung (auf dem Pi, nicht im Code):** Node 22 via NodeSource-Setup-Skript
+installiert (`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E
+bash -` gefolgt von `apt-get install -y nodejs`). Ein erster Versuch brach
+mitten im `needrestart`-Dialog ab (Strg+C riss vermutlich den ganzen
+`apt`-Vorgang mit ab), zweiter Versuch mit `apt-get install -f -y` zum
+Reparieren plus sauberem Durchklicken des Dialogs war erfolgreich.
+Verifiziert: `node --version` → `v22.23.2`, `npx --version` → `10.9.8`.
+
+## Status
+
+Erster echter End-to-End-Test (Tab öffnen, Nachricht senden über
+`claude-code-ssh`) vom Nutzer bestätigt erfolgreich. Damit ist die gesamte
+SSH-Passwort-Auth-Arbeit plus alle Nachtrags-Fixes (UI-Umbau, `spawnCwd`,
+`resolveSshExecutable`, `SOURCE_NVM_PREFIX`) funktional abgeschlossen und
+gegen den echten Pi verifiziert. Alles weiterhin uncommitted.

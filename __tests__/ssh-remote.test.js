@@ -11,6 +11,7 @@
 
 const {
   shellQuote,
+  SOURCE_NVM_PREFIX,
   buildAdapterCommand,
   buildProbeCommand,
   parseProbeOutput,
@@ -65,16 +66,26 @@ describe('shellQuote', () => {
 describe('buildAdapterCommand', () => {
   test('wechselt ins Verzeichnis und ersetzt die Shell durch den Adapter', () => {
     expect(buildAdapterCommand('/home/pi/projekt', 'pkg@1.2.3'))
-      .toBe("cd '/home/pi/projekt' && exec npx -y 'pkg@1.2.3'");
+      .toBe(`${SOURCE_NVM_PREFIX}cd '/home/pi/projekt' && exec npx -y 'pkg@1.2.3'`);
   });
 
   test('quotet sowohl Verzeichnis als auch Paketangabe', () => {
     const cmd = buildAdapterCommand('/tmp; evil', 'pkg@1.0; evil');
-    expect(cmd).toBe("cd '/tmp; evil' && exec npx -y 'pkg@1.0; evil'");
+    expect(cmd).toBe(`${SOURCE_NVM_PREFIX}cd '/tmp; evil' && exec npx -y 'pkg@1.0; evil'`);
   });
 
   test('nutzt exec, damit kein Shell-Prozess zwischen SSH und Adapter bleibt', () => {
     expect(buildAdapterCommand('/x', 'p@1')).toContain('&& exec npx');
+  });
+
+  test('lädt nvm vorab, falls vorhanden — deckt Node-Installationen ab, deren PATH-Eintrag nur in ~/.bashrc steht (von SSH nicht-interaktiv nicht geladen)', () => {
+    const cmd = buildAdapterCommand('/x', 'p@1');
+    expect(cmd).toContain('.nvm/nvm.sh');
+    expect(cmd.indexOf('.nvm/nvm.sh')).toBeLessThan(cmd.indexOf('cd '));
+  });
+
+  test('nvm-Vorlauf ist still (Ausgabe umgeleitet) — darf den JSON-RPC-Stream des Adapters nicht verunreinigen', () => {
+    expect(buildAdapterCommand('/x', 'p@1')).toContain('>/dev/null 2>&1');
   });
 });
 
@@ -96,6 +107,10 @@ describe('buildProbeCommand', () => {
 
   test('quotet einen bösartigen cwd', () => {
     expect(buildProbeCommand('/tmp; rm -rf /')).toContain("[ -d '/tmp; rm -rf /' ]");
+  });
+
+  test('lädt nvm vorab, falls vorhanden (gleiche Begründung wie bei buildAdapterCommand)', () => {
+    expect(buildProbeCommand()).toContain('.nvm/nvm.sh');
   });
 
   test('fängt fehlende Programme ab, statt das Skript abzubrechen', () => {

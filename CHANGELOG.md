@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.21.2] - 2026-09-23
+
+### Changed
+- **SSH-Ziel für Claude Code (SSH) wird jetzt in der Provider-Zeile
+  eingegeben** (Settings → Provider), genau wie API-Key/Base-URL bei den
+  anderen Anbietern — statt in einem eigenen Tab, der vorher fälschlich
+  immer sichtbar war. Der "CC (SSH)"-Tab (Arbeitsverzeichnis, Passwort,
+  Verbindungstest) erscheint wieder erst, sobald dort ein Host gespeichert
+  ist.
+- Eingabefelder in den Provider-Einstellungen nutzten teils eine nicht
+  existierende CSS-Klasse (reines Browser-Default-Styling, weiße Boxen statt
+  dunklem Theme) — behoben, plus eine Absicherung gegen Chromiums
+  Autofill-Heuristik, die benachbarte Host-/Passwort-Felder fälschlich als
+  Login-Formular erkennen und neu einfärben kann.
+
+### Fixed
+- **`spawn ssh ENOENT` beim Start eines Claude-Code-(SSH)-Chats.** Ursache:
+  `spawn('ssh', …, { shell: false })` verlässt sich auf die PATH-Auflösung
+  des aufrufenden Prozesses — bei einem über Startmenü/Taskleiste
+  gestarteten Prozess kann das ein älterer Stand sein als in einem frisch
+  geöffneten Terminal. Der absolute Pfad zu `ssh.exe` wird jetzt einmalig
+  aufgelöst (`where`/`which`, mit Fallback auf den Windows-Standardpfad)
+  und wiederverwendet.
+- **Derselbe Fehler hatte noch eine zweite, eigentliche Ursache:** Der
+  Remote-Arbeitsverzeichnis-Pfad (z.B. `/home/pi/projekt`) wurde
+  fälschlich auch als *lokales* Arbeitsverzeichnis für den `ssh`-Prozess
+  selbst verwendet — kein gültiger Windows-Pfad, wodurch `spawn()`
+  irreführend mit `ENOENT` auf `ssh.exe` statt auf das Verzeichnis
+  fehlschlug. ACP-Protokoll-cwd (bleibt der Remote-Pfad) und
+  Spawn-cwd (jetzt ein echtes lokales Verzeichnis) sind jetzt getrennt.
+- **`Process exited (code=127)` beim Start.** Node.js/`npx` waren über
+  einen einzelnen SSH-Befehl nicht auffindbar, obwohl in einer normalen
+  interaktiven SSH-Sitzung erreichbar — typisch bei `nvm`-Installationen,
+  deren PATH-Eintrag nur in `~/.bashrc` steht (die bash für
+  nicht-interaktive Befehle überspringt). Die App lädt `~/.nvm/nvm.sh`
+  jetzt still nach, falls vorhanden, bevor der eigentliche Befehl läuft.
+
 ## [1.21.1] - 2026-09-23
 
 ### Fixed

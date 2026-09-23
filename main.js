@@ -313,12 +313,15 @@ function createWindow() {
  * @param {string} cwd - Working directory. Remote path when sshHost is set.
  * @param {{sshHost?: string}} [opts]
  */
-function claudeCodeClientOptions(cwd, { sshHost } = {}) {
+async function claudeCodeClientOptions(cwd, { sshHost } = {}) {
   const adapterSpec = `${claudeAdapterUpdate.PACKAGE_NAME}@${getClaudeAdapterVersion()}`;
   if (sshHost) {
     return {
       cwd,
-      command: 'ssh',
+      // Absolute path, not the bare string 'ssh': spawn() without a shell
+      // (below) has been observed to ENOENT on a bare command name even
+      // though `ssh` resolves fine in a terminal — see resolveSshExecutable().
+      command: await resolveSshExecutable(),
       // -T: no TTY. The adapter speaks newline-delimited JSON-RPC over stdio,
       // and a TTY would inject terminal control sequences into that stream.
       // StrictHostKeyChecking=accept-new: trust a never-before-seen host on
@@ -329,8 +332,11 @@ function claudeCodeClientOptions(cwd, { sshHost } = {}) {
       // remote home directory; both it and the adapter spec are shell-quoted
       // since SSH concatenates its arguments into one remote shell command.
       baseArgs: ['-T', ...sshRemote.STRICT_HOST_KEY_OPT, sshHost, sshRemote.buildAdapterCommand(cwd, adapterSpec)],
-      // ssh is a real executable (OpenSSH ships with Windows) — unlike npx,
-      // which is a .cmd shim, so no shell wrapper is needed here.
+      // Deliberately no shell even though we resolved an absolute .exe path:
+      // the remote command above is already POSIX-shell-quoted for the
+      // REMOTE end, and running it through a LOCAL shell too (cmd.exe) would
+      // re-tokenize that same string a second time — e.g. its "&&" would be
+      // read as cmd.exe's own chaining operator, corrupting the argument.
       shell: false,
       localCommandStdout: true,
       useConfigOptions: true,
@@ -338,6 +344,13 @@ function claudeCodeClientOptions(cwd, { sshHost } = {}) {
       // Password auth (if configured) instead of a key — see sshPasswordEnv().
       // Empty object when only a key is set up, so that path is unaffected.
       env: sshPasswordEnv(),
+      // `cwd` above is the REMOTE path (already applied via `cd` inside
+      // baseArgs) — not a valid local directory to spawn ssh.exe *in*.
+      // Passing it as Node's spawn cwd anyway has been observed to make
+      // spawn fail outright (misleadingly, as ENOENT on ssh.exe itself, not
+      // on the cwd) since it isn't a local Windows path. spawnCwd overrides
+      // just that, independently of the ACP-protocol cwd above.
+      spawnCwd: process.cwd(),
       // No stripEnv/CLAUDE_CODE_EXECUTABLE: both target the LOCAL environment,
       // which the remote process doesn't inherit anyway.
     };
@@ -396,14 +409,15 @@ function sshPasswordEnv() {
 }
 
 /**
- * Shared `ssh` args/env for the one-shot helper commands (connection probe,
- * remote folder listing) — as opposed to the long-lived adapter connection,
- * which goes through claudeCodeClientOptions() instead.
- * @returns {{args: string[], env: Object<string,string>}}
+ * Shared `ssh` command/args/env for the one-shot helper commands (connection
+ * probe, remote folder listing) — as opposed to the long-lived adapter
+ * connection, which goes through claudeCodeClientOptions() instead.
+ * @returns {Promise<{command: string, args: string[], env: Object<string,string>}>}
  */
-function sshOneShotOptions() {
+async function sshOneShotOptions() {
+  const command = await resolveSshExecutable();
   const built = sshRemote.buildOneShotSshArgs(secureStore.getKey('claude-code-ssh'), SSH_ASKPASS_HELPER);
-  return { args: built.args, env: { ...process.env, ...built.env } };
+  return { command, args: built.args, env: { ...process.env, ...built.env } };
 }
 
 /** The pinned adapter version to launch (user override from Settings, else the built-in default). */
@@ -445,6 +459,57 @@ function resolveClaudeExecutable() {
     } catch (_) {
       _claudeExecutablePath = '';
       resolve('');
+    }
+  });
+}
+
+// Cached path to the `ssh` binary (resolved lazily, once). undefined = not
+// yet looked up; always ends up a non-empty string ('ssh' itself on failure).
+let _sshExecutablePath;
+
+/**
+ * Resolves the absolute path of the `ssh` executable (cached).
+ *
+ * spawn('ssh', …, { shell: false }) can fail with ENOENT even though `ssh`
+ * works fine in a terminal: Explorer-launched processes (Start Menu/taskbar)
+ * inherit whatever PATH Explorer itself had at *its* last start, which can
+ * predate a PATH change — a fresh terminal re-reads PATH on every launch and
+ * doesn't show the problem. Resolving once via where/which and reusing the
+ * absolute path sidesteps that regardless of cause. The resolver call itself
+ * uses a shell (safe — fixed args, nothing user-controlled); the actual ssh
+ * calls that use the result stay shell:false, so the already shell-quoted
+ * remote command isn't re-parsed by a local shell too.
+ * @returns {Promise<string>} Absolute path, or 'ssh' if resolution failed
+ *   (falls back to relying on PATH, same as before this existed).
+ */
+// Standard Win32-OpenSSH install location (present on Windows 10 1809+ and
+// 11 by default) — tried directly if where/which comes back with nothing,
+// since PATH-based resolution is exactly the thing that's unreliable here.
+const WIN32_DEFAULT_SSH_PATH = 'C:\\Windows\\System32\\OpenSSH\\ssh.exe';
+
+function resolveSshExecutable() {
+  if (_sshExecutablePath !== undefined) return Promise.resolve(_sshExecutablePath);
+  return new Promise((resolve) => {
+    const settle = (value) => { _sshExecutablePath = value; resolve(value); };
+    const fallback = () => {
+      if (process.platform === 'win32') {
+        try { if (fs.existsSync(WIN32_DEFAULT_SSH_PATH)) return settle(WIN32_DEFAULT_SSH_PATH); } catch (_) { /* ignore */ }
+      }
+      settle('ssh');
+    };
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    try {
+      const proc = spawn(finder, ['ssh'], { shell: true, windowsHide: true });
+      let out = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.on('error', fallback);
+      proc.on('close', () => {
+        const first = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+        if (first) settle(first); else fallback();
+      });
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } if (_sshExecutablePath === undefined) fallback(); }, 4000);
+    } catch (_) {
+      fallback();
     }
   });
 }
@@ -493,7 +558,7 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
     // Only relevant locally: the remote host resolves its own `claude` binary.
     if (!sshHost) await resolveClaudeExecutable();
     clientOptions = {
-      ...claudeCodeClientOptions(cwd, { sshHost }),
+      ...(await claudeCodeClientOptions(cwd, { sshHost })),
       // No app-side auto-approve override here: Claude Code's own permission
       // mode (default/acceptEdits/plan/bypassPermissions, set via options.mode)
       // is the single source of truth for whether it asks before acting.
@@ -765,17 +830,18 @@ ipcMain.handle('claudecode:testSsh', async (_event, host, cwd) => {
   if (!host || typeof host !== 'string') return { ok: false, error: 'Kein SSH-Ziel angegeben' };
 
   const probe = sshRemote.buildProbeCommand(cwd);
+  // BatchMode (no stored password): fail instead of blocking forever on a
+  // password prompt there's no TTY to type into. With a stored password,
+  // sshOneShotOptions() drops BatchMode and wires up askpass instead — see
+  // its doc comment for why the two are mutually exclusive. Resolved before
+  // the Promise below since its executor can't itself be async.
+  const { command, args, env } = await sshOneShotOptions();
 
   return new Promise((resolve) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     try {
-      // BatchMode (no stored password): fail instead of blocking forever on
-      // a password prompt there's no TTY to type into. With a stored
-      // password, sshOneShotOptions() drops BatchMode and wires up askpass
-      // instead — see its doc comment for why the two are mutually exclusive.
-      const { args, env } = sshOneShotOptions();
-      const proc = spawn('ssh', [...args, host, probe], { windowsHide: true, env });
+      const proc = spawn(command, [...args, host, probe], { windowsHide: true, env });
       let out = '';
       let err = '';
       proc.stdout?.on('data', (d) => { out += d.toString(); });
@@ -808,13 +874,14 @@ ipcMain.handle('claudecode:sshListDir', async (_event, host, dirPath) => {
   if (!host || typeof host !== 'string') return { ok: false, error: 'Kein SSH-Ziel angegeben' };
 
   const cmd = sshRemote.buildListDirCommand(dirPath);
+  // Resolved before the Promise below since its executor can't itself be async.
+  const { command, args, env } = await sshOneShotOptions();
 
   return new Promise((resolve) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     try {
-      const { args, env } = sshOneShotOptions();
-      const proc = spawn('ssh', [...args, host, cmd], { windowsHide: true, env });
+      const proc = spawn(command, [...args, host, cmd], { windowsHide: true, env });
       let out = '';
       let err = '';
       proc.stdout?.on('data', (d) => { out += d.toString(); });

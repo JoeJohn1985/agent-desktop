@@ -1124,6 +1124,38 @@ body {
   border-color: var(--accent);
 }
 
+.settings__input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.settings__input:focus {
+  border-color: var(--accent);
+}
+
+/* Chromium's autofill heuristics can flag a host/password field pair as a
+   login form and repaint them with its own white/yellow background,
+   overriding the rules above — the long transition delay is the standard
+   trick to keep that from ever becoming visible. */
+.settings__input:-webkit-autofill,
+.settings__input:-webkit-autofill:hover,
+.settings__input:-webkit-autofill:focus,
+.settings__folder-input:-webkit-autofill,
+.settings__folder-input:-webkit-autofill:hover,
+.settings__folder-input:-webkit-autofill:focus,
+.providers-row__input:-webkit-autofill,
+.providers-row__input:-webkit-autofill:hover,
+.providers-row__input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-base) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 /* ── Instructions Editor Modal ───────────────────────── */
 .instructions-editor-overlay {
   position: fixed;

@@ -30,7 +30,8 @@ class AcpClient extends EventEmitter {
   #tabId;
   #sendToRenderer;
   #options;      // CLI options (model, deniedTools, addDirs, etc.)
-  #cwd;
+  #cwd;          // ACP-protocol cwd (session/new, session/load) — local OR remote path
+  #spawnCwd;     // LOCAL directory the child process itself is spawned in (see constructor)
   #copilotBin;
   #baseArgs = null;   // fixed spawn args for a non-Copilot ACP adapter (else null)
   #stripEnv = [];     // env vars removed from the child (e.g. ANTHROPIC_API_KEY)
@@ -78,7 +79,15 @@ class AcpClient extends EventEmitter {
    * @param {number} tabId - Tab identifier
    * @param {Function} sendToRenderer - Function to send IPC messages (channel, ...args)
    * @param {Object} [options={}] - Configuration
-   * @param {string} [options.cwd] - Working directory
+   * @param {string} [options.cwd] - Working directory sent as the ACP-protocol
+   *   cwd (session/new, session/load). For the SSH Claude Code variant this is
+   *   a path on the REMOTE host, not this machine.
+   * @param {string} [options.spawnCwd] - LOCAL directory to spawn the child
+   *   process in. Defaults to options.cwd, which is correct whenever that's
+   *   already a local path (Copilot, local Claude Code) — but a remote SSH
+   *   cwd is not a valid local directory, so the SSH provider passes this
+   *   explicitly. Node's spawn() has been observed to fail (misleadingly, as
+   *   ENOENT on the *command*) when handed a nonexistent/foreign-format cwd.
    * @param {string} [options.copilotBin='copilot'] - Path to the copilot binary
    * @param {string} [options.command] - ACP process command (overrides copilotBin;
    *   e.g. 'npx' for the Claude Code adapter). Defaults to the copilot binary.
@@ -107,6 +116,7 @@ class AcpClient extends EventEmitter {
     this.#tabId = tabId;
     this.#sendToRenderer = sendToRenderer;
     this.#cwd = options.cwd || process.cwd();
+    this.#spawnCwd = options.spawnCwd || this.#cwd;
     this.#copilotBin = options.command || options.copilotBin || 'copilot';
     this.#baseArgs = Array.isArray(options.baseArgs) ? options.baseArgs : null;
     this.#stripEnv = Array.isArray(options.stripEnv) ? options.stripEnv : [];
@@ -176,7 +186,7 @@ class AcpClient extends EventEmitter {
     for (const key of this.#stripEnv) delete env[key];
 
     const proc = spawn(this.#copilotBin, args, {
-      cwd: this.#cwd,
+      cwd: this.#spawnCwd,
       env,
       shell: this.#shell,
       stdio: ['pipe', 'pipe', 'pipe'],

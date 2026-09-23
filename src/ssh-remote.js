@@ -25,6 +25,24 @@ function shellQuote(s) {
 }
 
 /**
+ * Prefix that makes `node`/`npx`/`claude` resolvable on the remote PATH even
+ * when Node.js was installed via nvm — by far the most common cause of
+ * "works fine when I SSH in normally, fails when the app does it". SSH runs
+ * a command argument through a plain non-interactive, non-login shell by
+ * default; nvm's installer adds its PATH setup to shell rc files that
+ * aren't sourced in that mode (typically ~/.bashrc, which bash itself
+ * skips for non-interactive shells).
+ *
+ * Deliberately narrow (only nvm's own loader, not the user's full rc files)
+ * and silent (output redirected): switching to a login/interactive shell
+ * instead would source whatever else those files print to stdout (a login
+ * banner, a fortune/cowsay line, …), which would corrupt the ACP adapter's
+ * JSON-RPC stream rather than just failing cleanly.
+ * `-s` (non-empty file) is nvm's own documented non-interactive load idiom.
+ */
+const SOURCE_NVM_PREFIX = '[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ';
+
+/**
  * Remote command that launches the ACP adapter in `cwd`.
  *
  * `cd` is needed because SSH always starts in the remote home directory, and
@@ -36,7 +54,7 @@ function shellQuote(s) {
  * @returns {string}
  */
 function buildAdapterCommand(cwd, adapterSpec) {
-  return `cd ${shellQuote(cwd)} && exec npx -y ${shellQuote(adapterSpec)}`;
+  return `${SOURCE_NVM_PREFIX}cd ${shellQuote(cwd)} && exec npx -y ${shellQuote(adapterSpec)}`;
 }
 
 /**
@@ -47,7 +65,7 @@ function buildAdapterCommand(cwd, adapterSpec) {
  * @returns {string}
  */
 function buildProbeCommand(cwd) {
-  return [
+  return SOURCE_NVM_PREFIX + [
     'echo NODE=$(node --version 2>/dev/null || true)',
     'echo CLAUDE=$(claude --version 2>/dev/null || true)',
     cwd ? `echo CWD=$([ -d ${shellQuote(cwd)} ] && echo yes || echo no)` : 'echo CWD=skip',
@@ -161,6 +179,7 @@ function buildOneShotSshArgs(password, askpassHelperPath) {
 
 module.exports = {
   shellQuote,
+  SOURCE_NVM_PREFIX,
   buildAdapterCommand,
   buildProbeCommand,
   parseProbeOutput,

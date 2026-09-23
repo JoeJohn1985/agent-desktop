@@ -48,9 +48,10 @@ const PROVIDER_SETTINGS = [
       'Dadurch liegt die Session dort — du kannst sie auf dem Zielrechner',
       'jederzeit im Terminal mit „claude --resume <id>" weiterführen.',
       '',
-      'Voraussetzungen auf dem Zielrechner: Node.js/npx, die „claude"-CLI',
-      'mit Abo eingeloggt, und ein SSH-Zugang ohne Passwortabfrage',
-      '(SSH-Key), da die App keine Passworteingabe anzeigen kann.',
+      'Voraussetzungen auf dem Zielrechner: Node.js/npx und die „claude"-CLI',
+      'mit Abo eingeloggt. Anmeldung per SSH-Key oder per im eigenen Tab',
+      'hinterlegtem Passwort — eine interaktive Abfrage kann die App nicht',
+      'anzeigen.',
       '',
       'Skills, Agents und Instructions liegen auf dem Zielrechner und',
       'werden hier (noch) nicht angezeigt — Claude Code nutzt sie dort',
@@ -152,19 +153,16 @@ async function getConnectedProviders() {
  * static HTML (always present, handled separately by the Settings dialog), so
  * it's excluded here.
  *
- * Claude Code (SSH) is force-included even when not yet "connected" (unlike
- * every other entry here, sourced from getConnectedProviders()): its tab is
- * the ONLY place to type in a host in the first place, so gating it behind
- * already having one would make it permanently unreachable from a cold start.
+ * Claude Code (SSH) only gets a tab once a host is saved (getConnectedProviders()'s
+ * existing gate) — its host field lives in the "Provider" row instead (see
+ * renderCopilotProviderRow()), the same place every other provider's first-time
+ * setup (API key, base URL) happens. The tab itself only holds what needs a
+ * host to make sense: working directory, password, connection test.
  * @returns {Promise<Array<{id: string, label: string}>>}
  */
 async function getConnectedProviderConfigs() {
   const providers = await getConnectedProviders();
-  const configs = providers.filter(p => p.id !== 'copilot');
-  if (!configs.some((p) => p.id === 'claude-code-ssh')) {
-    configs.push({ id: 'claude-code-ssh', label: SETTINGS_TAB_LABELS['claude-code-ssh'] || PROVIDER_LABELS['claude-code-ssh'] });
-  }
-  return configs;
+  return providers.filter(p => p.id !== 'copilot');
 }
 
 /**
@@ -180,15 +178,11 @@ function buildProviderConfigPanelHtml(providerId) {
   const label = PROVIDER_LABELS[providerId] || providerId;
   const parts = [];
 
-  // SSH target first: without it this provider can't start at all, so it
-  // belongs above the model picker rather than buried under it.
+  // SSH target itself is entered on the "Provider" tab's row (like every
+  // other provider's key/base-URL) — this tab only exists once that's set,
+  // so it only needs what actually depends on having a host already.
   if (providerId === 'claude-code-ssh') {
     parts.push(`
-      <div class="settings__group">
-        <label class="settings__label">🖧 SSH-Ziel</label>
-        <div class="settings__hint">Wie hinter <code>ssh</code> eingegeben — z.B. <code>pi@192.168.1.50</code> oder ein Alias aus deiner <code>~/.ssh/config</code>. Anmeldung per SSH-Key oder per Passwort (siehe unten) — ohne eines von beiden kann die App keine interaktive Abfrage anzeigen.</div>
-        <input type="text" class="settings__input" id="settClaudeCodeSshHost" placeholder="pi@raspberrypi.local" value="${escapeAttr(getClaudeCodeSshHost())}" />
-      </div>
       <div class="settings__group">
         <label class="settings__label">📂 Arbeitsverzeichnis (Standard)</label>
         <div class="settings__hint">Pfad <strong>auf dem Zielrechner</strong>, in dem neue Tabs starten — z.B. <code>/home/pi/projekt</code>. Claude Code bindet Sessions an ihr Verzeichnis: derselbe Pfad = dieselbe Session-Liste beim späteren <code>claude --resume</code> dort.</div>
@@ -397,15 +391,14 @@ function pickRemoteFolder(host, startPath) {
 }
 
 /**
- * Wires the Claude Code (SSH) settings: host/cwd inputs (saved on change) and
- * the connection test. Both fields are saved as typed rather than validated —
- * an SSH target can be a config alias, a user@host, or an IP, and guessing
- * which is "valid" would reject legitimate setups. The test button is the
- * validation instead: it reports what actually happened when connecting.
+ * Wires the Claude Code (SSH) settings: working directory (saved on change),
+ * password and the connection test. The host itself is entered on the
+ * "Provider" tab's row (renderCopilotProviderRow) — this tab only exists
+ * once one is saved (see getConnectedProviderConfigs), so it's read here via
+ * getClaudeCodeSshHost() rather than having its own input.
  * @param {HTMLElement} panel
  */
 function wireClaudeCodeSshPanel(panel) {
-  const hostInput = panel.querySelector('#settClaudeCodeSshHost');
   const cwdInput = panel.querySelector('#settClaudeCodeSshCwd');
   const testBtn = panel.querySelector('#btnTestClaudeCodeSsh');
   const statusEl = panel.querySelector('#claudeCodeSshTestStatus');
@@ -444,16 +437,14 @@ function wireClaudeCodeSshPanel(panel) {
     refreshPasswordStatus();
   }));
 
-  hostInput?.addEventListener('change', () => setPref('claudeCodeSshHost', hostInput.value.trim()));
   cwdInput?.addEventListener('change', () => setPref('claudeCodeSshCwd', cwdInput.value.trim()));
 
   panel.querySelector('#btnBrowseClaudeCodeSshCwd')?.addEventListener('click', async () => {
-    const host = (hostInput?.value || '').trim();
+    const host = getClaudeCodeSshHost();
     if (!host) {
-      statusEl.textContent = 'Bitte zuerst ein SSH-Ziel eintragen.';
+      statusEl.textContent = 'Kein SSH-Ziel gespeichert (Tab „Provider").';
       return;
     }
-    setPref('claudeCodeSshHost', host); // browsing implies this host is the one we want
     const picked = await pickRemoteFolder(host, (cwdInput?.value || '').trim());
     if (picked && cwdInput) {
       cwdInput.value = picked;
@@ -462,14 +453,11 @@ function wireClaudeCodeSshPanel(panel) {
   });
 
   testBtn?.addEventListener('click', async () => {
-    const host = (hostInput?.value || '').trim();
+    const host = getClaudeCodeSshHost();
     if (!host) {
-      statusEl.textContent = 'Bitte zuerst ein SSH-Ziel eintragen.';
+      statusEl.textContent = 'Kein SSH-Ziel gespeichert (Tab „Provider").';
       return;
     }
-    // Persist before testing, so a user who types and immediately clicks
-    // doesn't test one value while a different one stays configured.
-    setPref('claudeCodeSshHost', host);
     if (cwdInput) setPref('claudeCodeSshCwd', cwdInput.value.trim());
 
     testBtn.disabled = true;
@@ -716,26 +704,48 @@ async function renderCopilotProviderRow(list, p) {
     return;
   }
 
-  // Claude Code (SSH): no local CLI/login to check — its setup (host, remote
-  // working directory, connection test) lives in its own tab (getConnectedProviderConfigs()
-  // force-includes it so that tab always exists). This row is just a status summary.
+  // Claude Code (SSH): no local CLI/login to check — the host is entered
+  // right here (like every other provider's key/base-URL), since this row is
+  // the only place a first-time setup can happen. Once saved, its own "CC
+  // (SSH)" tab appears (getConnectedProviders()'s existing host check) for
+  // the working directory, password and connection test.
   if (p.id === 'claude-code-ssh') {
     const host = getClaudeCodeSshHost();
-    if (host) {
-      statusEl.textContent = `● SSH-Ziel: ${host}`;
-      statusEl.classList.add('is-set');
-    } else {
-      statusEl.textContent = '○ noch nicht eingerichtet';
-    }
-    const hint = document.createElement('span');
-    hint.className = 'providers-row__hint';
-    hint.textContent = 'SSH-Ziel, Arbeitsverzeichnis und Verbindungstest im eigenen Tab „CC (SSH)" oben in diesem Fenster.';
-    controls.appendChild(hint);
-    const recheck = document.createElement('button');
-    recheck.className = 'action-btn';
-    recheck.textContent = 'Aktualisieren';
-    recheck.addEventListener('click', () => renderProvidersSettings());
-    controls.appendChild(recheck);
+    statusEl.textContent = host ? '● eingerichtet' : '○ nicht eingerichtet';
+    statusEl.classList.toggle('is-set', Boolean(host));
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'providers-row__input';
+    input.placeholder = 'pi@raspberrypi.local';
+    input.autocomplete = 'off';
+    input.value = host;
+    controls.appendChild(input);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'action-btn';
+    saveBtn.textContent = 'Speichern';
+    saveBtn.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+      const val = input.value.trim();
+      if (!val) { showNotification('Bitte ein SSH-Ziel eingeben.', 'warning'); return; }
+      setPref('claudeCodeSshHost', val);
+      showNotification('SSH-Ziel gespeichert.', 'success');
+      renderProvidersSettings();
+      renderProviderConfigTabs();
+    }));
+    controls.appendChild(saveBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'action-btn';
+    deleteBtn.textContent = 'Löschen';
+    deleteBtn.disabled = !host;
+    deleteBtn.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+      setPref('claudeCodeSshHost', '');
+      showNotification('SSH-Ziel entfernt.', 'info');
+      renderProvidersSettings();
+      renderProviderConfigTabs();
+    }));
+    controls.appendChild(deleteBtn);
     return;
   }
 
