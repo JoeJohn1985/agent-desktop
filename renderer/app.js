@@ -1288,15 +1288,15 @@ const {
   setDynamicPricing,
 } = window.RendererLogic;
 
-/**
- * Load the public pricing fallback (LiteLLM) so models without a hardcoded
- * price still show costs. Runs in the background at startup; failures are silent.
- */
+/** Load official Copilot prices plus the public fallback in the background. */
 async function initDynamicPricing() {
   try {
-    const map = await window.desktop.pricing.getMap();
-    if (map && Object.keys(map).length) {
-      setDynamicPricing(map);
+    const pricing = await window.desktop.pricing.getMap();
+    if (!pricing || typeof pricing !== 'object' || Array.isArray(pricing)) {
+      throw new Error('Ungültiges Preisquellen-Format');
+    }
+    setDynamicPricing(pricing);
+    if (Object.keys(pricing.copilot || {}).length || Object.keys(pricing.fallback || {}).length) {
       // Recompute the visible cost display now that more prices are known.
       const tab = tabs.get(activeTabId);
       if (tab) refreshUsageDisplay(activeTabId);
@@ -1341,12 +1341,13 @@ async function refreshUsageDisplay(tabId) {
       const modelId = tab._billingModel || tab.selectedModel || '';
       // Subscription providers (Claude Code) are covered by the plan — no USD
       // billing yet (token-based accounting for add-on budgets comes later).
-      const deltaUsd = isSubscriptionProvider(getTabProvider(tab))
+      const provider = getTabProvider(tab);
+      const deltaUsd = isSubscriptionProvider(provider)
         ? 0
-        : estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId);
+        : estimateCostUsdDelta(tokens, tab._lastUsageTokens, modelId, provider);
       if (deltaUsd && deltaUsd > 0) {
         tab._costUsd = (tab._costUsd || 0) + deltaUsd;
-        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, getTabProvider(tab));
+        recordCostEntry(tab.sessionId || null, tab._sessionName || null, deltaUsd, provider);
       }
       tab._lastUsageParsed = parsed;
       tab._lastUsageText = result.text;
@@ -1473,9 +1474,10 @@ function updateUsageDisplay(parsed, tokens, fullText) {
 
   const tab = tabs.get(activeTabId);
   const modelId = tab?.selectedModel || '';
+  const provider = tab ? getTabProvider(tab) : 'copilot';
 
   let display;
-  if (getModelPricing(modelId)) {
+  if (getModelPricing(modelId, Date.now(), provider)) {
     // Known pricing (hardcoded or from the dynamic source) → show the running
     // per-prompt cost in USD (≥ 0, $0.00 before the first prompt).
     display = '~' + formatUsd(tab?._costUsd || 0);

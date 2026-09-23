@@ -226,17 +226,26 @@ function filterSessions(sessions, query) {
 
 // ── Usage / Cost Parsing ─────────────────────────────────────
 
-// Preise pro 1M Tokens. Copilot-Modelle (mit Punkt in der ID) in AI Credits;
-// Direkt-API-Modelle (mit Bindestrich) in US-Dollar (input/cache-read/output).
-// Bei neuen Modellen hier ergänzen.
+// Preise pro 1M Tokens. Copilot-Werte in AI Credits; Direkt-API-Werte in USD.
+// Aktuelle Copilot-Raten werden bevorzugt aus GitHubs offizieller Preistabelle
+// geladen; diese Werte bleiben als Offline-Fallback und für historische Modelle.
 const MODEL_PRICING = {
   // Copilot CLI (Credits)
-  'claude-haiku-4.5':  { input: 100, cache: 10, output: 500  },
-  'claude-sonnet-4.6': { input: 300, cache: 30, output: 1500 },
-  'claude-opus-4.6':   { input: 500, cache: 50, output: 2500 },
-  'claude-opus-4.8':   { input: 500, cache: 50, output: 2500 },
-  // Sonnet 5: Einführungspreis (200/20/1000) bis 31.08.2026, danach regulär (300/30/1500).
-  'claude-sonnet-5':   { input: 200, cache: 20, output: 1000, until: '2026-08-31', then: { input: 300, cache: 30, output: 1500 } },
+  'claude-haiku-4.5':  { input: 100, cache: 10, cacheWrite: 125, output: 500 },
+  'claude-sonnet-4.6': { input: 300, cache: 30, cacheWrite: 375, output: 1500 },
+  'claude-opus-4.6':   { input: 500, cache: 50, cacheWrite: 625, output: 2500 },
+  'claude-opus-4.8':   { input: 500, cache: 50, cacheWrite: 625, output: 2500 },
+  'claude-sonnet-5':   { input: 200, cache: 20, cacheWrite: 250, output: 1000 },
+  'gpt-5.3-codex':     { input: 175, cache: 17.5, cacheWrite: 0, output: 1400 },
+  'claude-opus-5.5':   { input: 400, cache: 20, cacheWrite: 500, output: 2000 },
+  'gpt-6-luna':        {
+    input: 10, cache: 1, cacheWrite: 12.5, output: 50,
+    longContext: { threshold: 272_000, input: 20, cache: 2, cacheWrite: 25, output: 75 },
+  },
+  'gpt-6-sol':         {
+    input: 200, cache: 20, cacheWrite: 250, output: 1000,
+    longContext: { threshold: 272_000, input: 400, cache: 40, cacheWrite: 500, output: 1500 },
+  },
   // Anthropic API (USD pro 1M)
   'claude-haiku-4-5':  { input: 1,   cache: 0.1, output: 5  },
   'claude-sonnet-4-6': { input: 3,   cache: 0.3, output: 15 },
@@ -256,8 +265,8 @@ const MODEL_PRICING = {
   // andere Preis.
   'gemini-3.5-flash':  { input: 1.50, cache: 0.15,  output: 9    },
   'gemini-3.5-flash-lite': { input: 0.30, cache: 0.03, output: 2.5 },
-  // Einführungspreis bis 31.12.2026, danach regulär (analog claude-sonnet-5 oben).
-  'gemini-3.8-flash':  { input: 0.75, cache: 0.075, output: 3.75, until: '2026-12-31', then: { input: 1.50, cache: 0.15, output: 7.50 } },
+  // Promo-Preis bis 31.12.2026; die offizielle Copilot-Quelle steuert Copilot-Raten.
+  'gemini-3.8-flash':  { input: 0.75, cache: 0.075, cacheWrite: 0, output: 3.75, until: '2026-12-31', then: { input: 1.50, cache: 0.15, cacheWrite: 0, output: 7.50 } },
   // OpenAI API (USD pro 1M) — TODO: bei Preisänderungen aktualisieren.
   'gpt-5.1':           { input: 1.25, cache: 0.125, output: 10 },
   'gpt-5.1-mini':      { input: 0.25, cache: 0.025, output: 2  },
@@ -573,35 +582,81 @@ function parseUsageRequests(text) {
   return { value: parseFloat(m[1]), unit: m[2] };
 }
 
-// ── Dynamic pricing fallback ─────────────────────────────────
-// When a model has no hardcoded MODEL_PRICING entry (e.g. a Copilot model the
-// CLI reports dynamically), fall back to a public pricing source (LiteLLM),
-// injected at runtime as a normalized-key → {input,cache,output} (USD per 1M) map.
-let _dynamicPricing = {};
+// ── Dynamic pricing ──────────────────────────────────────────
+// Official Copilot rates and a LiteLLM fallback are injected at runtime as
+// normalized-key → USD-per-1M maps.
+let _dynamicPricing = { copilot: {}, fallback: {} };
 
-/** Normalize a model id for pricing lookup: lowercase, strip provider prefix. */
+/** Keep in sync with pricing-source.normalizeKey so model names and ids match. */
 function normalizeModelKey(id) {
-  return String(id || '').toLowerCase().split('/').pop().trim();
+  return String(id || '')
+    .toLowerCase()
+    .split('/')
+    .pop()
+    .trim()
+    .replace(/\[\^[^\]]+\]/g, '')
+    .replace(/\(\s*preview\s*\)/g, '')
+    .replace(/\bmode\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
 }
 
-/** Inject the dynamic pricing map (from the main process / LiteLLM snapshot). */
+function normalizePricingMap(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(map)) {
+    const normalized = normalizeModelKey(key);
+    if (normalized) out[normalized] = value;
+  }
+  return out;
+}
+
+/** Inject official Copilot prices and the public fallback map. */
 function setDynamicPricing(map) {
-  _dynamicPricing = (map && typeof map === 'object') ? map : {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) {
+    _dynamicPricing = { copilot: {}, fallback: {} };
+    return;
+  }
+  const structured = Object.prototype.hasOwnProperty.call(map, 'copilot')
+    || Object.prototype.hasOwnProperty.call(map, 'fallback');
+  _dynamicPricing = structured
+    ? {
+      copilot: normalizePricingMap(map.copilot),
+      fallback: normalizePricingMap(map.fallback),
+    }
+    : { copilot: {}, fallback: normalizePricingMap(map) };
 }
 
 /**
- * Look up dynamic pricing for a model, scaled into the model's NATIVE unit:
- * Copilot → AI Credits (USD × 100), direct-API → USD. Returns null if unknown.
+ * Scale a per-token map into the model's native unit. Any long-context tier
+ * uses the same unit as its default tier.
  */
-function lookupDynamicPrice(modelId) {
-  const entry = _dynamicPricing[normalizeModelKey(modelId)];
-  if (!entry || typeof entry.input !== 'number' || typeof entry.output !== 'number') return null;
-  const scale = getModelProvider(modelId) === 'copilot' ? AIC_PER_USD : 1;
-  return {
+function scalePricing(entry, scale) {
+  const scaled = {
+    ...entry,
     input: entry.input * scale,
-    cache: (entry.cache != null ? entry.cache : entry.input * 0.1) * scale,
+    cache: (typeof entry.cache === 'number' ? entry.cache : entry.input * 0.1) * scale,
     output: entry.output * scale,
   };
+  if (typeof entry.cacheWrite === 'number') scaled.cacheWrite = entry.cacheWrite * scale;
+  if (entry.longContext && typeof entry.longContext === 'object') {
+    scaled.longContext = scalePricing(entry.longContext, scale);
+  }
+  return scaled;
+}
+
+/** Look up an official GitHub Copilot rate (USD) and convert it to AI Credits. */
+function lookupCopilotPrice(modelId) {
+  const entry = _dynamicPricing.copilot[normalizeModelKey(modelId)];
+  if (!entry || typeof entry.input !== 'number' || typeof entry.output !== 'number') return null;
+  return scalePricing(entry, AIC_PER_USD);
+}
+
+/** Look up a LiteLLM fallback; direct APIs stay in USD, Copilot uses AI Credits. */
+function lookupDynamicPrice(modelId, provider) {
+  const entry = _dynamicPricing.fallback[normalizeModelKey(modelId)];
+  if (!entry || typeof entry.input !== 'number' || typeof entry.output !== 'number') return null;
+  const effectiveProvider = provider || getModelProvider(modelId);
+  return scalePricing(entry, effectiveProvider === 'copilot' ? AIC_PER_USD : 1);
 }
 
 /**
@@ -618,19 +673,35 @@ function resolveTimedPricing(entry, now) {
   return intro;
 }
 
-/** Pricing for a model: hardcoded table (time-resolved) first, then the dynamic source. */
-function getModelPricing(modelId, now = Date.now()) {
+/** Pricing for a model: official Copilot source, hardcoded fallback, then LiteLLM. */
+function getModelPricing(modelId, now = Date.now(), provider) {
+  const effectiveProvider = provider || getModelProvider(modelId);
+  if (effectiveProvider === 'copilot') {
+    const official = lookupCopilotPrice(modelId);
+    if (official) return official;
+  }
+
   const hard = MODEL_PRICING[modelId];
-  if (hard) return resolveTimedPricing(hard, now);
-  return lookupDynamicPrice(modelId) || null;
+  const modelProvider = getModelProvider(modelId);
+  if (hard && (effectiveProvider === modelProvider || effectiveProvider === 'copilot')) {
+    const resolved = resolveTimedPricing(hard, now);
+    return effectiveProvider === 'copilot' && modelProvider !== 'copilot'
+      ? scalePricing(resolved, AIC_PER_USD)
+      : resolved;
+  }
+  return lookupDynamicPrice(modelId, effectiveProvider) || null;
 }
 
 // Raw, UNROUNDED cost in the model's native unit (Copilot → AI Credits,
 // direct API → USD) per the pricing table. Keep this unrounded so small USD
 // amounts aren't lost; rounding happens only at display time.
-function computeRawCost(tokens, modelId) {
-  const pricing = getModelPricing(modelId);
-  if (!pricing || !tokens) return null;
+function computeRawCost(tokens, modelId, provider) {
+  const basePricing = getModelPricing(modelId, Date.now(), provider);
+  if (!basePricing || !tokens) return null;
+  const inputTokens = (tokens.input || 0) + (tokens.cache || 0) + (tokens.cacheWrite || 0);
+  const pricing = basePricing.longContext && inputTokens > basePricing.longContext.threshold
+    ? basePricing.longContext
+    : basePricing;
   // Cache-write tokens (first time a prefix is cached) bill at 1.25x input.
   const cacheWritePrice = pricing.cacheWrite != null ? pricing.cacheWrite : pricing.input * 1.25;
   return (
@@ -652,8 +723,8 @@ function deltaTokens(currentTokens, previousTokens) {
   };
 }
 
-function estimateCredits(tokens, modelId) {
-  const c = computeRawCost(tokens, modelId);
+function estimateCredits(tokens, modelId, provider) {
+  const c = computeRawCost(tokens, modelId, provider);
   return c == null ? null : Math.round(c * 10) / 10;
 }
 
@@ -668,9 +739,9 @@ function estimateCredits(tokens, modelId) {
  * @param {string} modelId
  * @returns {number|null} delta credits, or null if model has no pricing / no data
  */
-function estimateCreditsDelta(currentTokens, previousTokens, modelId) {
-  if (!getModelPricing(modelId) || !currentTokens) return null;
-  return estimateCredits(deltaTokens(currentTokens, previousTokens), modelId);
+function estimateCreditsDelta(currentTokens, previousTokens, modelId, provider) {
+  if (!getModelPricing(modelId, Date.now(), provider) || !currentTokens) return null;
+  return estimateCredits(deltaTokens(currentTokens, previousTokens), modelId, provider);
 }
 
 // Copilot bills in AI Credits (100 AIC = 1 USD); direct APIs already in USD.
@@ -682,16 +753,17 @@ const AIC_PER_USD = 100;
  * already USD.
  * @returns {number|null}
  */
-function estimateCostUsd(tokens, modelId) {
-  const v = computeRawCost(tokens, modelId); // unrounded — don't lose cents
+function estimateCostUsd(tokens, modelId, provider) {
+  const effectiveProvider = provider || getModelProvider(modelId);
+  const v = computeRawCost(tokens, modelId, effectiveProvider); // unrounded — don't lose cents
   if (v == null) return null;
-  return getModelProvider(modelId) === 'copilot' ? v / AIC_PER_USD : v;
+  return effectiveProvider === 'copilot' ? v / AIC_PER_USD : v;
 }
 
 /** USD cost for the *new* tokens since the last reading (see estimateCreditsDelta). */
-function estimateCostUsdDelta(currentTokens, previousTokens, modelId) {
-  if (!getModelPricing(modelId) || !currentTokens) return null;
-  return estimateCostUsd(deltaTokens(currentTokens, previousTokens), modelId);
+function estimateCostUsdDelta(currentTokens, previousTokens, modelId, provider) {
+  if (!getModelPricing(modelId, Date.now(), provider) || !currentTokens) return null;
+  return estimateCostUsd(deltaTokens(currentTokens, previousTokens), modelId, provider);
 }
 
 // ── Cost Log Helpers ─────────────────────────────────────────

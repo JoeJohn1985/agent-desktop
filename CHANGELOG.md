@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.21.3] - 2026-09-23
+
+### Changed
+- Copilot-Modellpreise werden täglich aus GitHubs offizieller Preistabelle
+  geladen; die verfügbaren CLI-Modelle erhalten damit aktuelle Input-,
+  Cache-Write-, Cache-Read- und Output-Raten. Feste Werte bleiben als
+  Offline-Fallback erhalten, inklusive Long-Context-Preisen für GPT-6 Luna
+  und GPT-6 Sol. LiteLLM bleibt Fallback für Direkt-API-Modelle.
+- Die veraltete Sonnet-5-Einführungspreisstaffel wurde durch den aktuell
+  offiziellen Preis ersetzt.
+
 ## [1.21.2] - 2026-09-23
 
 ### Changed

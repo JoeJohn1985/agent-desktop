@@ -706,19 +706,34 @@ describe('Dynamischer Preis-Fallback (setDynamicPricing / getModelPricing)', () 
     expect(getModelPricing('brandneu-x')).not.toBeNull();
   });
 
-  it('zeitabhängiger Preis: Einführungspreis vor, regulärer Preis nach dem Stichtag', () => {
+  it('nutzt den aktuellen offiziellen Copilot-Preis für Sonnet 5', () => {
     const before = Date.parse('2026-07-01T12:00:00Z');
     const after = Date.parse('2026-09-01T12:00:00Z');
-    // claude-sonnet-5 (Copilot): 200/20/1000 bis 31.08.2026, danach 300/30/1500
-    expect(getModelPricing('claude-sonnet-5', before)).toEqual({ input: 200, cache: 20, output: 1000 });
-    expect(getModelPricing('claude-sonnet-5', after)).toEqual({ input: 300, cache: 30, output: 1500 });
+    // GitHub lists $2/$0.20/$2.50/$10 per 1M tokens (= AIC x100).
+    const current = { input: 200, cache: 20, cacheWrite: 250, output: 1000 };
+    expect(getModelPricing('claude-sonnet-5', before)).toEqual(current);
+    expect(getModelPricing('claude-sonnet-5', after)).toEqual(current);
+  });
+
+  it('hält Preise der aktuell vom CLI gemeldeten Copilot-Modelle als Offline-Fallback vor', () => {
+    const modelIds = [
+      'claude-sonnet-5',
+      'claude-haiku-4.5',
+      'gpt-5.3-codex',
+      'gemini-3.8-flash',
+      'claude-opus-5.5',
+      'gpt-6-luna',
+      'gpt-6-sol',
+    ];
+    for (const modelId of modelIds) expect(MODEL_PRICING[modelId]).toBeDefined();
+    expect(MODEL_PRICING['gpt-6-luna'].longContext.threshold).toBe(272_000);
   });
 
   it('zeitabhängiger Preis gilt auch für gemini-3.8-flash (Einführungspreis bis 31.12.2026)', () => {
     const before = Date.parse('2026-12-01T12:00:00Z');
     const after = Date.parse('2027-01-02T12:00:00Z');
-    expect(getModelPricing('gemini-3.8-flash', before)).toEqual({ input: 0.75, cache: 0.075, output: 3.75 });
-    expect(getModelPricing('gemini-3.8-flash', after)).toEqual({ input: 1.50, cache: 0.15, output: 7.50 });
+    expect(getModelPricing('gemini-3.8-flash', before)).toEqual({ input: 0.75, cache: 0.075, cacheWrite: 0, output: 3.75 });
+    expect(getModelPricing('gemini-3.8-flash', after)).toEqual({ input: 1.50, cache: 0.15, cacheWrite: 0, output: 7.50 });
   });
 
   // ── tierForDiscoveredModel ────────────────────────────────
@@ -875,6 +890,49 @@ describe('Dynamischer Preis-Fallback (setDynamicPricing / getModelPricing)', () 
     expect(p).toEqual({ input: 300, cache: 30, output: 1500 });
     // estimateCostUsd rechnet Copilot-Credits zurück in USD: 1M input → 300 credits /100 = $3
     expect(estimateCostUsd({ input: 1_000_000 }, 'claude-sonnet-9.9')).toBeCloseTo(3, 5);
+  });
+
+  it('priorisiert offizielle Copilot-Preise und ordnet IDs mit Punkt der YAML-Tabelle zu', () => {
+    setDynamicPricing({
+      copilot: {
+        'Claude Sonnet 5': { input: 2, cache: 0.2, cacheWrite: 2.5, output: 10 },
+      },
+      fallback: {},
+    });
+    expect(getModelPricing('claude-sonnet-5', Date.now(), 'copilot'))
+      .toEqual({ input: 200, cache: 20, cacheWrite: 250, output: 1000 });
+  });
+
+  it('trennt Copilot- und Direkt-API-Preise bei derselben Modell-ID', () => {
+    setDynamicPricing({
+      copilot: {
+        'Gemini 3.8 Flash': { input: 0.75, cache: 0.075, cacheWrite: 0, output: 3.75 },
+      },
+      fallback: {},
+    });
+    expect(getModelPricing('gemini-3.8-flash', Date.now(), 'copilot'))
+      .toEqual({ input: 75, cache: 7.5, cacheWrite: 0, output: 375 });
+    expect(estimateCostUsd({ input: 1_000_000 }, 'gemini-3.8-flash', 'copilot')).toBeCloseTo(0.75, 5);
+    expect(estimateCostUsd({ input: 1_000_000 }, 'gemini-2.5-pro', 'gemini')).toBeCloseTo(1.25, 5);
+  });
+
+  it('wendet für Copilot Long-Context-Preise oberhalb der offiziellen Schwelle an', () => {
+    expect(estimateCostUsd({ input: 272_000 }, 'gpt-6-luna', 'copilot')).toBeCloseTo(0.0272, 6);
+    expect(estimateCostUsd({ input: 272_001 }, 'gpt-6-luna', 'copilot')).toBeCloseTo(0.0544002, 7);
+  });
+
+  it('verwendet den expliziten Provider für dynamische Direkt-API-Preise', () => {
+    setDynamicPricing({
+      copilot: {},
+      fallback: { 'brandneu-x': { input: 3, cache: 0.3, output: 15 } },
+    });
+    expect(getModelPricing('brandneu-x', Date.now(), 'openai'))
+      .toEqual({ input: 3, cache: 0.3, output: 15 });
+    expect(estimateCostUsd({ input: 1_000_000 }, 'brandneu-x', 'openai')).toBe(3);
+  });
+
+  it('berechnet bei Modellen ohne Cache-Write-Preis keine Cache-Write-Kosten', () => {
+    expect(estimateCredits({ cacheWrite: 1_000_000 }, 'gpt-5.3-codex', 'copilot')).toBe(0);
   });
 
   it('lässt USD unverändert für Direkt-API-Provider-Modelle', () => {

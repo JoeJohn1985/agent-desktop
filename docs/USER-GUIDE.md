@@ -186,7 +186,7 @@ Directly below the tab bar you control the active session:
 | **📊 XX%** | Context dropdown — shows usage, opens a detail panel, or runs compact/clear |
 | **🔧 Tools** | Opens a popup for session-specific tool denials |
 | **📈** | Opens the cost page (cost listing as a dedicated full-screen page) |
-| **~XX.XC** | Estimated AI Credits for this session (always visible, `~0C` before the first prompt) |
+| **~$X.XX** | Estimated USD cost when a per-token price is known; Copilot prices are refreshed daily from GitHub when online. Unknown/Auto models fall back to raw `/usage` values when available. |
 
 #### Chat area
 

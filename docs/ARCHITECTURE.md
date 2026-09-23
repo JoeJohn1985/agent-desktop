@@ -616,18 +616,24 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 
 ### 8.3 Cost tracking
 
-The app computes estimated AI Credits from token usage:
+The app estimates the cost from token usage:
 
 ```javascript
-credits = (input * priceInput + cache * priceCache + output * priceOutput) / 1_000_000
+cost = (input * priceInput + cache * priceCache + cacheWrite * priceCacheWrite + output * priceOutput) / 1_000_000
 ```
 
-**Model prices (credits per 1M tokens):**
+Copilot prices are read from GitHub's official pricing data table
+(`data/tables/copilot/models-and-pricing.yml`) once a day and converted from USD
+to AI Credits (100 AI Credits = $1). The static `MODEL_PRICING` entries are the
+offline fallback and retain prices for older models. Direct-API models use their
+hardcoded prices first, then the weekly LiteLLM fallback.
 
-| Model | Input | Cache | Output |
-|---|---|---|---|
-| claude-sonnet-4.6 | 300C | 30C | 1500C |
-| claude-opus-4.6 / 4.8 | 500C | 50C | 2500C |
+The Copilot model list itself is discovered from the CLI over ACP. Pricing is
+matched against model IDs and official display names after normalization. GitHub's
+`Auto` selection has no single rate; the estimate is unavailable until a
+billable model ID is known. For long-context tiers, the estimate uses the
+per-prompt input-token delta reported by `/usage`; ACP does not provide
+per-request tier attribution, so this remains an estimate.
 
 Token data comes from `/usage` (via `silentCommand`). The delta per prompt is stored (`recordCostEntry`), priced at the model actually used for that prompt. The cost history is visualized on the cost page as a stacked bar chart (day/week, broken down by session). Direct-API providers return real token counts and are billed in USD; Copilot is billed in AI Credits (100 AIC = $1).
 
