@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.22.0] - 2026-09-24
+
+### Added
+- **"Trennen"-Button für Claude Code (lokal)** in Settings → Provider. Die
+  Zeile zeigt jetzt den echten Anmeldestatus (`claude auth status`, z.B.
+  "angemeldet als name@example.com (pro)") statt nur ob die CLI installiert
+  ist. Trennen öffnet — wie die bestehende Copilot-Anmeldung — ein
+  sichtbares Terminal-Fenster mit `claude auth logout`, statt das im
+  Hintergrund ohne Bestätigungsmöglichkeit auszuführen.
+
 ## [1.21.3] - 2026-09-23
 
 ### Changed

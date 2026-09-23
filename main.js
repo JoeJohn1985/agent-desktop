@@ -818,6 +818,81 @@ ipcMain.handle('claudecode:status', async () => {
 });
 
 /**
+ * @ipc claudecode:authStatus — Whether the user is actually logged in to
+ * Claude Code, not just whether the CLI is installed (see claudecode:status
+ * for that — a separate handler so its existing {installed, version}
+ * contract and callers are unaffected). `claude auth status` prints clean
+ * JSON by default.
+ * @returns {Promise<{loggedIn:boolean, email?:string|null, subscriptionType?:string|null, authMethod?:string|null}>}
+ */
+ipcMain.handle('claudecode:authStatus', async () => {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      const proc = spawn('claude', ['auth', 'status'], { shell: true, windowsHide: true });
+      let out = '';
+      proc.stdout?.on('data', (d) => { out += d.toString(); });
+      proc.on('error', () => finish({ loggedIn: false }));
+      proc.on('close', () => {
+        try {
+          const parsed = JSON.parse(out);
+          finish({
+            loggedIn: Boolean(parsed.loggedIn),
+            email: parsed.email || null,
+            subscriptionType: parsed.subscriptionType || null,
+            authMethod: parsed.authMethod || null,
+          });
+        } catch (_) {
+          finish({ loggedIn: false });
+        }
+      });
+      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ loggedIn: false }); }, 6000);
+    } catch (_) {
+      finish({ loggedIn: false });
+    }
+  });
+});
+
+/**
+ * @ipc claudecode:logout — Opens a new terminal window running
+ * `claude auth logout`. Same reasoning as auth:login (Copilot, below): the
+ * app never drives an auth flow silently in the background — whatever
+ * confirmation the CLI itself needs happens in a real, visible terminal
+ * instead of a piped child process with no TTY.
+ * @returns {Promise<{success:boolean, pendingInTerminal:boolean, error:string|null}>}
+ */
+ipcMain.handle('claudecode:logout', async () => {
+  console.log('[claudecode:logout] Opening claude auth logout in a new terminal window');
+  try {
+    if (process.platform === 'win32') {
+      // See auth:login below for why `start` + -NoExit is needed on Windows.
+      const cmd = 'start "Claude Code Logout" powershell -NoLogo -NoExit -Command "claude auth logout"';
+      const child = require('child_process').spawn(cmd, {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      const child = require('child_process').spawn(
+        'osascript', ['-e', 'tell app "Terminal" to do script "claude auth logout"'],
+        { detached: true, stdio: 'ignore' },
+      );
+      child.unref();
+    } else {
+      const child = require('child_process').spawn('x-terminal-emulator', ['-e', 'claude', 'auth', 'logout'], { detached: true, stdio: 'ignore' });
+      child.unref();
+    }
+    return { success: true, pendingInTerminal: true, error: null };
+  } catch (err) {
+    console.error('[claudecode:logout]', err.message);
+    return { success: false, pendingInTerminal: false, error: err.message };
+  }
+});
+
+/**
  * @ipc claudecode:testSsh — One-shot reachability check for the remote Claude
  * Code provider. Runs a single SSH command that reports node/claude versions
  * and whether the working directory exists, so a misconfiguration surfaces

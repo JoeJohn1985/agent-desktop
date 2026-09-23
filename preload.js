@@ -108,6 +108,10 @@ contextBridge.exposeInMainWorld('desktop', {
     resetBackend: (tabId) => ipcRenderer.invoke('agent:resetBackend', tabId),
     /** @ipc claudecode:status — {installed, version} for the Claude Code CLI. */
     claudeCodeStatus: () => ipcRenderer.invoke('claudecode:status'),
+    /** @ipc claudecode:authStatus — Whether actually logged in (not just installed). @returns {Promise<{loggedIn:boolean, email?:string|null, subscriptionType?:string|null, authMethod?:string|null}>} */
+    claudeCodeAuthStatus: () => ipcRenderer.invoke('claudecode:authStatus'),
+    /** @ipc claudecode:logout — Opens a terminal window running `claude auth logout`. @returns {Promise<{success:boolean, pendingInTerminal:boolean, error:string|null}>} */
+    claudeCodeLogout: () => ipcRenderer.invoke('claudecode:logout'),
     /** @ipc claudecode:testSsh — Reachability check for the remote Claude Code provider. @param {string} host @param {string} [cwd] @returns {Promise<{ok:boolean, nodeVersion?:string, claudeVersion?:string, cwdOk?:boolean, error?:string}>} */
     testClaudeCodeSsh: (host, cwd) => ipcRenderer.invoke('claudecode:testSsh', host, cwd),
     /** @ipc claudecode:sshListDir — Lists remote subdirectories (remote folder picker). @param {string} host @param {string} [dirPath] @returns {Promise<{ok:boolean, path?:string, dirs?:string[], error?:string}>} */

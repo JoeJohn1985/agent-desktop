@@ -679,23 +679,44 @@ async function renderCopilotProviderRow(list, p) {
   const controls = row.querySelector('.providers-row__controls');
 
   // Claude Code: launched on demand via npx; billed through the subscription.
-  // Live-detect the CLI; the subscription login itself can't be checked
-  // non-interactively, so we point the user to `claude` for it.
+  // `claude auth status` reports the actual login state non-interactively
+  // (clean JSON) — claudeCodeStatus() above only checks CLI presence.
   if (p.id === 'claude-code') {
     let cc = { installed: false };
     try { cc = await window.desktop.chat.claudeCodeStatus(); } catch (_) { /* old build */ }
+    let authStatus = { loggedIn: false };
     if (cc.installed) {
-      statusEl.textContent = '● „claude"-CLI installiert' + (cc.version ? ` (v${cc.version})` : '');
+      try { authStatus = await window.desktop.chat.claudeCodeAuthStatus(); } catch (_) { /* old build */ }
+    }
+    if (authStatus.loggedIn) {
+      statusEl.textContent = '● angemeldet' + (authStatus.email ? ` als ${authStatus.email}` : '') + (authStatus.subscriptionType ? ` (${authStatus.subscriptionType})` : '');
       statusEl.classList.add('is-set');
+    } else if (cc.installed) {
+      statusEl.textContent = '○ CLI installiert' + (cc.version ? ` (v${cc.version})` : '') + ', nicht angemeldet';
     } else {
       statusEl.textContent = '⚠ „claude"-CLI nicht gefunden';
     }
     const hint = document.createElement('span');
     hint.className = 'providers-row__hint';
-    hint.textContent = cc.installed
-      ? 'Melde dich einmalig mit dem Abo an (Terminal: „claude" → Login). Kein API-Key nötig — ANTHROPIC_API_KEY wird für Claude Code entfernt.'
-      : 'Installiere die „claude"-CLI (npm i -g @anthropic-ai/claude-code) und melde dich mit dem Abo an.';
+    hint.textContent = !cc.installed
+      ? 'Installiere die „claude"-CLI (npm i -g @anthropic-ai/claude-code) und melde dich mit dem Abo an.'
+      : 'Kein API-Key nötig — ANTHROPIC_API_KEY wird für Claude Code entfernt.'
+        + (authStatus.loggedIn ? '' : ' Melde dich einmalig mit dem Abo an (Terminal: „claude" → Login).');
     controls.appendChild(hint);
+    if (authStatus.loggedIn) {
+      const logoutBtn = document.createElement('button');
+      logoutBtn.className = 'action-btn';
+      logoutBtn.textContent = 'Trennen';
+      logoutBtn.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+        const res = await window.desktop.chat.claudeCodeLogout();
+        if (res.success) {
+          showNotification('Abmeldung im geöffneten Terminal-Fenster abschließen, danach „Status prüfen".', 'info');
+        } else {
+          showNotification(res.error || 'Trennen fehlgeschlagen.', 'error');
+        }
+      }));
+      controls.appendChild(logoutBtn);
+    }
     const recheck = document.createElement('button');
     recheck.className = 'action-btn';
     recheck.textContent = 'Status prüfen';
