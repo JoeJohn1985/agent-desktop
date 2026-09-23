@@ -7,8 +7,8 @@
 // setPref (app.js preferences), PROVIDER_LABELS/SETTINGS_TAB_LABELS/
 // getClaudeCodeSshHost/getClaudeCodeSshCwd/refreshProviderStatus/
 // _providerStatus/providerSupports/renderProviderModelSelect/
-// renderProviderReasoningSelect/getModelsForProvider/MODEL_TIER_TEXT/
-// getDefaultModelForProvider/setShowPaidModels/getShowPaidModels/
+// refreshProviderModelSelectOptions/renderProviderReasoningSelect/
+// setShowPaidModels/getShowPaidModels/
 // providerIconHtml/providerStageBadge/refreshProviderModels/
 // providerHasReasoning/getTabProvider (app.js provider catalog),
 // renderDeniedTools/addDeniedTool (app.js denylist), openInstructionsEditor
@@ -514,16 +514,10 @@ async function wireProviderConfigPanel(providerId, panel) {
   if (providerId === 'gemini') {
     panel.querySelector('#settGeminiShowPaid')?.addEventListener('change', (e) => {
       setShowPaidModels('gemini', e.target.checked);
-      // Re-render just the select's contents — NOT via renderProviderModelSelect(),
-      // which would attach a second 'change' listener onto the same, still-live
-      // <select> element.
-      const sel = panel.querySelector(`[data-provider-model-select="${providerId}"]`);
-      if (sel) {
-        sel.innerHTML = getModelsForProvider(providerId)
-          .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
-          .join('');
-        sel.value = getDefaultModelForProvider(providerId);
-      }
+      // Re-render just the select's contents via the shared helper — NOT
+      // renderProviderModelSelect(), which would attach a second 'change'
+      // listener onto the same, still-live <select> element.
+      refreshProviderModelSelectOptions(providerId, panel.querySelector(`[data-provider-model-select="${providerId}"]`));
     });
   }
 

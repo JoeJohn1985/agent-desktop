@@ -325,12 +325,26 @@ function renderProviderReasoningSelect(provider, sel) {
   sel.addEventListener('change', () => saveDefaultReasoningForProvider(provider, sel.value || null));
 }
 
-function renderProviderModelSelect(provider, sel) {
+/**
+ * Fill a provider's model <select> options and current value only — no
+ * listener binding. Safe to call repeatedly on an already-wired element
+ * (e.g. whenever freshly discovered models arrive via applyDynamicModels()),
+ * unlike renderProviderModelSelect() which would stack a duplicate 'change'
+ * listener onto the same element on every call.
+ * @param {string} provider
+ * @param {HTMLSelectElement|null} sel
+ */
+function refreshProviderModelSelectOptions(provider, sel) {
   if (!sel) return;
   sel.innerHTML = getModelsForProvider(provider)
     .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}${MODEL_TIER_TEXT[m.tier] || ''}</option>`)
     .join('');
   sel.value = getDefaultModelForProvider(provider);
+}
+
+function renderProviderModelSelect(provider, sel) {
+  if (!sel) return;
+  refreshProviderModelSelectOptions(provider, sel);
   sel.addEventListener('change', () => saveDefaultModelForProvider(provider, sel.value));
 }
 
@@ -384,6 +398,16 @@ function applyDynamicModels(provider, models) {
 
   updateModelSelectBtn(activeTabId);
   if (document.getElementById('settDefaultProvider')) renderDefaultModelSettings();
+  // Keep the Settings dialog's own default-model select for this provider in
+  // sync too. Without this it only ever shows the snapshot from when that
+  // <select> was last (re)built — initSettings() for Copilot's static tab, or
+  // the last renderProviderConfigTabs() rebuild for the others — so it kept
+  // showing the pre-discovery fallback list even after the real one arrived,
+  // unlike the in-tab model dropdown, which calls getModelsForProvider() fresh
+  // on every open.
+  refreshProviderModelSelectOptions(provider, provider === 'copilot'
+    ? document.getElementById('settProviderModel-copilot')
+    : document.querySelector(`[data-provider-model-select="${provider}"]`));
 }
 
 /** Merge the CLI-reported Copilot models into the selectable list (via ACP). */

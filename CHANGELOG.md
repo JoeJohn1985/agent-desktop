@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.21.1] - 2026-09-23
+
+### Fixed
+- **Die „Standard-Modell"-Auswahl in den Provider-Einstellungen reagierte
+  nicht auf neu entdeckte Modelle.** Das Select wurde nur einmal befüllt —
+  bei Copilots eigenem (statischem) Settings-Tab beim App-Start, bei den
+  dynamisch erzeugten Provider-Tabs (Anthropic, Gemini, …) beim letzten
+  Tab-Aufbau — und blieb danach eingefroren: neu von der CLI/API gemeldete
+  Modelle tauchten dort nicht auf, obwohl das Modell-Dropdown im Tab selbst
+  (🧠-Menü) sie sofort zeigte, weil es bei jedem Öffnen neu aufgebaut wird.
+  `applyDynamicModels()` aktualisiert jetzt zusätzlich das passende
+  Settings-Select, sobald neue Modelle eintreffen.
+
 ## [1.21.0] - 2026-09-22
 
 ### Added
