@@ -67,9 +67,64 @@ function updateReasonText(reason, error) {
   }
 }
 
+// ── Shared: banner auto-collapse into a sidebar icon ─────────
+// A banner (app-update or adapter-update) no longer just vanishes when
+// dismissed or ignored — it collapses into a small icon next to the version
+// label (bottom-left), so the update isn't forgotten but also isn't
+// blocking anything. Clicking the icon re-opens the full banner.
+const BANNER_AUTO_COLLAPSE_MS = 8000;
+
+/**
+ * Creates/replaces a small persistent icon in the sidebar footer, next to
+ * the version label. Clicking it removes itself and re-opens the banner.
+ * @param {string} iconId - Fixed id so re-collapsing replaces rather than stacks.
+ * @param {string} tooltipText
+ * @param {() => void} reopen
+ */
+function collapseToUpdateIcon(iconId, tooltipText, reopen) {
+  document.getElementById(iconId)?.remove();
+  const icon = document.createElement('button');
+  icon.id = iconId;
+  icon.className = 'sidebar__footer-btn sidebar__footer-btn--sm update-pending-icon';
+  // Deliberately not 🔄 — that's already "check for updates now" right next
+  // to it (#btnCheckUpdatesQuick). This means "a known update is waiting,
+  // click to see it again", a different action entirely.
+  icon.textContent = '🔔';
+  icon.setAttribute('data-tooltip', tooltipText);
+  icon.addEventListener('click', () => { icon.remove(); reopen(); });
+  document.getElementById('sidebarUpdateIcons')?.appendChild(icon);
+}
+
+/**
+ * Wires a banner's dismiss (✕) button and an auto-collapse timeout to both
+ * do the same thing: collapse into a sidebar icon instead of disappearing
+ * outright. No-ops if the banner is already gone for another reason (e.g.
+ * the update was applied) by the time either fires.
+ * @param {HTMLElement} bar
+ * @param {string} dismissBtnId
+ * @param {string} iconId
+ * @param {string} tooltipText
+ * @param {() => void} reopen
+ * @param {() => void} [onCollapse] - e.g. record the dismissed version.
+ */
+function wireBannerAutoCollapse(bar, dismissBtnId, iconId, tooltipText, reopen, onCollapse) {
+  const collapse = () => {
+    if (!document.body.contains(bar)) return;
+    bar.remove();
+    onCollapse?.();
+    collapseToUpdateIcon(iconId, tooltipText, reopen);
+  };
+  const timer = setTimeout(collapse, BANNER_AUTO_COLLAPSE_MS);
+  document.getElementById(dismissBtnId)?.addEventListener('click', () => {
+    clearTimeout(timer);
+    collapse();
+  });
+}
+
 /** Show the top update banner (idempotent — replaces any existing one). */
 function showUpdateBanner(currentVersion, latestVersion) {
   document.getElementById('updateBanner')?.remove();
+  document.getElementById('updateBannerIcon')?.remove();
   const bar = document.createElement('div');
   bar.id = 'updateBanner';
   bar.className = 'update-banner';
@@ -78,11 +133,13 @@ function showUpdateBanner(currentVersion, latestVersion) {
     <button class="update-banner__btn" id="btnApplyUpdate">Herunterladen & Neustarten</button>
     <button class="update-banner__close" id="btnDismissUpdate" aria-label="Schließen">✕</button>`;
   document.body.appendChild(bar);
-  document.getElementById('btnDismissUpdate').addEventListener('click', () => {
-    _dismissedUpdateVersion = latestVersion; // don't re-nag on background checks
-    bar.remove();
-  });
   document.getElementById('btnApplyUpdate').addEventListener('click', () => applyUpdate(bar));
+  wireBannerAutoCollapse(
+    bar, 'btnDismissUpdate', 'updateBannerIcon',
+    `App-Update verfügbar: v${latestVersion} (aktuell v${currentVersion})`,
+    () => showUpdateBanner(currentVersion, latestVersion),
+    () => { _dismissedUpdateVersion = latestVersion; }, // don't re-nag on background checks
+  );
 }
 
 /** Apply the update: confirm, run via main, handle failure reasons. */
@@ -167,22 +224,30 @@ async function checkClaudeAdapterUpdate() {
 /** Shows the "Claude Code adapter update available" banner (idempotent). */
 function showClaudeAdapterUpdateBanner(currentVersion, latestVersion) {
   document.getElementById('claudeAdapterUpdateBanner')?.remove();
+  document.getElementById('claudeAdapterUpdateBannerIcon')?.remove();
   const bar = document.createElement('div');
   bar.id = 'claudeAdapterUpdateBanner';
   bar.className = 'update-banner';
-  // Stack below the app self-update banner if that one is showing too.
+  // Stack above the app self-update banner if that one is showing too (both
+  // are bottom-anchored — read its actual resolved offset rather than
+  // assuming the CSS default, in case that ever changes).
   const other = document.getElementById('updateBanner');
-  if (other) bar.style.top = (other.offsetTop + other.offsetHeight + 8) + 'px';
+  if (other) {
+    const otherBottom = parseFloat(getComputedStyle(other).bottom) || 0;
+    bar.style.bottom = (otherBottom + other.offsetHeight + 8) + 'px';
+  }
   bar.innerHTML = `
     <span class="update-banner__text">🔄 Claude-Code-Adapter <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
     <button class="update-banner__btn" id="btnApplyClaudeAdapterUpdate">Aktualisieren</button>
     <button class="update-banner__close" id="btnDismissClaudeAdapterUpdate" aria-label="Schließen">✕</button>`;
   document.body.appendChild(bar);
-  document.getElementById('btnDismissClaudeAdapterUpdate').addEventListener('click', () => {
-    _dismissedClaudeAdapterVersion = latestVersion; // don't re-nag on background checks
-    bar.remove();
-  });
   document.getElementById('btnApplyClaudeAdapterUpdate').addEventListener('click', () => applyClaudeAdapterUpdateFromBanner(bar, latestVersion));
+  wireBannerAutoCollapse(
+    bar, 'btnDismissClaudeAdapterUpdate', 'claudeAdapterUpdateBannerIcon',
+    `Claude-Code-Adapter-Update verfügbar: v${latestVersion} (aktuell v${currentVersion})`,
+    () => showClaudeAdapterUpdateBanner(currentVersion, latestVersion),
+    () => { _dismissedClaudeAdapterVersion = latestVersion; }, // don't re-nag on background checks
+  );
 }
 
 /** "Aktualisieren" button handler on the banner: applies + verifies the pinned version. */

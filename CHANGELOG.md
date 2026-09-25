@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.24.0] - 2026-09-25
+
+### Added
+- **Update-Banner klappen zu einem 🔔-Icon in der Sidebar zusammen** statt
+  beim Wegklicken oder nach Timeout ganz zu verschwinden (betrifft sowohl
+  das App-Update- als auch das Claude-Code-Adapter-Update-Banner). Nach 8s
+  automatisch oder sofort per ✕ — Klick auf das Icon öffnet das Banner
+  wieder (`collapseToUpdateIcon`/`wireBannerAutoCollapse` in
+  `renderer/modules/self-update.js`).
+
+### Fixed
+- **Update-Banner saßen unter der draggable Titelleiste** — Klicks auf die
+  Banner-Buttons wurden dort teils vom Drag-Bereich verschluckt. Jetzt
+  unten verankert (`bottom` statt `top`) statt oben, plus
+  `-webkit-app-region: no-drag`.
+
 ## [1.23.0] - 2026-09-25
 
 ### Added

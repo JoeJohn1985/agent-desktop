@@ -607,6 +607,12 @@ body {
   white-space: nowrap;
 }
 .sidebar__footer-spacer { flex: 1; }
+/* Holds the small collapsed-update icons (see self-update.js
+   collapseToUpdateIcon) — empty and invisible when no update is pending. */
+.sidebar__footer-icons { display: flex; gap: 2px; }
+/* Accent color distinguishes "update pending, click to reopen" from the
+   neutral check/settings icons it sits next to. */
+.update-pending-icon { color: var(--accent); }
 /* Flat/borderless icon button — deliberately its own class rather than
    reusing .action-btn (that one stays as-is for settings/dialog buttons,
    which weren't part of the redesign mockup this matches). */
@@ -1657,10 +1663,17 @@ mark.chat-search-highlight--active {
 /* ── Update Banner (oben, global) ─────────────────────── */
 .update-banner {
   position: fixed;
-  top: 12px;
+  /* Bottom-anchored, not top: `top: 12px` used to sit on top of the
+     draggable titlebar/tab-bar area (z-index put it visually above, but
+     -webkit-app-region: drag there still swallowed clicks meant for this
+     banner's buttons — no-drag below is the belt-and-suspenders fix).
+     60px matches .toast-stack's bottom offset, already tuned to clear the
+     chat input bar. */
+  bottom: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9998;
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 12px;
