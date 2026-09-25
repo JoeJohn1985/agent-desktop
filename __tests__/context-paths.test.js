@@ -16,7 +16,7 @@ const path = require('path');
 const { skillDirs, agentDirs, needsContextInjection, PROJECT_DIR_NAME } = require('../src/context-paths');
 const { DATA_DIR } = require('../src/data-dir');
 
-const CWD = path.join('C:', 'projekte', 'meinprojekt');
+const CWD = path.resolve(path.sep, 'projekte', 'meinprojekt');
 const HOME = os.homedir();
 const API_PROVIDERS = ['anthropic', 'openai', 'glm', 'ollama'];
 
