@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.24.1] - 2026-09-25
+
+### Fixed
+- **Claude Code (SSH): ssh-Prozesse und Remote-Adapter blieben nach
+  Tab-Schließen und App-Neustart bestehen.** `closeTab` rief nur
+  `agent:stop` auf (bricht den Prompt ab) — das Backend und damit der lokale
+  `ssh`-Prozess lebten bis zum App-Ende weiter, ebenso die Adapter-Kette
+  (`npm exec` → `claude-agent-acp` → `claude`, rund 0,5 GB) auf dem
+  Remote-Host. Zusätzlich beenden `updates:apply` und `app:relaunch` die App
+  per `app.exit(0)`, das jedes Aufräumen überspringt; unter Windows blieben
+  die ssh-Kindprozesse dabei verwaist zurück. `closeTab` ruft jetzt
+  zusätzlich `agent:resetBackend` auf, und beide Neustart-Pfade warten vor
+  `app.exit(0)` auf `destroyAllBackends` (`src/main-helpers.js`, höchstens
+  3 s); Fenster-Schließen und App-Ende nutzen denselben Helfer. Schließt die
+  Verbindung sauber, beendet sich die Remote-Kette von selbst (der Adapter
+  endet bei EOF auf stdin).
+
 ## [1.24.0] - 2026-09-25
 
 ### Added

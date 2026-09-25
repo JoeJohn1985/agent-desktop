@@ -13,7 +13,7 @@ const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkil
 const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
 const { readClaudeCodeTranscript } = require('./src/claude-code-transcript');
 const { readTodos, writeTodos } = require('./src/todos');
-const { createSendToRenderer: _createSendToRenderer, buildEnv } = require('./src/main-helpers');
+const { createSendToRenderer: _createSendToRenderer, buildEnv, destroyAllBackends } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, scanSkillsIndex: _scanSkillsIndex, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
 const { scanAgentsDirectory, scanAgentsIndex: _scanAgentsIndex } = require('./src/agents');
 const { readAllInstructions } = require('./src/instructions');
@@ -275,8 +275,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    backends.forEach(client => client.destroy().catch(() => {}));
-    backends.clear();
+    destroyAllBackends(backends);
   });
 }
 
@@ -1235,7 +1234,8 @@ ipcMain.handle('updates:apply', async () => {
     const res = await updater.applyUpdate(REPO_DIR);
     if (res.ok) {
       // Give the renderer a tick to show its "restarting" state, then relaunch.
-      setTimeout(() => { app.relaunch(); app.exit(0); }, 400);
+      // app.exit() überspringt jedes Aufräumen: erst die Backends beenden, sonst bleiben ssh-Prozesse samt Remote-Adapter zurück.
+      setTimeout(async () => { await destroyAllBackends(backends); app.relaunch(); app.exit(0); }, 400);
     }
     return res;
   } catch (e) {
@@ -2440,6 +2440,7 @@ ipcMain.handle('auth:login', async () => {
  */
 ipcMain.handle('app:relaunch', async () => {
   console.log('[app:relaunch] Relaunching the app');
+  await destroyAllBackends(backends);
   app.relaunch();
   app.exit(0);
   return { success: true };
@@ -2506,8 +2507,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  backends.forEach(client => client.destroy().catch(() => {}));
-  backends.clear();
+  destroyAllBackends(backends);
   stopImageWatcher();
   closeLogger();
   app.quit();

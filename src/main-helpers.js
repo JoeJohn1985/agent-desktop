@@ -44,7 +44,31 @@ function createSendToRenderer(getWindow) {
   };
 }
 
+// ── Backends beenden ─────────────────────────────────────────
+/**
+ * Zerstört alle Backends und leert die Map. destroy() wird sofort aufgerufen
+ * (bei ACP-Backends schickt das gleich das SIGTERM an den ssh-/CLI-Kindprozess);
+ * gewartet wird höchstens timeoutMs, damit ein hängender Prozess einen Neustart
+ * nicht blockiert. Vor app.exit() muss awaited werden, denn exit() überspringt
+ * jedes weitere Aufräumen.
+ */
+async function destroyAllBackends(backends, timeoutMs = 3000) {
+  const pending = [...backends.values()].map(client => {
+    try {
+      return Promise.resolve(client.destroy()).catch(() => {});
+    } catch (_) {
+      return Promise.resolve();
+    }
+  });
+  backends.clear();
+  let timer;
+  const timeout = new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); });
+  await Promise.race([Promise.all(pending), timeout]);
+  clearTimeout(timer);
+}
+
 module.exports = {
   buildEnv,
   createSendToRenderer,
+  destroyAllBackends,
 };

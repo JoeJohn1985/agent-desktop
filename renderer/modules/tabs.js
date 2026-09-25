@@ -253,6 +253,8 @@ function closeTab(tabId) {
 
   stopInactivityMonitor(tabId);
   try { desktop.chat.stop(tabId); } catch (_) {}
+  // stop bricht nur den Prompt ab; ohne resetBackend lebt der Backend-Prozess (bei Claude Code (SSH) der ssh-Client samt Remote-Adapter) bis zum App-Ende weiter.
+  try { desktop.chat.resetBackend(tabId).catch(() => {}); } catch (_) {}
   tab.streamEl.remove();
 
   tabs.delete(tabId);

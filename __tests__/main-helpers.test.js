@@ -1,9 +1,60 @@
 const {
   createSendToRenderer,
   buildEnv,
+  destroyAllBackends,
 } = require('../src/main-helpers');
 const path = require('path');
 const os = require('os');
+
+// ═══════════════════════════════════════════════════════════════
+// destroyAllBackends
+// ═══════════════════════════════════════════════════════════════
+describe('destroyAllBackends', () => {
+  test('zerstört alle Backends und leert die Map', async () => {
+    const a = { destroy: jest.fn().mockResolvedValue() };
+    const b = { destroy: jest.fn().mockResolvedValue() };
+    const backends = new Map([[1, a], [2, b]]);
+
+    await destroyAllBackends(backends);
+
+    expect(a.destroy).toHaveBeenCalledTimes(1);
+    expect(b.destroy).toHaveBeenCalledTimes(1);
+    expect(backends.size).toBe(0);
+  });
+
+  test('ruft destroy() sofort auf, noch bevor gewartet wird', () => {
+    const a = { destroy: jest.fn(() => new Promise(() => {})) };
+    const backends = new Map([[1, a]]);
+
+    destroyAllBackends(backends, 10);
+
+    expect(a.destroy).toHaveBeenCalledTimes(1);
+    expect(backends.size).toBe(0);
+  });
+
+  test('verschluckt Fehler einzelner Backends und zerstört die übrigen', async () => {
+    const abgelehnt = { destroy: jest.fn().mockRejectedValue(new Error('boom')) };
+    const wirft = { destroy: jest.fn(() => { throw new Error('sync boom'); }) };
+    const ok = { destroy: jest.fn().mockResolvedValue() };
+
+    await expect(destroyAllBackends(new Map([[1, abgelehnt], [2, wirft], [3, ok]]))).resolves.toBeUndefined();
+
+    expect(ok.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('wartet höchstens timeoutMs auf ein hängendes Backend', async () => {
+    const haengt = { destroy: jest.fn(() => new Promise(() => {})) };
+    const start = Date.now();
+
+    await destroyAllBackends(new Map([[1, haengt]]), 50);
+
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  test('funktioniert mit leerer Map', async () => {
+    await expect(destroyAllBackends(new Map())).resolves.toBeUndefined();
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════
 // createSendToRenderer

@@ -10,6 +10,7 @@
  * Fake-Abhängigkeiten statt echtem Dateisystemzugriff.
  */
 
+const path = require('path');
 const {
   ALL_PROVIDERS,
   validateContextTarget,
@@ -49,7 +50,8 @@ describe('validateContextTarget', () => {
   });
 
   test('übernimmt einen gültigen absoluten cwd unverändert', () => {
-    expect(validateContextTarget('copilot', 'C:\\projekt')).toEqual({ provider: 'copilot', cwd: 'C:\\projekt' });
+    const absolute = path.resolve(path.sep, 'projekt');
+    expect(validateContextTarget('copilot', absolute)).toEqual({ provider: 'copilot', cwd: absolute });
   });
 });
 
