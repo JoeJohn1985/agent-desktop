@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.23.0] - 2026-09-25
+
+### Added
+- **Automatisches Compact für Claude Code (ACP) ab 65% Kontext-Auslastung.**
+  Der `claude-code-acp`-Adapter (lokal wie SSH) repliziert das Auto-Compact
+  der interaktiven `claude`-CLI nicht — dasselbe Verhalten (Kontext läuft
+  voll, nichts kompaktiert automatisch) melden Zed-Nutzer über denselben
+  Adapter (zed-industries/zed#37483). Agent Desktop prüft jetzt nach jedem
+  Zug den bereits live getrackten Kontext-Prozentsatz (gespeist aus
+  `usage_update`) und schickt ab 65% selbst ein stilles `/compact`
+  (`maybeAutoCompactSubscription` in `renderer/app.js`, aufgerufen aus dem
+  `onDone`-Handler in `renderer/modules/agent-ipc.js`). Direkt-API-Tabs sind
+  unverändert (eigener Auto-Compact bei 80%, `AUTO_COMPACT_PERCENT`).
+
 ## [1.22.0] - 2026-09-24
 
 ### Added

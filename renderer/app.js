@@ -1427,6 +1427,34 @@ async function refreshSubscriptionUsage(tabId) {
   }
 }
 
+/** Context utilisation (%) at which a Claude Code (ACP subscription) tab auto-compacts. */
+const AUTO_COMPACT_PERCENT_SUBSCRIPTION = 65;
+
+/**
+ * For Claude Code tabs (local + SSH, both driven via claude-code-acp): after a
+ * turn, check the context-% already tracked live from usage_update events and,
+ * if it's high, auto-compact. Unlike the interactive `claude` CLI, the
+ * claude-code-acp adapter does not replicate the CLI's own auto-compact — this
+ * is confirmed upstream (zed-industries/zed#37483: Zed users hit the identical
+ * "context fills, nothing compacts" behaviour through the same adapter) — so
+ * without this, the session just runs until the backend rejects the next
+ * prompt outright.
+ * @param {number} tabId
+ */
+async function maybeAutoCompactSubscription(tabId) {
+  const tab = tabs.get(tabId);
+  const pct = tab?._contextPercent;
+  if (pct == null || pct < AUTO_COMPACT_PERCENT_SUBSCRIPTION) return;
+  try {
+    showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
+    await window.desktop.chat.silentCommand(tabId, '/compact');
+    const after = await window.desktop.chat.silentCommand(tabId, '/context');
+    if (after.success) setTabContext(tabId, after.text);
+  } catch (e) {
+    console.warn('[context] maybeAutoCompactSubscription fehlgeschlagen:', e?.message);
+  }
+}
+
 /**
  * Read & display the context-% for a tab without auto-compacting. Used for
  * Copilot tabs (the CLI manages its own context window). /context is free.

@@ -10,8 +10,8 @@
 // pruneOldMessages (tab management/status), the model/provider catalog
 // (applyDynamicModels/updateModelSelectBtn/updateModeSelectBtn/
 // isSubscriptionProvider/isAcpProvider/getTabProvider/_dynamicModes), usage
-// display (refresh*/update*UsageDisplay/updateContextButtonPct — see
-// plans/app-js-modularization.md for why that cluster stays in app.js),
+// display (refresh*/update*UsageDisplay/updateContextButtonPct — stays in
+// app.js: high fan-out, tightly coupled, not worth a mechanical split),
 // named-session persistence (setSessionName/saveSessionCwd/
 // saveSessionProvider/saveSessionModelConfiguration), and permission
 // requests (enqueuePermissionRequest). Also relies on modules/skills-mcp.js
@@ -606,8 +606,10 @@ function initAgentIPC() {
       if (isSubscriptionProvider(getTabProvider(tab))) {
         // Subscription (Claude Code): no per-token billing, and the context %
         // arrives live via usage_update. The rate-limit *percentage*, however,
-        // is NOT in the live stream — fetch it from /usage.
-        refreshSubscriptionUsage(tabId);
+        // is NOT in the live stream — fetch it from /usage. The claude-code-acp
+        // adapter doesn't auto-compact on its own (unlike the interactive CLI),
+        // so check the just-updated context-% and compact here if needed.
+        refreshSubscriptionUsage(tabId).finally(() => maybeAutoCompactSubscription(tabId));
       } else {
         refreshUsageDisplay(tabId).finally(() => {
           // /context is free for all providers. Direct-API tabs additionally
