@@ -184,7 +184,7 @@
 | `main.js` | **Electron main process** — window creation, AcpClient management, IPC glue |
 | `preload.js` | **Context bridge** — exposes `window.copilot` and `window.markdown` |
 | `renderer/index.html` | **App shell** — custom titlebar, sidebar, chat area, settings overlay |
-| `renderer/app.js` | **Frontend logic** — tab management, agent-IPC event dispatch, model/provider catalog, settings init, usage/cost display glue (what hasn't been extracted into `renderer/modules/` yet — see §5.5 and `plans/app-js-modularization.md`) |
+| `renderer/app.js` | **Frontend logic** — tab management, agent-IPC event dispatch, model/provider catalog, settings init, usage/cost display glue (what hasn't been extracted into `renderer/modules/` yet — see §5.5) |
 | `renderer/styles.css` | **All styles** — CSS variables, 2 themes (Light/Dark) |
 | `renderer/modules/*.js` | **UI modules**, one per concern — see §5.5 for the full list |
 | `src/acp-client.js` | **AcpClient** (Copilot backend) — JSON-RPC over NDJSON stdio, session management, silentCommand |
@@ -274,10 +274,9 @@ mechanics. Loaded before `app.js`, in this order:
 | `plugins.js` | Plugin/marketplace manager + chat/plugins/costs main-view switching |
 | `onboarding.js` | First-run wizard (cwd/provider/folders/role) + post-onboarding tutorial popups |
 
-The last nine were extracted from `renderer/app.js` in one pass (see
-`plans/app-js-modularization.md`); tab management, the agent-IPC event
-dispatcher, and the model/provider catalog remain in `app.js` on purpose —
-too tightly coupled for a mechanical split.
+The last nine were extracted from `renderer/app.js` in one pass; tab
+management, the agent-IPC event dispatcher, and the model/provider catalog
+remain in `app.js` on purpose — too tightly coupled for a mechanical split.
 
 ### 5.6 `src/renderer-logic.js` — pure logic
 
@@ -486,7 +485,6 @@ duplicated block is recoverable, swallowed instructions are not.
 Deliberately out of scope for now: the direct-API providers (their system prompt
 composition/caching is being reworked first) and `claude-code-ssh` (its
 instruction file lives on the remote host, which needs SSH rather than `fs`).
-See `plans/cross-provider-plans.md`.
 
 ### 6.5 IPC communication
 
@@ -688,7 +686,7 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 
 | # | Risk / debt | Impact | Mitigation |
 |---|---|---|---|
-| R-1 | **`renderer/app.js` is ~4.7k lines, procedural** (was ~8.5k before the Phase-1 modularization pass) | Hard to navigate | Phase 1 done — 9 self-contained clusters moved to `renderer/modules/`. Remaining: tab management, `initAgentIPC`, model/provider catalog, `initSettings` — deferred (Phase 2) as too tightly coupled for a mechanical split. See `plans/app-js-modularization.md`. |
+| R-1 | **`renderer/app.js` is ~4.7k lines, procedural** (was ~8.5k before the Phase-1 modularization pass) | Hard to navigate | Phase 1 done — 9 self-contained clusters moved to `renderer/modules/`. Remaining: tab management, `initAgentIPC`, model/provider catalog, `initSettings` — deferred (Phase 2) as too tightly coupled for a mechanical split. |
 | R-2 | **ACP is an unofficial API** | A CLI update can change the protocol | `acp-client.js` encapsulates all ACP details; changes stay localized |
 | R-3 | **`/usage` reports "AI Units" instead of "AI Credits"** | The credit display is based on token calculation, not the official number | Track whether ACP will provide credits in the future; token calculation as fallback |
 | R-4 | **No automated E2E smoke test for the chat roundtrip** | Regressions surface only manually | Playwright stub present in `e2e/` |

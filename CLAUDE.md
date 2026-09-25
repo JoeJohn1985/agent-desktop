@@ -20,9 +20,9 @@ script has finished loading before `DOMContentLoaded` fires.
 `renderer/app.js` (~4.7k lines) hosts what hasn't been extracted yet: tab
 management (`switchTab`/`closeTab`/`createTab`), the central agent-IPC event
 dispatcher (`initAgentIPC`), the model/provider catalog, `initSettings`, and
-usage/cost display glue. These are intentionally **not** split further — see
-`plans/app-js-modularization.md` (Phase 2) for why: high fan-out, tightly
-coupled, needs a slower, more careful pass than the mechanical Phase 1 move.
+usage/cost display glue. These are intentionally **not** split further:
+high fan-out, tightly coupled, needs a slower, more careful pass than the
+mechanical Phase 1 move.
 
 `renderer/modules/*.js` — one file per concern, loaded before `app.js`:
 

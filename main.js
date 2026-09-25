@@ -162,7 +162,7 @@ function ensureProviderContextDirs() {
  *
  * `claude-code-ssh` is absent on purpose: its instruction file lives on the
  * remote host, which needs SSH rather than fs (a later extension of the SSH
- * provider, see plans/cross-provider-plans.md).
+ * provider).
  * @type {Array<{bin: string, file: string}>}
  */
 const PLANS_CONVENTION_TARGETS = [
