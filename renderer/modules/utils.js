@@ -137,7 +137,7 @@ async function withButtonBusy(btn, asyncFn) {
 // ── Shared Empty-State Markup ─────────────────────────────────
 /**
  * Consistent icon+text markup for an empty sidebar list (Todos, Sessions,
- * Images, session-tools popup, skill manager, …), instead of each spot
+ * Images, skill manager, …), instead of each spot
  * hand-rolling its own inline-styled placeholder text.
  * @param {string} icon - Single emoji/icon character.
  * @param {string} text - Message shown below the icon.

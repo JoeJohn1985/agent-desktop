@@ -14,7 +14,7 @@
 // (modules/utils.js), switchToChatView (modules/plugins.js), loadTodos
 // (modules/todos.js), loadContextForTab/renderSkills/loadProjectMcpServers/
 // mergeMcpByName/mcpServers/globalMcpServers/renderMcpServers (modules/
-// skills-mcp.js), renderSessionTools (modules/session-tools.js),
+// skills-mcp.js),
 // filterSessions/renderSessions/setSessionName (modules/sessions-sidebar.js),
 // initAutoScroll/resizeChatInput/updateStatus/stopInactivityMonitor/
 // saveOpenTabs (app.js), getDefaultProvider/getDefaultModelForProvider/
@@ -86,7 +86,6 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
     _unlockBtnTimer: null,
     _unlockBtnEl: null,
     allowedTools: new Set(),
-    sessionDeniedTools: [],
     // Restore the provider's last-picked mode, else the default.
     mode: getSavedModeForProvider(tabProvider) || DEFAULT_MODE_ID,
     _lastUsageParsed: null,
@@ -174,9 +173,6 @@ function switchTab(tabId) {
   _mark('context load kicked off + renderSkills done');
 
   loadProjectMcpServers(activeTab?.cwd || null);
-
-  // Refresh session tools list for this tab
-  renderSessionTools();
 
   // Update MCP servers for this tab: global (user/workspace) servers as base,
   // plus any tab-specific servers — deduplicated by name (global wins).

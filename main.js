@@ -1273,30 +1273,6 @@ ipcMain.handle('agent:getInstructions', () => {
   return found;
 });
 
-/** @ipc agent:restartWithDeniedTools — Restarts the ACP process with updated denied tools, then reloads the session. */
-ipcMain.handle('agent:restartWithDeniedTools', async (_event, tabId, deniedTools) => {
-  const client = backends.get(tabId);
-  if (!client) return { success: false, error: 'Kein aktiver Client' };
-  // Direct-API backends read the deny list live per tool call — no restart needed.
-  if (client.__provider && client.__provider !== 'copilot') {
-    client.updateOptions({ deniedTools });
-    return { success: true };
-  }
-  const sessionId = client.sessionId;
-  if (!sessionId) return { success: false, error: 'Keine aktive Session' };
-  try {
-    await client.stop();
-    client.updateOptions({ deniedTools });
-    await client.start();
-    await client.loadSession(sessionId);
-    console.log(`[agent:restartWithDeniedTools] tab ${tabId} restarted with ${deniedTools.length} denied tools`);
-    return { success: true };
-  } catch (err) {
-    console.error('[agent:restartWithDeniedTools]', err?.message || String(err));
-    return { success: false, error: err?.message || String(err) };
-  }
-});
-
 /** @ipc agent:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('agent:stop', (_event, tabId) => {
   const client = backends.get(tabId);

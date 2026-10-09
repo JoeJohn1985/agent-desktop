@@ -857,17 +857,12 @@ function updateModelSelectBtn(tabId) {
 }
 
 /**
- * Hide the session tools deny-list for Claude Code (it governs permissions via
- * its mode/permission prompts, not --deny-tool). The mode dropdown IS shown for
- * Claude Code — it carries the provider's own discovered modes.
+ * Update sidebar sections for the active provider.
  * @param {string} [tabId]
  */
 function updateProviderSpecificControls(tabId) {
   const tab = tabs.get(tabId ?? activeTabId);
   const provider = tab ? getTabProvider(tab) : 'copilot';
-  const isClaudeCode = isClaudeCodeProvider(provider);
-  const toolsWrap = document.getElementById('btnSessionTools')?.closest('.tools-popup-wrapper');
-  if (toolsWrap) toolsWrap.style.display = isClaudeCode ? 'none' : '';
   // Hide sidebar sections the active provider doesn't support (skills/agents/MCP/sessions).
   updateSidebarForProvider(provider);
 }

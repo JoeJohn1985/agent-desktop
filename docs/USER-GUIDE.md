@@ -96,7 +96,7 @@ The interface consists of four main areas: titlebar, sidebar, main area, and sta
 ├────────────┬────────────────────────────────────────────────────┤
 │            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab bar
 │  Sessions  ├────────────────────────────────────────────────────┤
-│            │  🧠 Sonnet  🤖 Agent  📊 18%  🔧 Tools   ~12.5C  │  ← Session actions
+│            │  🧠 Sonnet  🤖 Agent  📊 18%             ~12.5C  │  ← Session actions
 │  Skills    ├────────────────────────────────────────────────────┤
 │            │                                                    │
 │  Todos     │                  Chat area                         │
@@ -184,7 +184,6 @@ Directly below the tab bar you control the active session:
 | **🧠 Model name** | Opens the model dropdown (shows only the selected provider's models; per tab, persistent) |
 | **🤖 Mode** | Opens the mode/agent selection dropdown |
 | **📊 XX%** | Context dropdown — shows usage, opens a detail panel, or runs compact/clear |
-| **🔧 Tools** | Opens a popup for session-specific tool denials |
 | **📈** | Opens the cost page (cost listing as a dedicated full-screen page) |
 | **~$X.XX** | Estimated USD cost when a per-token price is known; Copilot prices are refreshed daily from GitHub when online. Unknown/Auto models fall back to raw `/usage` values when available. |
 
@@ -504,6 +503,10 @@ A dedicated tab per provider that's actually usable right now: **Copilot** is al
 | **Gemini** | Default model, session resume (rename a tab to save it, reopen from the sidebar) — kept context-light otherwise, no Skills/Agents/Instructions/deny list (no shell tool) |
 
 Each provider's shell-tool deny list is fully independent — blocking `git push` for Anthropic doesn't affect Copilot or any other provider. Claude Code has its own approval mechanism instead and isn't part of this at all.
+
+Tool blocking is configured only in the provider settings, not separately for
+individual chat tabs. Previously saved session-specific tool blocks are ignored;
+the per-tab approval toggle and native permission requests remain available.
 
 #### Features tab
 

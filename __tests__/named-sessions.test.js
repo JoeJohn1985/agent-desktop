@@ -2,8 +2,6 @@
 
 const {
   isSessionIdLike,
-  stripShellWrapper,
-  wrapShell,
   createNamedSessionsManager,
 } = require('../src/named-sessions');
 
@@ -42,54 +40,6 @@ describe('isSessionIdLike', () => {
   });
 });
 
-// ── stripShellWrapper ────────────────────────────────────────
-
-describe('stripShellWrapper', () => {
-  test('entfernt shell() Wrapper', () => {
-    expect(stripShellWrapper('shell(git push)')).toBe('git push');
-    expect(stripShellWrapper('shell(rm -rf /)')).toBe('rm -rf /');
-  });
-
-  test('lässt Strings ohne Wrapper unverändert', () => {
-    expect(stripShellWrapper('git push')).toBe('git push');
-    expect(stripShellWrapper('npm install')).toBe('npm install');
-  });
-
-  test('behandelt leere/null-Werte', () => {
-    expect(stripShellWrapper('')).toBe('');
-    expect(stripShellWrapper(null)).toBe('');
-    expect(stripShellWrapper(undefined)).toBe('');
-  });
-
-  test('entfernt nur äußeren Wrapper, nicht verschachtelten', () => {
-    expect(stripShellWrapper('shell(echo shell(hello))')).toBe('echo shell(hello)');
-  });
-});
-
-// ── wrapShell ────────────────────────────────────────────────
-
-describe('wrapShell', () => {
-  test('wraps plain command in shell()', () => {
-    expect(wrapShell('git push')).toBe('shell(git push)');
-    expect(wrapShell('rm -rf /')).toBe('shell(rm -rf /)');
-  });
-
-  test('lässt bereits gewrappte Commands unverändert', () => {
-    expect(wrapShell('shell(git push)')).toBe('shell(git push)');
-  });
-
-  test('trimmt Whitespace', () => {
-    expect(wrapShell('  git push  ')).toBe('shell(git push)');
-  });
-
-  test('gibt leeren String für null/undefined/leer zurück', () => {
-    expect(wrapShell(null)).toBe('');
-    expect(wrapShell(undefined)).toBe('');
-    expect(wrapShell('')).toBe('');
-    expect(wrapShell('   ')).toBe('');
-  });
-});
-
 // ── createNamedSessionsManager ───────────────────────────────
 
 describe('createNamedSessionsManager', () => {
@@ -109,11 +59,11 @@ describe('createNamedSessionsManager', () => {
       expect(mgr.getName('abc-123')).toBe('Mein Projekt');
     });
 
-    test('erzeugt neuen Eintrag mit deniedTools und lastUsed', () => {
+    test('erzeugt neuen Eintrag ohne tabbezogene Tool-Konfiguration', () => {
       mgr.setName('new-session', 'Test');
       const entry = mgr.getEntry('new-session');
       expect(entry.name).toBe('Test');
-      expect(entry.deniedTools).toEqual([]);
+      expect(entry).not.toHaveProperty('deniedTools');
       expect(entry.lastUsed).toBeTruthy();
     });
 
@@ -170,34 +120,6 @@ describe('createNamedSessionsManager', () => {
     });
   });
 
-  // ── deniedTools ────────────────────────────────────────────
-
-  describe('getDeniedTools / saveDeniedTools', () => {
-    test('gibt leeres Array für neue Session zurück', () => {
-      mgr.setName('s1', 'Fresh');
-      expect(mgr.getDeniedTools('s1')).toEqual([]);
-    });
-
-    test('speichert und lädt denied tools', () => {
-      mgr.setName('s1', 'Tooled');
-      const tools = [
-        { name: 'shell(git push)', enabled: true, pinned: true },
-        { name: 'shell(rm -rf)', enabled: false, pinned: false },
-      ];
-      mgr.saveDeniedTools('s1', tools);
-      expect(mgr.getDeniedTools('s1')).toEqual(tools);
-    });
-
-    test('gibt leeres Array für unbekannte Session zurück', () => {
-      expect(mgr.getDeniedTools('nope')).toEqual([]);
-    });
-
-    test('tut nichts bei saveDeniedTools für unbekannte Session', () => {
-      expect(() => mgr.saveDeniedTools('nope', [{ name: 'x' }])).not.toThrow();
-      expect(store.namedSessions['nope']).toBeUndefined();
-    });
-  });
-
   // ── getSortedList ──────────────────────────────────────────
 
   describe('getSortedList', () => {
@@ -237,31 +159,4 @@ describe('createNamedSessionsManager', () => {
     });
   });
 
-  // ── Pin-Logik (max 5) ─────────────────────────────────────
-
-  describe('Pinned Tools (max 5)', () => {
-    test('kann bis zu 5 Tools pinnen', () => {
-      mgr.setName('s1', 'Test');
-      const tools = [];
-      for (let i = 0; i < 5; i++) {
-        tools.push({ name: `shell(cmd${i})`, enabled: true, pinned: true });
-      }
-      mgr.saveDeniedTools('s1', tools);
-      const pinned = mgr.getDeniedTools('s1').filter(t => t.pinned);
-      expect(pinned).toHaveLength(5);
-    });
-
-    test('Tools behalten ihre enabled/pinned-Flags', () => {
-      mgr.setName('s1', 'Test');
-      mgr.saveDeniedTools('s1', [
-        { name: 'shell(git push)', enabled: true, pinned: true },
-        { name: 'shell(rm)', enabled: false, pinned: false },
-      ]);
-      const tools = mgr.getDeniedTools('s1');
-      expect(tools[0].pinned).toBe(true);
-      expect(tools[0].enabled).toBe(true);
-      expect(tools[1].pinned).toBe(false);
-      expect(tools[1].enabled).toBe(false);
-    });
-  });
 });

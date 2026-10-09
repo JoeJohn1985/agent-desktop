@@ -14,26 +14,6 @@ function isSessionIdLike(str) {
 }
 
 /**
- * Strip shell() wrapper for display: "shell(git push)" → "git push"
- */
-function stripShellWrapper(name) {
-  if (!name || typeof name !== 'string') return name || '';
-  const m = name.match(/^shell\((.+)\)$/);
-  return m ? m[1] : name;
-}
-
-/**
- * Wrap a command in shell() if not already wrapped.
- */
-function wrapShell(cmd) {
-  if (!cmd || typeof cmd !== 'string') return '';
-  const trimmed = cmd.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('shell(') && trimmed.endsWith(')')) return trimmed;
-  return `shell(${trimmed})`;
-}
-
-/**
  * Named sessions CRUD operations on a plain object store.
  */
 function createNamedSessionsManager(store) {
@@ -53,7 +33,7 @@ function createNamedSessionsManager(store) {
   function setName(sessionId, name) {
     if (!store.namedSessions) store.namedSessions = {};
     if (!store.namedSessions[sessionId]) {
-      store.namedSessions[sessionId] = { name, deniedTools: [], lastUsed: new Date().toISOString() };
+      store.namedSessions[sessionId] = { name, lastUsed: new Date().toISOString() };
     } else {
       store.namedSessions[sessionId].name = name;
     }
@@ -67,16 +47,6 @@ function createNamedSessionsManager(store) {
   function touch(sessionId) {
     if (!store.namedSessions || !store.namedSessions[sessionId]) return;
     store.namedSessions[sessionId].lastUsed = new Date().toISOString();
-  }
-
-  function getDeniedTools(sessionId) {
-    const entry = getAll()[sessionId];
-    return entry?.deniedTools || [];
-  }
-
-  function saveDeniedTools(sessionId, tools) {
-    if (!store.namedSessions || !store.namedSessions[sessionId]) return;
-    store.namedSessions[sessionId].deniedTools = tools;
   }
 
   /**
@@ -125,12 +95,10 @@ function createNamedSessionsManager(store) {
       .sort((a, b) => (b.lastUsed || '').localeCompare(a.lastUsed || ''));
   }
 
-  return { getAll, getName, getEntry, setName, remove, touch, getDeniedTools, saveDeniedTools, saveSessionCwd, getSessionCwd, saveSessionProvider, getSessionProvider, getSortedList };
+  return { getAll, getName, getEntry, setName, remove, touch, saveSessionCwd, getSessionCwd, saveSessionProvider, getSessionProvider, getSortedList };
 }
 
 module.exports = {
   isSessionIdLike,
-  stripShellWrapper,
-  wrapShell,
   createNamedSessionsManager,
 };

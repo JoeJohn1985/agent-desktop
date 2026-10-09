@@ -98,8 +98,6 @@ contextBridge.exposeInMainWorld('desktop', {
      * @param {number} tabId
      */
     stop: (tabId) => ipcRenderer.send('agent:stop', tabId),
-    /** @ipc agent:restartWithDeniedTools — Restarts the ACP process with new denied tools, reloads session. */
-    restartWithDeniedTools: (tabId, deniedTools) => ipcRenderer.invoke('agent:restartWithDeniedTools', tabId, deniedTools),
     /** @ipc agent:silentCommand — Runs a slash command silently, returns {success, text}. */
     silentCommand: (tabId, command, timeoutMs) => ipcRenderer.invoke('agent:silentCommand', tabId, command, timeoutMs),
     /** @ipc agent:respondPermission — Answers an ACP permission request. */

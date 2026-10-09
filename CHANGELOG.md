@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.25.0] - 2026-10-09
+
+### Removed
+- **Tabbezogene Tool-Konfiguration:** Der Tools-Button und sein Popup wurden
+  einschließlich Tabzustand, Speicherung, Wiederherstellung und dem zugehörigen
+  Prozess-Neustart entfernt. Früher gespeicherte Session-Tool-Sperren wirken
+  nicht mehr. Globale Tool-Sperrlisten in den Provider-Einstellungen,
+  der Freigabeschalter pro Tab und native Berechtigungsabfragen bleiben erhalten.
+
 ## [1.24.1] - 2026-09-25
 
 ### Fixed

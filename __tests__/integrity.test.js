@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const HTML_PATH = path.join(ROOT, 'renderer', 'index.html');
@@ -27,6 +28,85 @@ if (fs.existsSync(IPC_DIR)) {
     allBackendJs += '\n' + fs.readFileSync(path.join(IPC_DIR, f), 'utf-8');
   }
 }
+
+describe('Tabbezogene Tool-Konfiguration entfernt', () => {
+  const rendererJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf-8');
+
+  test('Toolbar und Scripts enthalten keine Session-Tool-Konfiguration', () => {
+    expect(html).not.toMatch(/id="(?:btnSessionTools|sessionToolsPopup|sessionToolInput|btnAddSessionTool|sessionToolsList)"/);
+    expect(html).not.toContain('modules/session-tools.js');
+    expect(css).not.toMatch(/\.session-tools-popup|\.tools-popup-wrapper/);
+  });
+
+  test('kein tabbezogener Tool-Neustart, native Freigaben bleiben verfügbar', () => {
+    expect(preloadJs).not.toContain('restartWithDeniedTools');
+    expect(allBackendJs).not.toContain('agent:restartWithDeniedTools');
+    expect(html).toContain('id="btnApprovalToggle"');
+    expect(preloadJs).toContain("ipcRenderer.invoke('agent:respondPermission'");
+  });
+
+  test.each(['copilot', 'anthropic'])('sendet nur globale Sperren für %s, keine alten Tab-Sperren', (provider) => {
+    const settings = {
+      deniedToolsByProvider: {
+        copilot: ['shell(git push)'],
+        anthropic: ['shell(npm publish)'],
+      },
+    };
+    const tab = {
+      sessionId: 'existing-session',
+      selectedModel: 'test-model',
+      provider,
+      manualApproval: true,
+      sessionDeniedTools: [{ name: 'shell(legacy-command)', enabled: true }],
+      activeSkills: new Set(),
+      streamEl: { insertBefore: jest.fn() },
+      statusEl: { style: {} },
+    };
+    const input = { value: 'hello', style: {} };
+    const send = jest.fn().mockResolvedValue('tab-1');
+    const sendSource = rendererJs.match(/^function sendMessage\b[\s\S]*?^\}/m)[0];
+    const denySource = rendererJs.match(/^function getDeniedTools\b[\s\S]*?^\}/m)[0];
+    const sendMessage = vm.runInNewContext(`(${sendSource})`, {
+      document: {
+        getElementById: () => input,
+        createElement: () => ({ dataset: {} }),
+      },
+      desktop: { chat: { send } },
+      tabs: new Map([['tab-1', tab]]),
+      activeTabId: 'tab-1',
+      activeAgents: new Set(),
+      richTextMode: false,
+      inputHistory: [],
+      historyIndex: -1,
+      historySavedInput: '',
+      getTabProvider: currentTab => currentTab.provider,
+      isCopilotModelAvailable: () => true,
+      formatMessageTime: () => '12:00',
+      setTabStatus: jest.fn(),
+      startInactivityMonitor: jest.fn(),
+      getSettings: () => settings,
+      getDeniedTools: vm.runInNewContext(`(${denySource})`, { getSettings: () => settings }),
+      getReasoningForModel: () => null,
+      isClaudeCodeProvider: () => false,
+      getEffectiveExtraDirs: () => [],
+      getProviderBaseUrl: () => undefined,
+      DEFAULT_MODEL_ID: 'test-model',
+      DEFAULT_MODE_ID: 'agent',
+      handleSendResult: jest.fn(),
+      touchSession: jest.fn(),
+      scrollToBottom: jest.fn(),
+    });
+
+    sendMessage();
+
+    expect(send).toHaveBeenCalledWith('tab-1', 'hello', expect.objectContaining({
+      deniedTools: settings.deniedToolsByProvider[provider],
+      manualApproval: true,
+      sessionId: 'existing-session',
+      provider,
+    }));
+  });
+});
 
 // ── Script-Tag Integrität ────────────────────────────────────
 

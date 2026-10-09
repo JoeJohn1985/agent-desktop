@@ -33,7 +33,6 @@ mechanical Phase 1 move.
 | `todos.js` | Per-session task list |
 | `images.js` | Image thumbnails, lightbox, drag&drop into chat |
 | `test-runner.js` | Jest/Playwright/coverage frontend |
-| `session-tools.js` | Session-specific denied-tools popup |
 | `costs.js` | Cost-log persistence + the Costs page (chart, Claude token-history) |
 | `skills-mcp.js` | Skills/Agents/MCP sidebar rendering + per-tab context loading |
 | `sessions-sidebar.js` | Named-session list, search, rename, resume, delete, history-bubble rendering |

@@ -6,7 +6,7 @@
 // showNotification/formatToolArgs (modules/utils.js), tabs/activeTabId/
 // switchTab/renderTabs/createTab/scrollToBottom (app.js tab management),
 // getSessionName/setSessionName/getSessionProvider/getSessionModel/
-// getSessionReasoningByModel/getSessionDeniedTools/getSessionApproval/
+// getSessionReasoningByModel/getSessionApproval/
 // getSessionCwd/saveSessionCwd/touchSession/getNamedSessions/
 // removeSessionName/getSettings (app.js named-session persistence),
 // getClaudeCodeSshHost/getClaudeCodeSshCwd/isClaudeCodeProvider/
@@ -359,9 +359,6 @@ async function resumeSession(sessionId) {
   if (!tab) return;
 
   tab._sessionName = customName || null;
-
-  // Restore session denied tools from namedSessions
-  tab.sessionDeniedTools = getSessionDeniedTools(sessionId);
 
   // Model was already applied via createTab(initialModel); just refresh the button.
   if (sessionModel) updateModelSelectBtn(tabId);

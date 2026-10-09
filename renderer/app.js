@@ -298,8 +298,6 @@ function saveOpenTabs() {
         reasoningByModel,
       });
       saveSessionReasoningByModel(tab.sessionId, reasoningByModel);
-      // Persist denied tools in namedSessions
-      saveSessionDeniedTools(tab.sessionId, tab.sessionDeniedTools || []);
     } else if (
       provider !== getDefaultProvider()
       || (tab.selectedModel && tab.selectedModel !== getDefaultModelId())
@@ -344,12 +342,9 @@ async function restoreOpenTabs() {
       if (tab) {
         tab.sessionId = t.sessionId || null;
         tab.cwd = t.sessionId ? getSessionCwd(t.sessionId) : null;
-        // Load denied tools from namedSessions
-        tab.sessionDeniedTools = t.sessionId ? getSessionDeniedTools(t.sessionId) : [];
         updateModelSelectBtn(tabId);
         activeSessionId = t.sessionId;
         loadTodos(tab.cwd);
-        renderSessionTools();
         // Display session context for restored tabs
         if (t.sessionId) displaySessionContext(tab, t.sessionId, tabId);
       }
@@ -372,7 +367,7 @@ function saveSetting(key, value) {
 // ── Named Sessions (persistent, CLI-sicher) ──────────────────
 /**
  * Retrieve the named-sessions map from preferences.
- * @returns {Object<string, {name: string, deniedTools: Array, lastUsed: string}>}
+ * @returns {Object<string, {name: string, lastUsed: string}>}
  */
 function getNamedSessions() {
   return getPref('namedSessions', {});
@@ -401,7 +396,7 @@ function getSessionEntry(sessionId) {
 function setSessionName(sessionId, name) {
   const all = getNamedSessions();
   if (!all[sessionId]) {
-    all[sessionId] = { name, deniedTools: [], lastUsed: new Date().toISOString() };
+    all[sessionId] = { name, lastUsed: new Date().toISOString() };
   } else {
     all[sessionId].name = name;
   }
@@ -422,29 +417,6 @@ function touchSession(sessionId) {
   const all = getNamedSessions();
   if (all[sessionId]) {
     all[sessionId].lastUsed = new Date().toISOString();
-    setPref('namedSessions', all);
-  }
-}
-
-/**
- * Get the list of denied tool names for a specific session.
- * @param {string} sessionId
- * @returns {string[]}
- */
-function getSessionDeniedTools(sessionId) {
-  const entry = getNamedSessions()[sessionId];
-  return entry?.deniedTools || [];
-}
-
-/**
- * Persist the denied-tools list for a specific session.
- * @param {string} sessionId
- * @param {string[]} tools - Tool names to deny.
- */
-function saveSessionDeniedTools(sessionId, tools) {
-  const all = getNamedSessions();
-  if (all[sessionId]) {
-    all[sessionId].deniedTools = tools;
     setPref('namedSessions', all);
   }
 }
@@ -805,7 +777,7 @@ function convertHtmlToMarkdown(html) {
 /**
  * Send the current chat input to the Copilot CLI backend.
  * Handles slash-command detection, input history, skill/agent prefix
- * injection, denied-tools merging, and UI state updates.
+ * injection, provider tool permissions, and UI state updates.
  */
 function sendMessage() {
   const input = document.getElementById('chatInput');
@@ -926,8 +898,6 @@ function sendMessage() {
 
   // Send to Copilot via JSON API
   const settings = getSettings();
-  const sessionDenied = (tab.sessionDeniedTools || []).filter(t => t.enabled).map(t => t.name);
-  const mergedDenied = [...new Set([...getDeniedTools(tabProvider), ...sessionDenied])];
   const effort = (tabProvider === 'copilot' || isClaudeCodeProvider(tabProvider)) && tab.selectedModel
     ? getReasoningForModel(tab, tab.selectedModel)
     : null;
@@ -941,7 +911,7 @@ function sendMessage() {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
     allowedTools: [],
-    deniedTools: mergedDenied,
+    deniedTools: getDeniedTools(tabProvider),
     allowAllPaths: settings.allowAllPaths === true,
     // Per-tab: when on, drop --allow-all / auto-approve so the agent asks per action.
     manualApproval: tab.manualApproval === true,
@@ -2189,8 +2159,6 @@ function initSlashButtons() {
   });
 }
 
-// ── Session Tools Popup → modules/session-tools.js ───────────
-
 /**
  * Initialize the settings overlay: theme, font size, sound, dev mode,
  * denied tools, extra dirs, folder paths, and instructions editor.
@@ -2643,7 +2611,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     initChatInput();
     initWindowControls();
     initSlashButtons();
-    initSessionTools();
     initSettings();
     initSidebar();
     initPluginButtons();

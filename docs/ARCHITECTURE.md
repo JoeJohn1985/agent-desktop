@@ -226,12 +226,6 @@ dead → starting → ready ⇄ busy → dead
 4. `agent_turn_start/end` events are suppressed
 5. After the response: returns `collector.join('')`, sets the collector to `null`
 
-**Process restart for session-specific tool denial:**
-Since `--deny-tool` flags are only accepted at spawn, the process must be restarted when the session-specific deny list changes:
-```
-stop() → updateOptions({ deniedTools }) → start() → loadSession(sessionId)
-```
-
 ### 5.4a Multi-provider backends (`src/providers/`)
 
 A different backend can be used per tab. **The key contract:** every backend emits the same renderer event vocabulary (`copilot:event` / `copilot:done`) as the `AcpClient`, so the renderer stays backend-agnostic. `main.js` keeps a `backends` map (tabId → backend) and selects the backend via `getModelProvider(modelId)`.
@@ -262,7 +256,6 @@ mechanics. Loaded before `app.js`, in this order:
 | `todos.js` | Per-session task list with IPC backend |
 | `images.js` | Image thumbnails, lightbox, drag&drop into the chat |
 | `test-runner.js` | Frontend for Jest/Playwright/coverage |
-| `session-tools.js` | UI for session-specific denied tools (popup, toggle, process restart) |
 | `costs.js` | Cost-log persistence and the "Cost" page (stacked bar chart + breakdown + Claude token-history) |
 | `skills-mcp.js` | Skills/Agents/MCP sidebar rendering, per-tab context loading, MCP status probing |
 | `sessions-sidebar.js` | Named-session list: search, rename, resume, delete, history-bubble rendering on resume |
@@ -353,20 +346,7 @@ Main
 
 **No more PTY:** all slash commands run via `silentCommand()` as silent ACP requests. This is more reliable than PTY bracketed paste and needs no `node-pty`.
 
-### 6.3 Process restart (session-specific tool denial)
-
-```
-User disables a tool in the session-tools popup
-  │
-  ▼  restartWithUpdatedDeniedTools()  [renderer/modules/session-tools.js]
-     IPC: copilot:restartWithDeniedTools(tabId, mergedDeniedTools)
-  │
-  ▼  main.js
-     client.stop()                    → terminate the process
-     client.updateOptions(deniedTools)→ set the new deny list
-     client.start()                   → spawn a new process
-     client.loadSession(sessionId)    → restore the session
-```
+### 6.3 Process restarts
 
 ### 6.3.1 Process restart (Copilot reasoning effort)
 
@@ -495,7 +475,6 @@ instruction file lives on the remote host, which needs SSH rather than `fs`).
 | `copilot:send` | handle | Sends a chat message via ACP |
 | `copilot:stop` | on | Stop the ACP process for a tab |
 | `copilot:silentCommand` | handle | Run a slash command silently, return the text |
-| `copilot:restartWithDeniedTools` | handle | Restart the process with a new deny list |
 | `copilot:getCwd` | handle | Current working directory |
 | `copilot:openCwd` | handle | Open the CWD in the file explorer |
 | `copilot:getVersions` | handle | Versions (app, CLI, Node, Electron) |
@@ -609,8 +588,13 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 ### 8.2 Tool permissions
 
 - **Per-provider deny list** (`settings.deniedToolsByProvider[provider]`): fully independent per provider — configured in each provider's own settings tab. Only providers with our own enforced shell tool get one (see `DENYLIST_PROVIDERS`/the `denylist` flag in `PROVIDER_CAPABILITIES`): Copilot, Anthropic, OpenAI, GLM, Ollama. Gemini has no shell tool at all; Claude Code has its own approval mechanism and isn't affected. One-shot migration (`migrateDeniedToolsToPerProvider`) seeds every one of those providers with a copy of the old flat `settings.deniedTools` list the first time the app runs post-upgrade.
-- **Session deny list** (`tab.sessionDeniedTools`): per session; changes trigger a process restart
-- Both lists (for that tab's provider) are merged into `--deny-tool=<name>` flags at spawn
+- The renderer passes only the selected provider's deny list to the backend.
+  Copilot receives `--deny-tool=<name>` flags at spawn; direct-API shell tools
+  enforce the same provider list. There is no per-tab tool configuration.
+- Legacy `namedSessions[sessionId].deniedTools` data is ignored. It is no longer
+  restored into tabs or included in prompt options.
+- Per-tab manual approval and the providers' native permission requests remain
+  available independently of the deny lists.
 
 ### 8.3 Cost tracking
 
@@ -652,7 +636,6 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
   sessionId: "copilot-session-uuid",
   selectedModel: "claude-sonnet-4.6",
   mode: "agent",
-  sessionDeniedTools: [{ name: "shell(git push)", enabled: true }],
   _lastUsageTokens: { input: 17500, output: 13, cache: 0 },
   _billingModel: "claude-sonnet-4.6",
   _sessionName: "My project",
