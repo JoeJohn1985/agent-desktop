@@ -693,15 +693,10 @@ function renderFeatureMatrix() {
     '</table>';
 }
 
-/** Show/hide sidebar sections based on the active provider's capabilities. */
-function updateSidebarForProvider(provider) {
-  // Sessions stay visible for every provider (needed to resume other providers'
-  // sessions); session *saving* is gated separately on the tab rename button.
-  const sections = { skills: 'skillsSection', agents: 'agentsSection', mcp: 'mcpSection' };
-  for (const [feature, id] of Object.entries(sections)) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = providerSupports(provider, feature) ? '' : 'none';
-  }
+/** Central management stays available for every provider; refresh its context. */
+function updateSidebarForProvider() {
+  renderSkills();
+  renderMcpServers();
 }
 
 /** Update the read-only provider label (shown next to the cost) for a tab. */

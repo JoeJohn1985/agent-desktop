@@ -110,6 +110,9 @@ class AcpClient extends EventEmitter {
    * @param {string[]} [options.deniedTools] - Tools to deny
    * @param {string[]} [options.addDirs] - Additional allowed directories
    * @param {boolean} [options.allowAllPaths] - Allow all paths
+   * @param {string} [options.additionalMcpConfig] - App-owned local MCP config file for Copilot startup
+   * @param {boolean} [options.noAutoUpdate] - Disable CLI self-updates for controlled native probes
+   * @param {string} [options.logDir] - Optional directory for isolated native CLI diagnostics
    */
   constructor(tabId, sendToRenderer, options = {}) {
     super();
@@ -167,6 +170,10 @@ class AcpClient extends EventEmitter {
       // --allow-all makes the CLI auto-approve tools (no permission prompts). When
       // manual approval is on we drop it so the CLI asks via session/request_permission.
       args = ['--acp'];
+      if (this.#options.noAutoUpdate) args.push('--no-auto-update');
+      if (this.#options.logDir) {
+        args.push('--log-dir', this.#shell ? `"${this.#options.logDir}"` : this.#options.logDir);
+      }
       if (this.#options.allowAll !== false) args.push('--allow-all');
       if (this.#options.model) args.push('--model', this.#options.model);
       if (effort) args.push('--reasoning-effort', effort);
@@ -177,6 +184,10 @@ class AcpClient extends EventEmitter {
         for (const d of this.#options.addDirs) args.push('--add-dir', d);
       }
       if (this.#options.allowAllPaths) args.push('--allow-all-paths');
+      if (this.#options.additionalMcpConfig) {
+        const configArg = '@' + this.#options.additionalMcpConfig;
+        args.push('--additional-mcp-config', this.#shell ? `"${configArg}"` : configArg);
+      }
     }
 
     // Build the child env, removing any keys the backend must not see. Critical
@@ -1233,6 +1244,10 @@ class AcpClient extends EventEmitter {
     this.#state = 'dead';
     this.#reasoningRestartPending = false;
 
+    if (this.#options.autoRestart === false) {
+      this.#emitToRenderer({ type: 'error', data: { interrupted: true, message: 'Geplanter Lauf unterbrochen: Prozess beendet. Keine automatische Wiederholung.' } });
+      return;
+    }
     // Auto-restart with rate limiting
     this.#attemptRestart();
   }

@@ -383,6 +383,7 @@ async function resumeSession(sessionId) {
 
   // Load and display session context (checkpoints, plan) as history overview
   await displaySessionContext(tab, sessionId, tabId);
+  if (provider === 'copilot') await refreshUsageDisplay(tabId);
 }
 
 /**

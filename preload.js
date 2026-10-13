@@ -1,4 +1,15 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
+contextBridge.exposeInMainWorld('scheduled', {
+  list: () => ipcRenderer.invoke('scheduled:list'),
+  save: task => ipcRenderer.invoke('scheduled:save', task),
+  action: (id, action, confirmed) => ipcRenderer.invoke('scheduled:action', id, action, confirmed),
+  on: (name, callback) => {
+    if (!['changed', 'attach', 'attention'].includes(name)) throw new Error('Unbekanntes Aufgabenereignis.');
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on(`scheduled:${name}`, handler);
+    return () => ipcRenderer.removeListener(`scheduled:${name}`, handler);
+  },
+});
 
 // ── Markdown + Syntax Highlighting ──────────────────────────
 
@@ -100,6 +111,8 @@ contextBridge.exposeInMainWorld('desktop', {
     stop: (tabId) => ipcRenderer.send('agent:stop', tabId),
     /** @ipc agent:silentCommand — Runs a slash command silently, returns {success, text}. */
     silentCommand: (tabId, command, timeoutMs) => ipcRenderer.invoke('agent:silentCommand', tabId, command, timeoutMs),
+    /** @ipc sessions:copilotUsage — Gesamter CLI-Verbrauch in AIC und USD. */
+    copilotUsage: (sessionId) => ipcRenderer.invoke('sessions:copilotUsage', sessionId),
     /** @ipc agent:respondPermission — Answers an ACP permission request. */
     respondPermission: (tabId, requestId, optionId) => ipcRenderer.invoke('agent:respondPermission', tabId, requestId, optionId),
     /** @ipc agent:resetBackend — Destroys a tab's backend (fresh session on next prompt). */
@@ -385,6 +398,19 @@ contextBridge.exposeInMainWorld('desktop', {
     probe: () => ipcRenderer.invoke('mcp:probe'),
     /** @ipc mcp:listProject @param {string} cwd @returns {Promise<Array<Object>>} Project MCP servers from .github/mcp.json */
     listProject: (cwd) => ipcRenderer.invoke('mcp:listProject', cwd),
+    /** @ipc mcp:save — Saves an app-owned remote MCP server. */
+    save: (server) => ipcRenderer.invoke('mcp:save', server),
+    /** @ipc mcp:remove — Removes an app-owned server and its credentials. */
+    remove: (id) => ipcRenderer.invoke('mcp:remove', id),
+    /** @ipc mcp:connect — Connects with interactive OAuth if required. */
+    connect: (id) => ipcRenderer.invoke('mcp:connect', id),
+    /** @ipc mcp:disconnect — Disconnects; optionally clears app-owned credentials. */
+    disconnect: (id, logout) => ipcRenderer.invoke('mcp:disconnect', id, logout),
+    onChanged: (callback) => {
+      const handler = (_event, servers) => callback(servers);
+      ipcRenderer.on('mcp:changed', handler);
+      return () => ipcRenderer.removeListener('mcp:changed', handler);
+    },
   },
 
   // ── Tests ─────────────────────────────────────────────────

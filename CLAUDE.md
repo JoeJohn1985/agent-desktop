@@ -35,6 +35,7 @@ mechanical Phase 1 move.
 | `test-runner.js` | Jest/Playwright/coverage frontend |
 | `costs.js` | Cost-log persistence + the Costs page (chart, Claude token-history) |
 | `skills-mcp.js` | Skills/Agents/MCP sidebar rendering + per-tab context loading |
+| `mcp-manager.js` | App-managed remote MCP configuration, OAuth connection actions and status |
 | `sessions-sidebar.js` | Named-session list, search, rename, resume, delete, history-bubble rendering |
 | `keyboard-shortcuts.js` | Configurable shortcut defs, settings panel, global keydown dispatch |
 | `drag-drop.js` | Whole-window file drop handling |

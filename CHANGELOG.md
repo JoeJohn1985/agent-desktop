@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.26.1] - 2026-10-09
+
+### Fixed
+- **Copilot-Sitzungskosten:** AIC und Dollaräquivalent stammen jetzt aus den
+  kumulierten CLI-Verbrauchscheckpoints statt aus Tokenpreis-Schätzungen.
+  Wiederhergestellte Sitzungen zeigen ihren gesamten Verbrauch ohne erneute
+  Buchung. Fehlende Daten werden ausdrücklich angezeigt. Bestätigte CLI-Daten
+  ersetzen Schätzungen derselben Sitzung in der Kostenansicht; die alten
+  Einträge bleiben gespeichert. Andere Provider bleiben unverändert.
+
+## [1.26.0] - 2026-10-09
+
+### Added
+- **MCP-Komfortfunktionen:** Aktivierte Server verbinden sich beim App-Start
+  automatisch im Hintergrund mit gespeicherter Anmeldung. Eine neue
+  Browser-Autorisierung bleibt explizit. Serveraktionen liegen in einem
+  Drei-Punkte-Menü direkt am Server, in Seitenleiste und Verwaltung.
+- **App-eigene MCP-Verwaltung:** Remote-Server über Streamable HTTP oder SSE
+  zentral hinzufügen, bearbeiten, verbinden, trennen und abmelden. OAuth läuft
+  in der App mit PKCE, geprüftem Loopback-Callback und OS-verschlüsseltem
+  Token-Speicher. Hintergrundverbindungen öffnen keinen Anmeldebrowser.
+- **Lokale MCP-Brücke für Copilot:** Native Tools, Ressourcen und Prompts werden
+  über einen geschützten lokalen Dienst und stdio-Adapter vermittelt. Remote-
+  Anmeldedaten bleiben bei der App. Änderungen werden vor der nächsten Nachricht
+  durch Wiederaufnahme der vorhandenen ACP-Sitzung übernommen; die native
+  Copilot-Konfiguration wird nicht verändert.
+- **Copilot-Brückenregistrierung:** Die lokalen stdio-Server werden über eine
+  separate Laufzeitdatei und `--additional-mcp-config` beim Prozessstart
+  registriert. Copilot lehnt stdio-Einträge aus der ACP-Serverliste ab; diese
+  bleibt deshalb leer. Der native MCP-Handshake mit Electron ist geprüft.
+
 ## [1.25.0] - 2026-10-09
 
 ### Removed

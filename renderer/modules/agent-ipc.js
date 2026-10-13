@@ -390,7 +390,8 @@ function initAgentIPC() {
           if (g) g.status = s.status;
         }
         if (tabId === activeTabId) {
-          mcpServers = servers;
+          const owned = globalMcpServers.filter(s => s.managed);
+          mcpServers = mergeMcpByName(owned, servers.filter(s => !owned.some(g => g.bridgeName === s.name)));
           renderMcpServers();
           // Re-merge project MCP entries from .github/mcp.json
           if (tab.cwd) loadProjectMcpServers(tab.cwd);
@@ -530,7 +531,7 @@ function initAgentIPC() {
           saveSessionProvider(event.sessionId, getTabProvider(tab));
           saveOpenTabs();
           // Show todos panel (project-scoped by cwd) for this session
-          if (!activeSessionId) {
+          if (!activeSessionId && tabId === activeTabId) {
             activeSessionId = event.sessionId;
             loadTodos(tab.cwd);
           }
@@ -599,6 +600,9 @@ function initAgentIPC() {
       playNotificationSound();
     }
 
+    if (code !== 0 && getTabProvider(tab) === 'copilot') {
+      refreshUsageDisplay(tabId);
+    }
     if (code === 0) {
       // Run /usage first, then /context — the backend handles only one silent
       // command at a time ("Cannot run command while busy" otherwise). Refresh

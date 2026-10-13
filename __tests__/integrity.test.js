@@ -29,6 +29,101 @@ if (fs.existsSync(IPC_DIR)) {
   }
 }
 
+describe('Copilot ACP MCP configuration', () => {
+  const promptSource = mainJs.match(/^async function sendAgentPrompt\b[\s\S]*?^\}/m)[0];
+
+  test('MCP automatic connections start after creating the window without blocking app startup', () => {
+    const startup = mainJs.match(/^app.whenReady\(\).then\(\(\) => \{[\s\S]*?^\}\);/m)[0];
+    const createWindow = jest.fn();
+    const connectEnabled = jest.fn().mockResolvedValue([]);
+    vm.runInNewContext(startup, {
+      app: { whenReady: () => ({ then: callback => callback() }), on: jest.fn() },
+      process: { platform: 'win32', arch: 'x64' },
+      require: name => name === './src/scheduled-tasks' ? { ScheduledTasks: class {} } : { version: 'test' }, console,
+      path, DATA_DIR: 'fixture', setInterval: jest.fn(), clearInterval: jest.fn(), powerMonitor: { on: jest.fn() },
+      ensureProviderContextDirs: jest.fn(), createWindow, startImageWatcher: jest.fn(), syncPlansConvention: jest.fn(),
+      appMcp: { connectEnabled },
+    });
+    expect(connectEnabled).toHaveBeenCalledTimes(1);
+    expect(createWindow.mock.invocationCallOrder[0]).toBeLessThan(connectEnabled.mock.invocationCallOrder[0]);
+  });
+
+  test.each([false, true])('app bridge revision change %s preserves the native session', async changed => {
+    const bridgeConfig = 'C:\\data\\mcp-runtime-fixture.json';
+    const backend = {
+      state: 'ready', sessionId: 'native-session', __provider: 'copilot', __mcpRevision: changed ? 1 : 2,
+      stop: jest.fn(async () => { backend.state = 'dead'; backend.sessionId = null; }),
+      start: jest.fn(async () => { backend.state = 'ready'; }),
+      updateOptions: jest.fn(), loadSession: jest.fn(async id => { backend.sessionId = id; }),
+      newSession: jest.fn(), prompt: jest.fn().mockResolvedValue(),
+    };
+    const send = vm.runInNewContext(`(${promptSource})`, {
+      scheduledTabs: new Map(),
+      backends: new Map([['tab', backend]]),
+      appMcp: { revision: 2, getCopilotMcpConfig: jest.fn().mockResolvedValue(bridgeConfig) },
+      COPILOT_CWD: 'C:\\project', COPILOT_BIN: 'copilot', console,
+    });
+
+    await send('tab', 'hello', { provider: 'copilot', cwd: 'C:\\project' });
+    expect(backend.updateOptions).toHaveBeenCalledWith(expect.objectContaining({ mcpServers: [], additionalMcpConfig: bridgeConfig }));
+    expect(backend.stop).toHaveBeenCalledTimes(changed ? 1 : 0);
+    expect(backend.start).toHaveBeenCalledTimes(changed ? 1 : 0);
+    expect(backend.loadSession).toHaveBeenCalledTimes(changed ? 1 : 0);
+    if (changed) expect(backend.loadSession).toHaveBeenCalledWith('native-session', 'C:\\project');
+    expect(backend.newSession).not.toHaveBeenCalled();
+    expect(backend.__mcpRevision).toBe(2);
+    expect(backend.prompt).toHaveBeenCalledWith('hello');
+  });
+
+  test.each([null, 'existing-session'])('does not resend native MCP config for session %s', async (sessionId) => {
+    const backend = {
+      state: 'dead',
+      sessionId: null,
+      start: jest.fn().mockResolvedValue(),
+      newSession: jest.fn().mockResolvedValue(),
+      loadSession: jest.fn().mockResolvedValue(),
+      prompt: jest.fn().mockResolvedValue(),
+    };
+    const AcpClient = jest.fn(() => backend);
+    const getAcpMcpServers = jest.fn().mockResolvedValue([{ name: 'native-server' }]);
+    const backends = new Map();
+    const sendAgentPrompt = vm.runInNewContext(`(${promptSource})`, {
+      scheduledTabs: new Map(),
+      AcpClient,
+      getAcpMcpServers,
+      backends,
+      sendToRenderer: jest.fn(),
+      COPILOT_CWD: 'C:\\workspace',
+      COPILOT_BIN: 'copilot',
+      appMcp: { revision: 0, getCopilotMcpConfig: jest.fn().mockResolvedValue(null) },
+      console: { log: jest.fn() },
+    });
+
+    await sendAgentPrompt('tab-1', 'hello', {
+      provider: 'copilot',
+      cwd: 'C:\\project',
+      sessionId,
+    });
+
+    expect(AcpClient).toHaveBeenCalledWith('tab-1', expect.any(Function), expect.objectContaining({
+      cwd: 'C:\\project',
+      mcpServers: [],
+      addDirs: ['C:\\workspace'],
+    }));
+    expect(getAcpMcpServers).not.toHaveBeenCalled();
+    expect(backends.get('tab-1')).toBe(backend);
+    expect(backend.start).toHaveBeenCalledTimes(1);
+    if (sessionId) {
+      expect(backend.loadSession).toHaveBeenCalledWith(sessionId, 'C:\\project');
+      expect(backend.newSession).not.toHaveBeenCalled();
+    } else {
+      expect(backend.newSession).toHaveBeenCalledWith('C:\\project');
+      expect(backend.loadSession).not.toHaveBeenCalled();
+    }
+    expect(backend.prompt).toHaveBeenCalledWith('hello');
+  });
+});
+
 describe('Tabbezogene Tool-Konfiguration entfernt', () => {
   const rendererJs = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf-8');
 

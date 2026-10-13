@@ -1,5 +1,9 @@
 # Plan: Automatisierte Aufgaben (Trigger-basierte Prompt-Ausführung)
 
+> Status: ALTER, NICHT FREIGEGEBENER ENTWURF. Nicht umsetzen.
+> Der freigegebene Umfang steht in `specs\changes\geplante-aufgaben\proposal.md`.
+> Keine Dateitrigger, keine täglichen Termine, kein Renderer-Scheduler.
+
 ## Ziel
 
 Der Nutzer kann "Automationen" konfigurieren: bei einem Trigger (Uhrzeit,

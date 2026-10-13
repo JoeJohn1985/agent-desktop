@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, safeStorage, powerMonitor } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -12,6 +12,7 @@ if (process.platform === 'linux') {
 const { stripAnsi, safeSessionPath: _safeSessionPath, builtinSkillIcon, userSkillIcon } = require('./src/utils');
 const { readCheckpoints, readPlan, readRecentMessages, readAllMessages } = require('./src/sessions');
 const { readClaudeCodeTranscript } = require('./src/claude-code-transcript');
+const { readCopilotUsage } = require('./src/copilot-usage');
 const { readTodos, writeTodos } = require('./src/todos');
 const { createSendToRenderer: _createSendToRenderer, buildEnv, destroyAllBackends } = require('./src/main-helpers');
 const { scanSkillDirectory: _scanSkillDirectory, scanSkillsIndex: _scanSkillsIndex, readFolderConfig: _readFolderConfig, writeFolderConfig: _writeFolderConfig } = require('./src/scanners');
@@ -27,6 +28,9 @@ const { skillDirs, agentDirs, needsContextInjection } = require('./src/context-p
 const plansConvention = require('./src/plans-convention');
 const { validateContextTarget, buildSkillsList, buildAgentsList, buildContextPaths } = require('./src/context-list');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
+const { AppMcpManager } = require('./src/mcp/manager');
+const { createCredentialStore } = require('./src/mcp/oauth');
+const { registerAppMcpIPC } = require('./src/ipc/mcp-ipc');
 
 app.name = 'agent-desktop';
 
@@ -229,7 +233,54 @@ function safeSessionPath(sessionId) {
  *
  * @type {(channel: string, ...args: any[]) => void}
  */
-const sendToRenderer = _createSendToRenderer(() => mainWindow);
+const rawSendToRenderer = _createSendToRenderer(() => mainWindow);
+const scheduledTabs = new Map();
+let scheduledTasks;
+let scheduledShuttingDown = false;
+function scheduledAttention(run, tabId) {
+  scheduledTasks.attention(run.id);
+  rawSendToRenderer('scheduled:attention', { ...run, tabId });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.flashFrame(true);
+  }
+}
+function sendToRenderer(channel, ...args) {
+  const [tabId, event] = args;
+  const run = scheduledTabs.get(tabId);
+  if (run && scheduledTasks && !scheduledShuttingDown) {
+    if (channel === 'agent:event') {
+      scheduledTasks.event(run.id, event);
+      if (event.type === 'result') run.sessionId = event.sessionId;
+      if (/permission|question|user_input|error|auth/.test(event.type || '')) scheduledAttention(run, tabId);
+      if (/ask.?user|question|user.?input/i.test(event.data?.toolName || '')) scheduledAttention(run, tabId);
+      if (event.type === 'error') scheduledTasks.finish(run.id, event.data?.interrupted ? 'interrupted' : 'error', event.data?.message);
+    }
+    if (channel === 'agent:done') {
+      const text = run.events.filter(e => /assistant.message/.test(e.type))
+        .map(e => e.data?.deltaContent || e.data?.content || '').join('');
+      const question = /\?|bitte (bestätig|anmeld|freigeb|entscheide)|möchtest du|please (confirm|sign in|approve)/i.test(text);
+      if (event !== 0 || question) scheduledAttention(run, tabId);
+      scheduledTasks.finish(run.id, event === 0 ? 'completed' : event === -1 ? 'cancelled' : 'error');
+    }
+  }
+  rawSendToRenderer(channel, ...args);
+}
+
+ipcMain.handle('scheduled:list', () => scheduledTasks.snapshot());
+ipcMain.handle('scheduled:save', (_event, input) => {
+  if (getModelProvider(input?.model || '') !== 'copilot') throw new Error('Nur Copilot-Modelle sind zulässig.');
+  return scheduledTasks.upsert(input);
+});
+ipcMain.handle('scheduled:action', (_event, id, action, confirmed) => scheduledTasks.action(id, action, confirmed));
+
+const appMcp = new AppMcpManager({
+  configPath: path.join(DATA_DIR, 'mcp-servers.json'),
+  credentialStore: createCredentialStore(path.join(app.getPath('userData'), 'mcp-auth.enc'), safeStorage),
+  openExternal: url => shell.openExternal(url),
+  onChange: servers => sendToRenderer('mcp:changed', servers),
+});
+registerAppMcpIPC({ ipcMain, manager: appMcp });
 
 // ── Window ───────────────────────────────────────────────────
 /**
@@ -514,6 +565,7 @@ function resolveSshExecutable() {
 }
 
 async function sendAgentPrompt(tabId, prompt, options = {}) {
+  if (scheduledTabs.has(tabId)) options = { ...options, manualApproval: true, scheduled: true };
   // The explicit ProviderID from the renderer is authoritative; fall back to
   // deriving it from the model only for legacy callers.
   const provider = options.provider || getModelProvider(options.model || '');
@@ -584,7 +636,10 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
       // Manual approval → drop --allow-all so the CLI asks via request_permission.
       allowAll: !options.manualApproval,
       autoApprovePermissions: !options.manualApproval,
-      mcpServers: await getAcpMcpServers(cwd),
+      autoRestart: !options.scheduled,
+      // Copilot rejects stdio servers from ACP clients; register local bridges at startup.
+      mcpServers: [],
+      additionalMcpConfig: await appMcp.getCopilotMcpConfig(),
     };
     // Always include global CWD as an additional path when using a different CWD
     if (cwd !== COPILOT_CWD && !clientOptions.addDirs.includes(COPILOT_CWD)) {
@@ -592,6 +647,9 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
     }
   }
 
+  const reloadMcp = provider === 'copilot' && client && client.__mcpRevision !== appMcp.revision;
+  const mcpSessionId = reloadMcp ? client.sessionId : null;
+  if (reloadMcp) await client.stop();
   if (!client) {
     client = new AcpClient(tabId, sendToRenderer, clientOptions);
     client.__provider = provider;
@@ -607,15 +665,21 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
   }
 
   // Session management: load existing or create new
+  if (mcpSessionId) await client.loadSession(mcpSessionId, cwd);
   if (!client.sessionId) {
     const mcpNames = (clientOptions.mcpServers || []).map(s => s.name);
-    console.log(`[acp:tab${tabId}] ${options.sessionId ? 'load' : 'new'} session with MCP servers: [${mcpNames.join(', ') || 'none'}]`);
+    const mcpSource = provider === 'copilot'
+      ? `native CLI + app bridges [${clientOptions.additionalMcpConfig ? 'startup configuration' : 'none'}]`
+      : `[${mcpNames.join(', ') || 'none'}]`;
+    console.log(`[acp:tab${tabId}] ${options.sessionId ? 'load' : 'new'} session with MCP servers: ${mcpSource}`);
     if (options.sessionId) {
       await client.loadSession(options.sessionId, cwd);
     } else {
       await client.newSession(cwd);
     }
   }
+
+  if (provider === 'copilot') client.__mcpRevision = appMcp.revision;
 
   // No app-side context injection for ACP providers. Both Copilot and Claude
   // Code discover their own skills and agents from their native folders (see
@@ -632,6 +696,7 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
   client.prompt(prompt).catch((err) => {
     // Cancellation is a normal user action, not an error.
     if (err.message === 'Cancelled') return;
+    if (scheduledTabs.has(tabId)) sendToRenderer('agent:event', tabId, { type: 'error', data: { message: err.message } });
     console.error(`[acp:tab${tabId}] prompt error:`, err.message);
   });
 
@@ -779,6 +844,7 @@ ipcMain.handle('agent:silentCommand', async (_event, tabId, command, timeoutMs) 
  * Claude Code applies live (backend reads autoApprovePermissions per request).
  */
 ipcMain.handle('agent:setApproval', async (_event, tabId, manualApproval) => {
+  if (scheduledTabs.has(tabId) && manualApproval !== true) return { success: false, error: 'Geplante Sitzungen erfordern manuelle Freigaben.' };
   const client = backends.get(tabId);
   if (!client) return { success: false, error: 'Kein aktiver Client' };
   const opts = { allowAll: !manualApproval, autoApprovePermissions: !manualApproval };
@@ -1235,7 +1301,7 @@ ipcMain.handle('updates:apply', async () => {
     if (res.ok) {
       // Give the renderer a tick to show its "restarting" state, then relaunch.
       // app.exit() überspringt jedes Aufräumen: erst die Backends beenden, sonst bleiben ssh-Prozesse samt Remote-Adapter zurück.
-      setTimeout(async () => { await destroyAllBackends(backends); app.relaunch(); app.exit(0); }, 400);
+      setTimeout(async () => { await destroyAllBackends(backends); await appMcp.close(); app.relaunch(); app.exit(0); }, 400);
     }
     return res;
   } catch (e) {
@@ -1314,8 +1380,19 @@ ipcMain.handle('files:processDropped', (_event, filePath) => {
 
 
 
+/** @ipc sessions:copilotUsage — CLI-protokollierter Sitzungsverbrauch. */
+ipcMain.handle('sessions:copilotUsage', async (_event, sessionId) => {
+  try {
+    if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      throw new Error('Ungültige Copilot-Session-ID');
+    }
+    return { success: true, ...await readCopilotUsage(safeSessionPath(sessionId)) };
+  } catch (err) {
+    console.warn('[sessions:copilotUsage]', err.message);
+    return { success: false, error: err.message };
+  }
+});
 /** @ipc sessions:readCheckpoints @param {string} sessionId @returns {Promise<Array>} */
-// Sessions
 ipcMain.handle('sessions:readCheckpoints', async (_event, sessionId) => {
   return readCheckpoints(safeSessionPath(sessionId));
 });
@@ -1687,29 +1764,6 @@ async function readMcpConfig(cwd) {
   }
 }
 
-/** Converts an object map {k: v} to the ACP [{name, value}] array format. */
-function toAcpKeyValueArray(obj) {
-  if (!obj || typeof obj !== 'object') return [];
-  return Object.entries(obj).map(([name, value]) => ({ name, value: String(value) }));
-}
-
-/**
- * Builds the MCP server list in the format ACP `session/new` expects, so the
- * agent actually gets the user's/workspace's configured MCP tools.
- * @param {string} [cwd] - Project directory
- * @returns {Array<Object>} ACP-formatted MCP servers
- */
-async function getAcpMcpServers(cwd) {
-  const servers = await readMcpConfig(cwd);
-  return Object.entries(servers).map(([name, cfg]) => {
-    const type = cfg.type || (cfg.command ? 'stdio' : 'http');
-    if (type === 'stdio') {
-      return { name, type: 'stdio', command: cfg.command, args: cfg.args || [], env: toAcpKeyValueArray(cfg.env) };
-    }
-    return { name, type, url: cfg.url, headers: toAcpKeyValueArray(cfg.headers) };
-  });
-}
-
 /**
  * @ipc mcp:list — Lists all configured MCP servers via `copilot mcp list --json`.
  * Returns the user/workspace/plugin servers the CLI knows about. Since the ACP
@@ -1718,12 +1772,12 @@ async function getAcpMcpServers(cwd) {
  */
 ipcMain.handle('mcp:list', async () => {
   const servers = await readMcpConfig();
-  return Object.entries(servers).map(([name, cfg]) => ({
+  return [...appMcp.list(), ...Object.entries(servers).map(([name, cfg]) => ({
     name,
     type: cfg.type || (cfg.command ? 'stdio' : 'sse'),
     source: cfg.source || 'user',
     status: 'configured',
-  }));
+  }))];
 });
 
 /**
@@ -1760,7 +1814,7 @@ function probeHttpReachable(url) {
  */
 ipcMain.handle('mcp:probe', async () => {
   const servers = await readMcpConfig();
-  return Promise.all(Object.entries(servers).map(async ([name, cfg]) => {
+  const native = await Promise.all(Object.entries(servers).map(async ([name, cfg]) => {
     const type = cfg.type || (cfg.command ? 'stdio' : 'sse');
     let status = 'configured';
     if ((type === 'http' || type === 'sse') && cfg.url) {
@@ -1768,6 +1822,7 @@ ipcMain.handle('mcp:probe', async () => {
     }
     return { name, type, source: cfg.source || 'user', status };
   }));
+  return [...appMcp.list(), ...native];
 });
 
 // Agents are listed via context:listAgents (provider- and project-aware) —
@@ -2417,6 +2472,7 @@ ipcMain.handle('auth:login', async () => {
 ipcMain.handle('app:relaunch', async () => {
   console.log('[app:relaunch] Relaunching the app');
   await destroyAllBackends(backends);
+  await appMcp.close();
   app.relaunch();
   app.exit(0);
   return { success: true };
@@ -2476,6 +2532,36 @@ app.whenReady().then(() => {
   }
   ensureProviderContextDirs();
   createWindow();
+  scheduledTasks = new (require('./src/scheduled-tasks').ScheduledTasks)({
+    file: path.join(DATA_DIR, 'scheduled-tasks.json'),
+    notify: state => rawSendToRenderer('scheduled:changed', state),
+    execute: async run => {
+      const tabId = nextTabId++;
+      run.tabId = tabId;
+      scheduledTabs.set(tabId, run);
+      rawSendToRenderer('scheduled:attach', { ...run, tabId });
+      try {
+        await sendAgentPrompt(tabId, run.prompt, { provider: 'copilot', cwd: run.cwd, model: run.model, manualApproval: true });
+      } catch (error) {
+        scheduledAttention(run, tabId);
+        throw error;
+      }
+    },
+  });
+  const scheduledTimer = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoadingMainFrame()) return;
+    try { scheduledTasks.tick(); } catch (error) { console.error('[scheduled]', error.message); }
+  }, 1000);
+  powerMonitor.on('resume', () => scheduledTasks.tick(true));
+  powerMonitor.on('suspend', () => { scheduledTasks.lastTick = 0; });
+  app.on('before-quit', () => {
+    clearInterval(scheduledTimer);
+    if (!scheduledShuttingDown) {
+      scheduledShuttingDown = true;
+      scheduledTasks.shutdown();
+    }
+  });
+  appMcp.connectEnabled().catch(e => console.error('[mcp:startup]', e.message));
   startImageWatcher();
   // Fire-and-forget: spawns two `--version` probes, so it must not delay the
   // window. Failures are logged inside and never surface to the user.
@@ -2483,10 +2569,24 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (scheduledTasks && !scheduledShuttingDown) {
+    scheduledShuttingDown = true;
+    scheduledTasks.shutdown();
+  }
   destroyAllBackends(backends);
   stopImageWatcher();
   closeLogger();
   app.quit();
+});
+
+let mcpShutdownStarted = false;
+app.on('before-quit', event => {
+  if (mcpShutdownStarted) return;
+  event.preventDefault();
+  mcpShutdownStarted = true;
+  Promise.all([destroyAllBackends(backends), appMcp.close()])
+    .catch(e => console.error('[mcp:shutdown]', e.message))
+    .finally(() => app.quit());
 });
 
 app.on('activate', () => {

@@ -768,6 +768,20 @@ function estimateCostUsdDelta(currentTokens, previousTokens, modelId, provider) 
 
 // ── Cost Log Helpers ─────────────────────────────────────────
 
+function visibleCostLog(log) {
+  const confirmed = new Set(log.filter(e => e.source === 'copilot-cli').map(e => e.sessionId));
+  return log.filter(e => e.source === 'copilot-cli'
+    || !((e.provider || 'copilot') === 'copilot' && confirmed.has(e.sessionId)));
+}
+
+function reconcileCopilotCostLog(log, sessionId, sessionName, usage) {
+  const retained = log.filter(e => !(e.source === 'copilot-cli' && e.sessionId === sessionId));
+  const entries = usage.entries.length ? usage.entries : [{ ts: Date.now(), usd: 0 }];
+  return retained.concat(entries.map(e => ({
+    ...e, sessionId, sessionName, provider: 'copilot', source: 'copilot-cli',
+  }))).sort((a, b) => a.ts - b.ts);
+}
+
 // Entry amount in USD. New entries store `usd`; older entries stored `credits`
 // (mixed units) — those are reset on migration, so `usd` is authoritative.
 function entryUsd(e) {
@@ -1362,6 +1376,8 @@ const _api = {
   buildCostBuckets,
   aggregateCostBySession,
   trimCostLog,
+  visibleCostLog,
+  reconcileCopilotCostLog,
   costPeriod,
   parseQuotaError,
   buildAgentPrefix,

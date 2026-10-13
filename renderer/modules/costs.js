@@ -51,11 +51,18 @@ function clearTokenLog() {
 }
 
 function getCostLog() {
-  return getPref(COST_LOG_KEY, []);
+  return window.RendererLogic.visibleCostLog(getPref(COST_LOG_KEY, []));
+}
+
+function recordCopilotSessionCost(sessionId, sessionName, usage) {
+  const log = window.RendererLogic.reconcileCopilotCostLog(
+    getPref(COST_LOG_KEY, []), sessionId, sessionName, usage);
+  trimCostLog(log, COST_LOG_MAX_ENTRIES);
+  setPref(COST_LOG_KEY, log);
 }
 
 function recordCostEntry(sessionId, sessionName, usd, provider) {
-  const log = getCostLog();
+  const log = getPref(COST_LOG_KEY, []);
   log.push({ ts: Date.now(), sessionId, sessionName, usd, provider: provider || null });
   trimCostLog(log, COST_LOG_MAX_ENTRIES);
   setPref(COST_LOG_KEY, log);

@@ -577,16 +577,15 @@ function nextOnboardingStep() {
 
 // ── Tutorial Popup ─────────────────────────────────────────
 /**
- * Show a tutorial popup next to the Skills section header, teaching
- * the user about hovering for tooltips and reloading. Auto-dismisses
- * after 30s or when the user clicks the reload button.
+ * Show the central functions entry to new users. Auto-dismisses
+ * after 30s or when the user opens the functions page.
  * @returns {Promise<void>}
  */
 async function showTutorialPopup() {
   const flags = await desktop.tutorial.getFlags();
   if (flags.tutorialSkillsShown) return;
 
-  const skillsHeader = document.querySelector('.sidebar__section[data-icon="🛠️"] .sidebar__header');
+  const skillsHeader = document.getElementById('btnFunctions');
   if (!skillsHeader) return;
 
   const existing = document.getElementById('tutorialSkillsPopup');
@@ -602,8 +601,8 @@ async function showTutorialPopup() {
       '<button class="tutorial-popup__close" id="tutorialSkillsClose">×</button>' +
     '</div>' +
     '<div class="tutorial-popup__body">' +
-      'Über <strong>Skills &amp; Agents</strong> hovern — Beschreibung erscheint als Tooltip.<br>' +
-      'Über den Header hovern um neu zu laden <strong>↻</strong>' +
+      'Unter <strong>Funktionen</strong> findest du Skills, Anbindungen, Plugins und die Kostenübersicht.<br>' +
+      'Skills gelten für den ausgewählten Chat-Tab. Über ihr <strong>⋮</strong>-Menü kannst du sie neu laden.' +
     '</div>';
   document.body.appendChild(popup);
 
@@ -622,9 +621,9 @@ async function showTutorialPopup() {
     setTimeout(() => showTutorialRenamePopup(), 1000);
   };
 
-  // Close when user clicks the reload button
+  // Close when user opens the functions page.
   const onReloadClick = (e) => {
-    if (e.target.closest('[aria-label="Skills neu laden"], [aria-label="Agents neu laden"]')) close();
+    if (e.target.closest('#btnFunctions')) close();
   };
 
   popup.querySelector('.tutorial-popup__close').addEventListener('click', (e) => {

@@ -38,7 +38,7 @@
  *   per-model reasoning choices.
  * @returns {Promise<string>} The new tab's unique ID.
  */
-async function createTab(label, initialModel, provider, initialReasoningByModel) {
+async function createTab(label, initialModel, provider, initialReasoningByModel, backgroundId) {
   const tabLabel = label || '🤖 Chat';
   // The ProviderID is the authoritative discriminator (it determines available
   // models and provider-specific behaviour). Prefer the explicit arg; else derive
@@ -46,7 +46,7 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
   const tabProvider = provider
     || (initialModel ? window.RendererLogic.getModelProvider(initialModel) : null)
     || getDefaultProvider();
-  const tabId = await desktop.chat.newTab();
+  const tabId = backgroundId === undefined ? await desktop.chat.newTab() : backgroundId;
 
   // Create stream output element
   const streamEl = document.createElement('div');
@@ -92,6 +92,8 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
     _lastUsageText: null,
     _lastUsageTokens: null,
     _costUsd: 0,
+    _copilotUsage: null,
+    _copilotUsageError: null,
     _sessionName: null,
     provider: tabProvider,
     reasoningByModel: normalizeReasoningByModel(seededReasoning),
@@ -107,9 +109,10 @@ async function createTab(label, initialModel, provider, initialReasoningByModel)
     activeSkills: new Set(),
   });
 
-  switchTab(tabId);
+  if (backgroundId === undefined) switchTab(tabId);
+  else streamEl.style.display = 'none';
   renderTabs();
-  updateStatus(`⚡ ${tabLabel}`, 'var(--green)');
+  if (backgroundId === undefined) updateStatus(`⚡ ${tabLabel}`, 'var(--green)');
   return tabId;
 }
 

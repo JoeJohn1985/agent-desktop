@@ -347,6 +347,7 @@ async function restoreOpenTabs() {
         loadTodos(tab.cwd);
         // Display session context for restored tabs
         if (t.sessionId) displaySessionContext(tab, t.sessionId, tabId);
+        if (t.sessionId && getTabProvider(tab) === 'copilot') refreshUsageDisplay(tabId);
       }
     }
     return true;
@@ -1287,6 +1288,30 @@ function formatUsd(v) {
 // consumed directly by modules/costs.js via window.RendererLogic.
 
 async function refreshUsageDisplay(tabId) {
+  const targetTab = tabs.get(tabId);
+  if (targetTab && getTabProvider(targetTab) === 'copilot') {
+    const sessionId = targetTab.sessionId;
+    if (!sessionId) return;
+    const request = (targetTab._copilotUsageRequest || 0) + 1;
+    targetTab._copilotUsageRequest = request;
+    try {
+      const usage = await window.desktop.chat.copilotUsage(sessionId);
+      if (tabs.get(tabId) !== targetTab || targetTab.sessionId !== sessionId
+          || targetTab._copilotUsageRequest !== request) return;
+      if (!usage.success) throw new Error(usage.error || 'CLI-Verbrauch nicht verfügbar');
+      targetTab._copilotUsage = { ...usage, sessionId };
+      targetTab._copilotUsageError = null;
+      targetTab._costUsd = usage.usd;
+      recordCopilotSessionCost(sessionId, targetTab._sessionName || null, usage);
+    } catch (err) {
+      if (tabs.get(tabId) !== targetTab || targetTab.sessionId !== sessionId
+          || targetTab._copilotUsageRequest !== request) return;
+      targetTab._copilotUsageError = { sessionId, message: err.message };
+      console.warn('[usage] Copilot-Sitzungsverbrauch nicht verfügbar:', err.message);
+    }
+    if (tabId === activeTabId) updateUsageDisplay(null, null, null);
+    return;
+  }
   try {
     const result = await window.desktop.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
@@ -1473,6 +1498,21 @@ function updateUsageDisplay(parsed, tokens, fullText) {
   const tab = tabs.get(activeTabId);
   const modelId = tab?.selectedModel || '';
   const provider = tab ? getTabProvider(tab) : 'copilot';
+
+  if (provider === 'copilot') {
+    const usage = tab?._copilotUsage?.sessionId === tab?.sessionId ? tab?._copilotUsage : null;
+    if (tab?._copilotUsageError?.sessionId === tab?.sessionId && tab?._copilotUsageError) {
+      el.textContent = 'Verbrauch nicht verfügbar';
+      el.title = tab._copilotUsageError.message;
+    } else if (usage) {
+      el.textContent = `${usage.aic.toFixed(2)} AIC · ${formatUsd(usage.usd)}`;
+      el.title = `Gesamter CLI-protokollierter Sitzungsverbrauch; 100 AIC = 1 USD. Stand: ${new Date(usage.asOf).toLocaleString('de-DE')}. Keine bestätigte Kontoabbuchung.`;
+    } else {
+      el.textContent = tab?.sessionId ? 'Verbrauch wird geladen …' : '0,00 AIC · $0.00';
+      el.title = 'CLI-protokollierter Sitzungsverbrauch';
+    }
+    return;
+  }
 
   let display;
   if (getModelPricing(modelId, Date.now(), provider)) {
@@ -2031,10 +2071,12 @@ function initChatInput() {
   // (renderer/app.js SECTION_MENUS.sessions.wire) since the field is created
   // dynamically only while the Sessions ⋮ menu is open, not present at startup.
 
-  document.getElementById('btnAddTab').addEventListener('click', (e) => {
-    e.stopPropagation();
-    openAddTabProviderMenu(e.currentTarget);
-  });
+  for (const id of ['btnAddTab', 'btnNewChat']) {
+    document.getElementById(id).addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAddTabProviderMenu(e.currentTarget);
+    });
+  }
 }
 
 /**
@@ -2556,6 +2598,13 @@ function initListActionDelegation() {
     if (!action) return;
     switch (action.dataset.action) {
       case 'open-images-folder': openImagesFolder(); break;
+      case 'open-functions': openFunctionsView(); break;
+      case 'toggle-right-sidebar': {
+        const sidebar = document.getElementById('rightSidebar');
+        sidebar.hidden = !sidebar.hidden;
+        action.setAttribute('aria-expanded', String(!sidebar.hidden));
+        break;
+      }
       case 'toggle-plugins-view': pluginsViewActive ? switchToChatView() : switchToPluginsView(); break;
       case 'close-view': switchToChatView(); break;
       case 'close-lightbox': closeLightbox(); break;
@@ -2613,6 +2662,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initSlashButtons();
     initSettings();
     initSidebar();
+    initMcpManager();
     initPluginButtons();
     initTestRunner();
     initDevConsole();

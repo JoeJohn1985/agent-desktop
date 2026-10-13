@@ -13,6 +13,8 @@
 
 /** @type {Array<{id: string, name: string, icon: string, description: string, source: string, dirName?: string}>} Skill definitions loaded from main process. */
 let skills = [];
+let _skillsLoading = false;
+let _skillsLoadError = '';
 /** @type {Array<{id: string, name: string, icon: string, description: string, fileSlug?: string}>} Agent definitions loaded from main process. */
 let agents = [];
 /** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
@@ -37,14 +39,23 @@ const _liveMcpStatus = new Map();
  */
 function renderSkills() {
   const container = document.getElementById('skillList');
-  const section = container.closest('.sidebar__section');
+  if (!container) return;
+  const tab = tabs.get(activeTabId);
+  const context = document.getElementById('skillsContext');
+  if (context) context.textContent = tab
+    ? `Provider: ${getTabProvider(tab)} · Projekt: ${tab.cwd || 'Kein Projekt gewählt'}`
+    : 'Kein Chat-Tab ausgewählt.';
+  if (_skillsLoading || _skillsLoadError) {
+    container.innerHTML = emptyStateHtml('🛠️', _skillsLoadError || 'Skills werden geladen…');
+    return;
+  }
 
   // Kein Filtern mehr: die Liste enthält per Konstruktion genau die Skills,
   // die der Provider dieses Tabs in diesem Projekt tatsächlich liest (siehe
   // loadContextForTab / src/context-paths.js). Alles, was hier ankommt, ist
   // verfügbar — und alles Verfügbare kommt hier an.
   if (skills.length === 0) {
-    if (section) section.style.display = 'none';
+    container.innerHTML = emptyStateHtml('🛠️', 'Keine Skills für diesen Provider und dieses Projekt verfügbar.');
     return;
   }
 
@@ -52,7 +63,6 @@ function renderSkills() {
   // darf in anderen Tabs nicht als aktiv erscheinen.
   const activeTabSkills = tabs.get(activeTabId)?.activeSkills || new Set();
 
-  if (section) section.style.display = 'block';
   // No inline onclick with interpolated values: skill names/dirs come from
   // third-party SKILL.md frontmatter (incl. marketplace plugins) — HTML-entity
   // decoding would let a crafted name break out of the JS string inside an
@@ -62,14 +72,17 @@ function renderSkills() {
     const isActive = activeTabSkills.has(s.id);
     const isProject = s.source === 'project';
     return `
-      <div class="skill-card ${isActive ? 'skill-card--active' : ''} ${isProject ? 'skill-card--project' : ''}"
+      <button type="button" class="skill-card ${isActive ? 'skill-card--active' : ''} ${isProject ? 'skill-card--project' : ''}"
+           aria-pressed="${isActive}" ${!tab ? 'disabled' : ''}
            data-skill-id="${escapeAttr(s.id)}" data-tooltip="${escapeAttr(s.description)}">
         <span class="skill-card__icon">${escapeHtml(s.icon || '🧩')}</span>
-        <div class="skill-card__info">
-          <div class="skill-card__name">${escapeHtml(s.name)}</div>
-        </div>
-        <div class="skill-card__toggle"></div>
-      </div>
+        <span class="skill-card__info">
+          <span class="skill-card__name">${escapeHtml(s.name)}</span>
+          <span class="functions-view__skill-description">${escapeHtml(s.description || '')}</span>
+          <span class="functions-view__skill-source">${escapeHtml(s.source || 'Unbekannte Herkunft')}</span>
+        </span>
+        <span class="skill-card__toggle"></span>
+      </button>
     `;
   }).join('');
 }
@@ -121,7 +134,7 @@ async function refreshMcpStatus() {
     // A live session already confirmed this server's real status (by actually
     // using it) — that's stronger evidence than our own unauthenticated probe,
     // which can false-negative on servers that need auth the probe doesn't send.
-    if (_liveMcpStatus.has(s.name)) return;
+    if (!s.managed && _liveMcpStatus.has(s.name)) return;
     if (statusByName.has(s.name)) s.status = statusByName.get(s.name);
   });
   applyStatus(globalMcpServers);
@@ -132,39 +145,35 @@ async function refreshMcpStatus() {
 function renderMcpServers() {
   const container = document.getElementById('mcpList');
   if (!container) return;
-  const section = container.closest('.sidebar__section');
-
-  // MCP servers are only wired to the Copilot CLI. Direct-API providers
-  // (Anthropic/Gemini/OpenAI/Ollama/GLM) have no MCP connection by design
-  // (internal/sensitive servers must not reach external APIs) — hide the
-  // section entirely for those tabs.
   const activeTab = tabs.get(activeTabId);
-  if (activeTab && getTabProvider(activeTab) !== 'copilot') {
-    if (section) section.style.display = 'none';
+  const context = document.getElementById('connectionsContext');
+  if (context) context.textContent = activeTab
+    ? `Chat-Provider: ${getTabProvider(activeTab)} · Projekt: ${activeTab.cwd || 'Kein Projekt gewählt'}`
+    : 'Zentrale Serververwaltung · Kein Chat-Tab ausgewählt.';
+  const servers = mergeMcpByName(mcpServers, globalMcpServers);
+
+  if (servers.length === 0) {
+    container.innerHTML = emptyStateHtml('🔌', 'Server über die MCP-Verwaltung hinzufügen.');
     return;
   }
 
-  if (mcpServers.length === 0) {
-    if (section) section.style.display = 'none';
-    return;
-  }
-
-  if (section) section.style.display = 'block';
-  container.innerHTML = mcpServers.map(s => {
+  container.innerHTML = servers.map(s => {
     const isConnected = s.status === 'connected';
     const isConfigured = s.status === 'configured';
     const statusIcon = isConnected ? '🟢' : isConfigured ? '⚪' : '🔴';
-    const statusLabel = isConnected ? 'verbunden' : isConfigured ? 'konfiguriert' : 'getrennt';
+    const statusLabel = MCP_STATUS_LABELS[s.status] || s.status;
     const cardClass = isConnected ? 'mcp-card--connected' : 'mcp-card--disconnected';
-    const projectBadge = '';
+    const projectBadge = s.fromProject ? ' (Projekt / CLI)' : ' (CLI)';
     return `
       <div class="mcp-card ${cardClass}"
-           data-tooltip="${escapeAttr(s.name)}">
+           data-tooltip="${escapeAttr(s.error || s.name)}">
         <span class="mcp-card__status">${statusIcon}</span>
         <div class="mcp-card__info">
-          <div class="mcp-card__name">${escapeHtml(s.name)}${projectBadge}</div>
+          <div class="mcp-card__name">${escapeHtml(s.name)}${s.managed ? ' (App)' : projectBadge}</div>
+          ${s.error ? `<div class="mcp-manager__error">${escapeHtml(s.error)}</div>` : ''}
         </div>
-        <span class="mcp-card__label">${statusLabel}</span>
+        <span class="mcp-card__label" title="${escapeAttr(statusLabel)}">${escapeHtml(statusLabel)}</span>
+        ${s.managed ? mcpMenuButtonHtml(s) : ''}
       </div>
     `;
   }).join('');
@@ -203,9 +212,14 @@ async function loadContextForTab(provider, cwd, opts = {}) {
   if (!opts.force && key === _lastContextKey) return;
   _lastContextKey = key;
   const requestGen = ++_contextRequestGen;
+  _skillsLoading = true;
+  _skillsLoadError = '';
+  skills = [];
+  renderSkills();
 
   let newSkills = [];
   let newAgents = [];
+  let loadError = '';
   try {
     [newSkills, newAgents] = await Promise.all([
       desktop.context.listSkills(provider, cwd || null).then(r => r || []),
@@ -213,10 +227,13 @@ async function loadContextForTab(provider, cwd, opts = {}) {
     ]);
   } catch (e) {
     console.warn('[context] Skills/Agents konnten nicht geladen werden:', e.message);
+    loadError = 'Skills konnten nicht geladen werden: ' + e.message;
   }
 
   if (requestGen !== _contextRequestGen) return; // von einer neueren Anfrage überholt — verwerfen
 
+  _skillsLoading = false;
+  _skillsLoadError = loadError;
   skills = newSkills;
   agents = newAgents;
   renderSkills();
@@ -271,6 +288,7 @@ async function loadProjectMcpServers(cwd) {
  */
 function renderAgents() {
   const container = document.getElementById('agentList');
+  if (!container) return;
   const section = container.closest('.sidebar__section');
 
   if (agents.length === 0) {

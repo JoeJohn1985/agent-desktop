@@ -57,6 +57,152 @@ test.describe('App Start', () => {
     await expect(sidebar).toBeVisible();
   });
 
+  test('Neuer Chat steht über Funktionen und öffnet einen Chat aus der Funktionsseite', async () => {
+    const button = window.locator('#btnNewChat');
+    await expect(button).toHaveText('+Neuer Chat');
+    expect(await button.evaluate(el => el.nextElementSibling.id)).toBe('btnFunctions');
+    const count = await window.locator('#tabBar .tab').count();
+    await window.locator('#btnFunctions').click();
+    await button.click();
+    await expect(window.locator('.provider-add-dropdown')).toBeVisible();
+    await window.locator('.provider-add-dropdown .model-dropdown__item').first().click();
+    await expect(window.locator('#tabBar .tab')).toHaveCount(count + 1);
+    await expect(window.locator('#functionsView')).toBeHidden();
+    await expect(window.locator('#chatInput')).toBeVisible();
+    await window.locator('#tabBar .tab--active .tab__close').click();
+  });
+
+  test('Sidebar zeigt App-Marke über kompakter Icon-Text-Navigation', async () => {
+    await expect(window.locator('.sidebar__brand')).toHaveText('Agent Desktop');
+    expect(await window.locator('.sidebar__brand').evaluate(el => window.getComputedStyle(el).fontSize)).toBe('14px');
+    expect((await window.locator('.sidebar__brand img').boundingBox()).width).toBe(20);
+    expect(await window.locator('.sidebar__brand img').evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
+    const brand = await window.locator('.sidebar__brand').boundingBox();
+    const list = await window.locator('.sidebar__button-list').boundingBox();
+    const tabRow = await window.locator('.window-tab-row').boundingBox();
+    expect(brand.height).toBe(tabRow.height);
+    expect(brand.y).toBe(tabRow.y);
+    expect(brand.height).toBe(36);
+    expect(brand.y + brand.height).toBeLessThanOrEqual(list.y);
+    for (const id of ['btnNewChat', 'btnFunctions']) {
+      const button = window.locator('#' + id);
+      expect((await button.boundingBox()).height).toBe(32);
+      await expect(button.locator('.sidebar__button-icon')).toBeVisible();
+      expect(await button.evaluate(el => window.getComputedStyle(el).borderBottomWidth)).toBe('0px');
+      expect(await button.evaluate(el => window.getComputedStyle(el).fontSize)).toBe('12px');
+    }
+  });
+
+  test('Fenstersteuerung liegt ohne Titelleiste fest rechts neben den Tabs', async () => {
+    await expect(window.locator('#titlebar')).toHaveCount(0);
+    const controls = window.locator('.window-tab-row .titlebar__controls');
+    await expect(controls).toBeVisible();
+    expect(await window.locator('.app').evaluate(el => el.getBoundingClientRect().height === window.innerHeight)).toBe(true);
+    await window.locator('#btnWindowMaximize').click();
+    await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized())).toBe(true);
+    await window.locator('#btnWindowMaximize').click();
+    await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized())).toBe(false);
+    const originals = await window.locator('#tabBar .tab').count();
+    try {
+      for (let i = 0; i < 8; i++) await window.locator('#btnAddTab').click();
+      await expect(controls).toBeVisible();
+      expect(await window.locator('.window-tab-row').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await window.locator('.window-tab-row__drag').evaluate(el => window.getComputedStyle(el).getPropertyValue('-webkit-app-region'))).toBe('drag');
+      expect(await window.locator('#tabBar').evaluate(el => window.getComputedStyle(el).getPropertyValue('-webkit-app-region'))).toBe('no-drag');
+    } finally {
+      while (await window.locator('#tabBar .tab').count() > originals) {
+        await window.locator('#tabBar .tab').last().locator('.tab__close').click();
+      }
+    }
+  });
+
+  test('Sessionbereich heißt Project', async () => {
+    const heading = window.locator('#sessionsSection .sidebar__header-left');
+    await expect(heading).toContainText('Project');
+  });
+
+  test('Todo-Bereich heißt Backlog', async () => {
+    const heading = window.locator('#todosSection .sidebar__header-left');
+    await expect(heading).toContainText('Backlog');
+    await expect(heading).not.toContainText('Todos');
+    await expect(window.locator('[data-section-menu="todos"]')).toHaveAttribute('aria-label', 'Backlog-Optionen');
+  });
+
+  test('Funktionen bündelt vier Unterseiten und erhält den Chat-Entwurf', async () => {
+    const input = window.locator('#chatInput');
+    await input.fill('Entwurf bleibt erhalten');
+    await expect(window.locator('#skillsSection, #mcpSection, #tabPlugins')).toHaveCount(0);
+    expect(await window.locator('#btnFunctions').evaluate(el =>
+      Boolean(el.compareDocumentPosition(window.document.getElementById('sessionsSection')) & window.Node.DOCUMENT_POSITION_FOLLOWING)
+    )).toBe(true);
+    await window.locator('#btnFunctions').click();
+    await expect(window.locator('#functionsView')).toBeVisible();
+    await expect(window.locator('#skillsView')).toBeVisible();
+    await expect(input).toBeHidden();
+    for (const [page, id] of [['connections', 'connectionsView'], ['plugins', 'pluginsView'], ['costs', 'costsView'], ['skills', 'skillsView']]) {
+      const button = window.locator(`[data-function-page="${page}"]`);
+      await button.focus();
+      await window.keyboard.press('Enter');
+      await expect(button).toHaveAttribute('aria-current', 'page');
+      await expect(window.locator('#' + id)).toBeVisible();
+      await expect(window.locator('#functionsView > .plugins-view:visible')).toHaveCount(1);
+      if (page === 'costs') {
+        await window.locator('[data-range="month"]').click();
+        await expect(window.locator('[data-range="month"]')).toHaveClass(/--active/);
+        await expect(window.locator('#costsNext')).toBeDisabled();
+        await window.locator('#costsPrev').click();
+        await expect(window.locator('#costsNext')).toBeEnabled();
+        await window.locator('#costsNext').click();
+        await window.locator('#costsProviderFilter').selectOption('all');
+        await expect(window.locator('#costsChart')).toBeVisible();
+        await window.locator('[data-range="week"]').click();
+      }
+    }
+    await window.locator('#functionsView [aria-label="Zurück zum Chat"]').click();
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('Entwurf bleibt erhalten');
+    await window.locator('#btnOpenCosts').click();
+    await expect(window.locator('#costsView')).toBeVisible();
+    await window.locator('#functionsView [aria-label="Zurück zum Chat"]').click();
+    await window.locator('#btnFunctions').click();
+    await expect(window.locator('#costsView')).toBeVisible();
+    await window.locator('#tabBar .tab').first().click();
+    await expect(window.locator('#functionsView')).toBeHidden();
+    await input.fill('');
+  });
+
+  test('Funktionsseiten bleiben im schmalen Fenster und beiden Themes erreichbar', async () => {
+    const viewport = window.viewportSize();
+    const theme = await window.locator('html').getAttribute('data-theme');
+    try {
+      await window.setViewportSize({ width: 800, height: 600 });
+      await window.locator('#btnFunctions').click();
+      for (const nextTheme of ['light', 'dark']) {
+        await window.locator('html').evaluate((el, value) => el.setAttribute('data-theme', value), nextTheme);
+        for (const page of ['skills', 'connections', 'plugins', 'costs']) {
+          await window.locator(`[data-function-page="${page}"]`).click();
+          const view = window.locator('#functionsView');
+          expect(await view.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+          await expect(window.locator('#functionsView [aria-label="Zurück zum Chat"]')).toBeVisible();
+        }
+      }
+    } finally {
+      await window.locator('html').evaluate((el, value) => el.setAttribute('data-theme', value), theme);
+      await window.locator('#functionsView [aria-label="Zurück zum Chat"]').click();
+      if (viewport) await window.setViewportSize(viewport);
+    }
+  });
+
+  test('Agents-Bereich ist entfernt und Agent-Rendering bleibt sicher', async () => {
+    await expect(window.locator('#agentsSection')).toHaveCount(0);
+    await expect(window.locator('#agentList')).toHaveCount(0);
+    await window.evaluate(() => {
+      /* global renderAgents, updateSidebarForProvider */
+      renderAgents();
+      updateSidebarForProvider('copilot');
+    });
+  });
+
   test('Chat-Input ist sichtbar', async () => {
     const input = window.locator('#chatInput');
     await expect(input).toBeVisible();

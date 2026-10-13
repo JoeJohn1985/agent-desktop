@@ -1,9 +1,9 @@
 // ── Plugins Module ────────────────────────────────────────────
 // Extracted from app.js — plugin/marketplace manager and the
-// plugins/costs/chat main-view switching.
+// compatibility entry points for the shared functions view.
 // Relies on globals provided elsewhere: escapeHtml/escapeAttr/showNotification
 // (modules/utils.js), reloadSkills (app.js skills), renderCostsPanel
-// (modules/costs.js), window.costsViewActive (modules/costs.js).
+// (modules/costs.js), openFunctionsView/closeFunctionsView (modules/functions.js).
 'use strict';
 
 /** @type {Array<{success: boolean, marketplace: string, name: string, plugins: Array, error?: string}>} Marketplace browse results. */
@@ -422,31 +422,7 @@ window.removeMarketplace = async function(name) {
  * Switch the main content area from chat to the plugins marketplace view.
  */
 window.switchToPluginsView = function() {
-  // Leave the costs view if it happens to be open.
-  window.costsViewActive = false;
-  const costsView = document.getElementById('costsView');
-  if (costsView) costsView.style.display = 'none';
-
-  window.pluginsViewActive = true;
-  const pluginsView = document.getElementById('pluginsView');
-  const sessionActions = document.getElementById('sessionActions');
-  const streamArea = document.getElementById('streamArea');
-  const chatInputBar = document.querySelector('.chat-input-bar');
-  const tabPlugins = document.getElementById('tabPlugins');
-
-  // Hide chat content, show plugin view (both inside terminal-container)
-  if (sessionActions) sessionActions.style.display = 'none';
-  if (streamArea) streamArea.style.display = 'none';
-  if (chatInputBar) chatInputBar.style.display = 'none';
-  if (pluginsView) pluginsView.style.display = 'flex';
-
-  // Deactivate all chat tabs, activate plugin tab
-  document.querySelectorAll('#tabBar .tab:not(.tab--fixed)').forEach(el => {
-    el.classList.remove('tab--active');
-  });
-  if (tabPlugins) tabPlugins.classList.add('tab--active');
-
-  renderPlugins();
+  openFunctionsView('plugins');
 };
 
 /**
@@ -454,47 +430,12 @@ window.switchToPluginsView = function() {
  * like the plugin marketplace — not a modal).
  */
 window.switchToCostsView = function() {
-  // Leave the plugins view if it happens to be open.
-  window.pluginsViewActive = false;
-  const pluginsView = document.getElementById('pluginsView');
-  const tabPlugins = document.getElementById('tabPlugins');
-  if (pluginsView) pluginsView.style.display = 'none';
-  if (tabPlugins) tabPlugins.classList.remove('tab--active');
-
-  window.costsViewActive = true;
-  const costsView = document.getElementById('costsView');
-  const sessionActions = document.getElementById('sessionActions');
-  const streamArea = document.getElementById('streamArea');
-  const chatInputBar = document.querySelector('.chat-input-bar');
-
-  if (sessionActions) sessionActions.style.display = 'none';
-  if (streamArea) streamArea.style.display = 'none';
-  if (chatInputBar) chatInputBar.style.display = 'none';
-  if (costsView) costsView.style.display = 'flex';
-
-  // Render after layout so the canvas has its final width.
-  requestAnimationFrame(renderCostsPanel);
+  openFunctionsView('costs');
 };
 
 /**
  * Switch the main content area back from plugins/costs to chat view.
  */
 function switchToChatView() {
-  if (!window.pluginsViewActive && !window.costsViewActive) return;
-  window.pluginsViewActive = false;
-  window.costsViewActive = false;
-  const pluginsView = document.getElementById('pluginsView');
-  const costsView = document.getElementById('costsView');
-  const sessionActions = document.getElementById('sessionActions');
-  const streamArea = document.getElementById('streamArea');
-  const chatInputBar = document.querySelector('.chat-input-bar');
-  const tabPlugins = document.getElementById('tabPlugins');
-
-  if (pluginsView) pluginsView.style.display = 'none';
-  if (costsView) costsView.style.display = 'none';
-  if (sessionActions) sessionActions.style.display = '';
-  if (streamArea) streamArea.style.display = '';
-  if (chatInputBar) chatInputBar.style.display = '';
-
-  if (tabPlugins) tabPlugins.classList.remove('tab--active');
+  closeFunctionsView();
 }

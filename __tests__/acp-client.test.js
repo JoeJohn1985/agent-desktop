@@ -254,6 +254,27 @@ describe('AcpClient', () => {
       client = new AcpClient('tab-1', mockSendToRenderer);
     });
 
+    it.each([false, true])('registriert app-eigene MCP-Konfiguration beim Start, shell=%s', async shell => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written);
+      mockSpawnFn = jest.fn(() => proc);
+      const file = 'C:\\local data\\mcp-runtime.json';
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        additionalMcpConfig: file, mcpServers: [], shell, noAutoUpdate: true, logDir: 'C:\\local data\\logs',
+      });
+      await client.start();
+      await client.newSession();
+      expect(mockSpawnFn.mock.calls[0][1]).toEqual(expect.arrayContaining([
+        '--additional-mcp-config', shell ? `"@${file}"` : '@' + file,
+      ]));
+      expect(parseStdin(written).find(request => request.method === 'session/new').params.mcpServers).toEqual([]);
+      expect(mockSpawnFn.mock.calls[0][1]).toContain('--no-auto-update');
+      expect(mockSpawnFn.mock.calls[0][1]).toEqual(expect.arrayContaining([
+        '--log-dir', shell ? '"C:\\local data\\logs"' : 'C:\\local data\\logs',
+      ]));
+    });
+
     it('spawnt Prozess mit "copilot" und "--acp" Argument', async () => {
       const startPromise = client.start();
       await flushPromises();
@@ -526,6 +547,7 @@ describe('AcpClient', () => {
 
       const req = JSON.parse(stdinWritten[0].trim());
       expect(req.method).toBe('session/new');
+      expect(req.params.mcpServers).toEqual([]);
 
       sendResponse(proc, { jsonrpc: '2.0', id: req.id, result: { sessionId: 'new-sess-1' } });
       await flushPromises();
@@ -576,6 +598,7 @@ describe('AcpClient', () => {
       const req = JSON.parse(stdinWritten[0].trim());
       expect(req.method).toBe('session/load');
       expect(req.params).toEqual(expect.objectContaining({ sessionId: 'existing-sess-99' }));
+      expect(req.params.mcpServers).toEqual([]);
 
       sendResponse(proc, { jsonrpc: '2.0', id: req.id, result: { sessionId: 'existing-sess-99' } });
       await flushPromises();
@@ -599,6 +622,7 @@ describe('AcpClient', () => {
       await flushPromises();
       const req2 = JSON.parse(stdinWritten[1].trim());
       expect(req2.method).toBe('session/new');
+      expect(req2.params.mcpServers).toEqual([]);
 
       sendResponse(proc, { jsonrpc: '2.0', id: req2.id, result: { sessionId: 'fallback-sess' } });
       await flushPromises();
@@ -949,6 +973,16 @@ describe('AcpClient', () => {
       expect(mockSpawnFn).toHaveBeenCalled();
     });
 
+    it('startet geplante Läufe nach Prozessabbruch nicht neu', async () => {
+      client.updateOptions({ autoRestart: false });
+      proc.emit('close', 1, null);
+      await flushPromises();
+      expect(mockSpawnFn).not.toHaveBeenCalled();
+      expect(mockSendToRenderer).toHaveBeenCalledWith('agent:event', 'tab-1',
+        expect.objectContaining({ type: 'error' }));
+      expect(client.state).toBe('dead');
+    });
+
     it('ignoriert ein verspätetes "close" eines bereits ersetzten Prozesses (kein Doppel-Restart)', async () => {
       const restartSpawn = jest.fn(() => createMockProcess());
       mockSpawnFn = restartSpawn;
@@ -1290,6 +1324,7 @@ describe('AcpClient', () => {
       client = new AcpClient('tab-1', mockSendToRenderer, {
         model: 'claude-opus-4.8',
         effort: 'high',
+        additionalMcpConfig: 'C:\\data\\mcp-runtime.json',
       });
       await client.start();
       await client.newSession();
@@ -1310,12 +1345,16 @@ describe('AcpClient', () => {
       expect(mockSpawnFn.mock.calls[1][1]).toEqual(
         expect.arrayContaining(['--reasoning-effort', 'max']),
       );
+      expect(mockSpawnFn.mock.calls[1][1]).toEqual(
+        expect.arrayContaining(['--additional-mcp-config', '@C:\\data\\mcp-runtime.json']),
+      );
 
       const methods = parseStdin(written2).map(message => message.method);
       const loadIndex = methods.indexOf('session/load');
       const setModelIndex = methods.indexOf('session/set_model');
       const promptIndex = methods.indexOf('session/prompt');
       expect(loadIndex).toBeGreaterThanOrEqual(0);
+      expect(parseStdin(written2)[loadIndex].params.mcpServers).toEqual([]);
       expect(setModelIndex).toBeGreaterThan(loadIndex);
       expect(promptIndex).toBeGreaterThan(setModelIndex);
 

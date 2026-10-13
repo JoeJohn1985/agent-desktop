@@ -24,8 +24,8 @@
    - [File drag & drop](#file-drag--drop)
    - [Skills](#skills)
    - [Agents](#agents)
-   - [MCP servers](#mcp-servers-sidebar)
-   - [Todos](#todos)
+   - [MCP servers](#mcp-servers-anbindungen)
+   - [Backlog](#backlog)
    - [Session actions](#session-actions)
    - [Session resume](#session-resume)
    - [Settings](#settings)
@@ -88,18 +88,16 @@ On the **first app start**, a 4-step onboarding wizard guides you through setup:
 
 ## User interface
 
-The interface consists of four main areas: titlebar, sidebar, main area, and statusbar.
+The interface consists of a sidebar, main area with tabs, and statusbar. There is no separate titlebar.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🟢 Agent Desktop                    v1.0.0         _ □ ✕     │  ← Titlebar
-├────────────┬────────────────────────────────────────────────────┤
-│            │  Tab 1 │ Tab 2 │ ➕                                │  ← Tab bar
-│  Sessions  ├────────────────────────────────────────────────────┤
+│            │  Tab 1 │ Tab 2 │ ➕                     _ □ ✕      │  ← Tabs / window controls
+│ Funktionen ├────────────────────────────────────────────────────┤
 │            │  🧠 Sonnet  🤖 Agent  📊 18%             ~12.5C  │  ← Session actions
-│  Skills    ├────────────────────────────────────────────────────┤
+│  Project   ├────────────────────────────────────────────────────┤
 │            │                                                    │
-│  Todos     │                  Chat area                         │
+│  Backlog   │                  Chat area                         │
 │            │                                                    │
 │  Images    ├────────────────────────────────────────────────────┤
 │            │  📤 [  Type a message…                        ] ➤  │  ← Chat input
@@ -108,19 +106,21 @@ The interface consists of four main areas: titlebar, sidebar, main area, and sta
 └────────────┴────────────────────────────────────────────────────┘
 ```
 
-### Titlebar
+### Tabs and window controls
 
-The app uses a custom, frameless titlebar:
+The frameless window places minimize, maximize/restore and close controls at the right of the tab row. They remain visible while overflowing tabs scroll independently. Drag the free area between tabs and controls to move the window. The separate app-name/icon titlebar has been removed; the version remains in the sidebar footer.
 
-- **Left:** app icon and title "Agent Desktop"
-- **Center:** version badge
-- **Right:** window controls — minimize, maximize, close
+The settings gear is in the tab row, immediately left of the right-sidebar toggle.
 
 ### Sidebar
 
-The sidebar is on the left edge. It contains six sections. Section header badges were removed in favor of a per-section **⋮ menu** (always visible in the header) that holds whichever secondary actions that section has — search, reload, manage, add, sync, etc. — so the header itself stays uncluttered.
+The sidebar starts with the app icon and **Agent Desktop**. Below it, **Neuer Chat** and **Funktionen** form a compact vertical icon-and-text navigation list. The window controls remain in the tab row; there is no separate titlebar.
 
-#### 📂 Sessions
+**+ Neuer Chat**, above **Funktionen**, opens the same provider chooser as the tab-row plus button. Choosing a provider opens a new chat, including when a functions page is active. Existing chats remain unchanged; the tab-row plus button and `Ctrl+T` remain available.
+
+The sidebar is on the left edge. **Funktionen**, above **Project**, opens a full-page area with four subpages: **Skills**, **Anbindungen**, **Plugins**, and **Kostenübersicht**. The sidebar remains available. The last visited subpage is remembered until the app closes. Close the page or select a chat tab to return without losing the draft or stopping the session. Skills and MCP lists are no longer separate sidebar sections; Plugins no longer has a fixed chat tab.
+
+#### 📂 Project
 
 - **Session cards** show the provider icon and name. Hover a card to reveal its **⋮ menu**: **✏️ Umbenennen** (rename in place), **📁 Ordner festlegen/ändern**, **🗑️ Session löschen**.
 - **Click** a card to open the session in a new tab.
@@ -128,26 +128,22 @@ The sidebar is on the left edge. It contains six sections. Section header badges
 
 > **Note:** only named sessions are shown in the sidebar. Unnamed sessions exist only as open tabs.
 
-#### 🧠 Skills
+#### 🧠 Skills (Funktionen)
 
 - List of all available AI skills with icon, name, and description — follows the active tab's provider (Copilot's native `~/.copilot/skills/`, or the tab provider's own `~/.agent-desktop/<provider>/skills/`).
 - The model decides on its own whether a skill is relevant and reads it via its file tool — nothing is force-fed into every prompt by default.
 - **Toggle switch** force-activates a skill for the next message as an explicit override, on top of the automatic selection.
-- **⊘ button** disables a skill globally in the Copilot CLI (`~/.copilot/settings.json`) — Copilot only.
-- The header's **⋮ menu** holds **↻ Skills neu laden** and **⚙️ Skills verwalten** (opens the Skill Manager).
+- The page shows the active chat's provider/project and each skill's description and source. Activation remains per chat tab, not global.
+- The header's **⋮ menu** holds **↻ Skills neu laden**. Skill files are managed in the provider's folders.
 
-#### 🤖 Agents
+#### 🔌 Anbindungen (Funktionen)
 
-- List of all available agents (persona/approach presets) with icon, name, and description — same provider-follows-active-tab behavior as Skills.
-- Agents are a **persona switch**: if the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task — still the same conversation, not a separate delegated sub-agent run.
-- **Toggle switch** force-activates an agent for the next message, same override semantics as Skills.
-- The header's **⋮ menu** holds **↻ Agents neu laden**.
+- Shows app-managed and native MCP servers with their source and live status. Central management is available regardless of the active chat provider; using the connections in a chat remains Copilot-only.
+- **Server verwalten / hinzufügen** opens the existing server editor. Per-server menus retain connection, editing, enable/disable, logout and removal actions.
 
-#### 🔌 MCP-Server
+#### ✅ Backlog
 
-- Shows configured MCP servers and their live connection status (🟢 connected / ⚪ configured / 🔴 disconnected) — Copilot only; direct-API providers have no MCP connection by design.
-
-#### ✅ Todos
+Backlog is in the right sidebar, not the left navigation. The icon immediately left of minimize toggles this sidebar. It starts closed; its state is not saved across app restarts. It sits beside the chat or functions page without covering the content.
 
 > This section is only visible when a session is loaded.
 
@@ -185,7 +181,7 @@ Directly below the tab bar you control the active session:
 | **🤖 Mode** | Opens the mode/agent selection dropdown |
 | **📊 XX%** | Context dropdown — shows usage, opens a detail panel, or runs compact/clear |
 | **📈** | Opens the cost page (cost listing as a dedicated full-screen page) |
-| **~$X.XX** | Estimated USD cost when a per-token price is known; Copilot prices are refreshed daily from GitHub when online. Unknown/Auto models fall back to raw `/usage` values when available. |
+| **XX.XX AIC · $X.XX** | Copilot: total CLI-recorded session consumption and its USD equivalent (100 AIC = $1). Other API providers retain their token-based estimates. |
 
 #### Chat area
 
@@ -284,11 +280,9 @@ Drag files directly into the chat area — the file paths are sent as context to
   reads that agent's file and adopts its approach for the rest of the task —
   within the same conversation, not a delegated, isolated sub-agent run (that
   is a separate, not-yet-built feature).
-- **Toggle switch** force-activates an agent for the next message. For
-  Copilot this sends its native `/agent <name>` slash command; for every
-  other provider a plain-language hint pointing at the same lazy index.
-- The **sidebar badge** shows the total number of loaded agents for the active tab's provider.
-- **Project agents** (`Project` badge): from `.github/agents/` in the active CWD.
+- Agents are no longer listed or toggled in the sidebar. Agent files and
+  provider-native discovery remain available.
+- **Project agents**: from `.github/agents/` in the active CWD.
 
 ### Instructions
 
@@ -309,12 +303,48 @@ Drag files directly into the chat area — the file paths are sent as context to
   it's clear which instructions apply to which provider. Settings → Features
   shows which providers support it.
 
-### MCP servers (sidebar)
+### MCP servers (Anbindungen)
 
+- **App-managed servers:** Open **Funktionen → Anbindungen → Server verwalten / hinzufügen**.
+  Enter a unique name, the HTTPS endpoint and its transport (**HTTP** for
+  Streamable HTTP, or **SSE** for legacy SSE), then save and click **Verbinden**.
+  Complete the authorization in your browser if the server requires OAuth.
+  The app stores credentials with OS encryption and refreshes tokens itself.
+  Plain HTTP is supported only for local endpoints.
+- **Automatic startup:** Enabled servers connect in the background when the app
+  starts, using saved credentials and token refresh. Disabled servers are skipped.
+  Startup never opens an authorization browser; if a new login is required, the
+  status shows **Anmeldung erforderlich**.
+- **Server actions:** Use the **⋮** menu directly next to the server in the sidebar
+  or management dialog to connect, disconnect, edit, enable/disable, log out or
+  remove it. **Bearbeiten** opens the form; ⚙ remains available for adding servers.
+- **Trennen / Anmeldung abbrechen** closes the connection or cancels a pending
+  login; **Abmelden** additionally clears saved credentials. Disabling a server
+  removes its tools from subsequent Copilot sessions. Changes apply before the
+  next message, preserving the existing native session.
+- The `(App)` badge and status describe the remote connection, not merely
+  Copilot's connection to the local bridge. Empty Copilot MCP sections remain
+  visible so the management button stays accessible.
+- App-managed connections are currently **Copilot-only** and support anonymous
+  servers or OAuth with dynamic client registration. Static client credentials,
+  custom authentication headers, sampling, elicitation, resource subscriptions,
+  logging control and experimental tasks are not supported.
 - The **badge** shows `connected/total`.
 - **Project MCP** (`Project` badge): from `.github/mcp.json` in the active CWD.
+- **Copilot connection:** Copilot CLI loads its user, workspace, and plugin MCP
+  configuration itself. Agent Desktop does not resend those servers through
+  ACP; the sidebar still reads the CLI configuration. This avoids duplicate
+  configuration conflicts. For app-managed servers, Copilot receives only local
+  stdio bridges through an app-owned startup configuration
+  (`--additional-mcp-config`), not through ACP's server list; the app performs
+  remote OAuth. Remove duplicate native remote
+  entries yourself if necessary; the app never edits the CLI configuration.
+  Compatibility with your particular remote server must still be verified.
+- An empty native server list must remain valid JSON: `{"mcpServers":{}}`.
+  Leaving `~/.copilot/mcp-config.json` as a zero-byte file causes the CLI to
+  reject its MCP configuration, including startup loading.
 
-### Todos
+### Backlog
 
 | Action | How to |
 |---|---|
@@ -418,9 +448,22 @@ Opens a popup for session-specific tool denials:
 
 > **Note:** every change restarts the ACP process automatically. The session is preserved — no data loss.
 
-#### Cost display (`~XX.XC`) and cost page (📈)
+#### Cost display and cost page (📈)
 
-On the right of the session bar you always see the estimated credit total of the current session (`~0C` before the first prompt). Computed from token usage × model price after each prompt; a tooltip shows the full `/usage` output.
+For Copilot, the session bar shows the **entire session's CLI-recorded AIC
+consumption** and its USD equivalent, including use before an app restart.
+The source is `session.usage_checkpoint.data.totalNanoAiu` in that session's
+`events.jsonl`, not a token-price estimate. The tooltip includes the checkpoint
+time. This is recorded consumption, not proof of a GitHub account charge.
+Missing or unsupported data displays **Verbrauch nicht verfügbar**; the app
+does not fall back to an estimate or silently show zero.
+
+After a session's CLI data is loaded, the cost page uses checkpoint increments
+at their original timestamps. Older estimates for that session are excluded
+from the chart but retained in storage. Repeated reads do not duplicate costs.
+Clearing history removes stored entries; loading a Copilot session again
+reimports its CLI-recorded history. Direct-API and Claude subscription accounting
+are unchanged.
 
 The **📈 icon** next to it opens the **cost page** — a dedicated full-screen page (like the plugin marketplace, not a modal) with:
 
@@ -516,7 +559,7 @@ A comparison matrix of which core features each provider currently supports — 
 
 Allows customizing all configurable shortcuts. Click **"Change"**, press the new combination (`Esc` cancels). **"🔄 Reset all"** restores all defaults.
 
-> **Note:** the cost history is no longer a settings item but a dedicated page — see [Cost display and cost page](#cost-display-xxxc-and-cost-page-) under session actions.
+> **Note:** the cost history is no longer a settings item but a dedicated page — see [Cost display and cost page](#cost-display-and-cost-page-) under session actions.
 
 ### Shortcut help
 
@@ -562,3 +605,31 @@ Configurable shortcuts can be customized via **Settings → Shortcuts**.
 ---
 
 > **Agent Desktop**
+# Geplante Aufgaben
+
+Unter **Funktionen → Geplante Aufgaben** lassen sich Copilot-Aufgaben anlegen,
+bearbeiten, pausieren und löschen. Name, Prompt, Projektordner, Copilot-Modell
+und erste lokale Datum/Uhrzeit sind Pflichtfelder. **0 Wochen** bedeutet
+einmalig, **1–520 Wochen** eine Wiederholung am ursprünglichen Raster.
+Die bei Anlage gespeicherte lokale Zeitzone bleibt auch nach einem Ortswechsel
+maßgeblich. Bei Sommerzeitwechsel bleibt die lokale Uhrzeit gleich; eine nicht
+existierende Wiederholungsstunde wird für diesen Termin um eine Stunde verschoben.
+
+Die App muss laufen (minimiert genügt). Bei Start oder Aufwachen verpasste
+Termine erscheinen als Erinnerung in der Funktionen-Navigation und als Anzahl
+bei der Aufgabe. **Nachholen** verlangt eine ausdrückliche Bestätigung und
+startet genau einen gebündelten Lauf, ohne das Wiederholungsraster zu ändern.
+Pausierte fällige Termine zählen ebenfalls als verpasst.
+
+Jeder Lauf verwendet eine frische Copilot-Sitzung im Hintergrund. Chat und
+Entwurf bleiben unangetastet. Werkzeugfreigaben sind immer manuell. Bei
+Anmeldung, Fehlern, Freigaben oder erkannten Rückfragen wird die Sitzung
+geöffnet und das Fenster fordert Aufmerksamkeit an. Ein Fragezeichen oder
+eine typische Bestätigungsaufforderung in der Antwort wird vorsichtshalber
+als Rückfrage behandelt; das kann auch bei rein informativen Antworten passieren.
+
+Der Verlauf enthält Prompt, Projekt, Modell, Sitzung und Antwort. Dort lässt
+sich die Sitzung öffnen. **Beendet (fachlich ungeprüft)** bestätigt nur das Ende
+der Agentenantwort, nicht beispielsweise eine erfolgreiche Wiki-Veröffentlichung.
+Unterbrochene Läufe werden nach App-Neustart nicht erneut gestartet. Das Löschen
+einer Aufgabe löscht nicht ihren Verlauf und stoppt keinen bereits laufenden Chat.

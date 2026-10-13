@@ -21,7 +21,7 @@
 - Drag & drop for files and images
 - Context monitoring (`/context`) and management (`/compact`, `/clear`) directly from the UI
 - Themes (Light, Dark), settings, sub-agent routing, test runner
-- Cost tracking based on token usage and model prices
+- Copilot cost tracking from CLI session consumption; direct-API token-price estimates
 
 ### 1.2 Quality goals
 
@@ -258,6 +258,7 @@ mechanics. Loaded before `app.js`, in this order:
 | `test-runner.js` | Frontend for Jest/Playwright/coverage |
 | `costs.js` | Cost-log persistence and the "Cost" page (stacked bar chart + breakdown + Claude token-history) |
 | `skills-mcp.js` | Skills/Agents/MCP sidebar rendering, per-tab context loading, MCP status probing |
+| `mcp-manager.js` | Central app-managed MCP configuration, connection actions and remote status |
 | `sessions-sidebar.js` | Named-session list: search, rename, resume, delete, history-bubble rendering on resume |
 | `keyboard-shortcuts.js` | Configurable shortcut definitions, rebind settings panel, global keydown dispatch |
 | `drag-drop.js` | Whole-window file-drop handling |
@@ -321,7 +322,8 @@ User              Renderer            Preload          Main            AcpClient
 4. `session/update` notifications come back as an NDJSON stream
 5. Events are mapped and sent to the renderer via `sendToRenderer('copilot:event', tabId, event)`
 6. On completion: `copilot:done` event → the tab status is reset
-7. `refreshUsageDisplay()` calls `silentCommand('/usage')` and computes the cost delta
+7. `refreshUsageDisplay()` reads Copilot's recorded session consumption through
+   `sessions:copilotUsage`; direct-API providers still use `silentCommand('/usage')`.
 
 ### 6.2 Slash command (`/context`, `/compact`, `/clear`, `/usage`)
 
@@ -525,10 +527,52 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 | `skills:list/listProject/listProvider/getDisabled/setDisabled` | Skill management (`list` = Copilot's native `~/.copilot/skills`; `listProvider` = every other provider's own `~/.agent-desktop/<provider>/skills`). `list` first calls `syncMarketplaceSkills()` (`src/plugin-skill-mirror.js`), which mirrors installed marketplace/plugin skills (`~/.copilot/installed-plugins/…/skills/`) into `~/.copilot/skills/` — `copilot --acp` (the mode this app always runs Copilot in) never exposes plugin skills to the model on its own, only builtin + user ones, unlike the CLI's interactive/-p modes. The mirror is tracked in a manifest so re-syncs can refresh/remove entries without ever touching a same-named skill the user created themselves. |
 | `agents:list/listProject/listProvider` | Agents (persona presets — same Copilot-native-vs-per-provider split as skills) |
 | `mcp:listProject` | MCP servers from `mcp.json` |
+| `mcp:list/probe` | Native configuration and app-managed remote status |
+| `mcp:save/remove/connect/disconnect` | App-managed configuration, explicit OAuth connection and logout |
+| `mcp:changed` | Remote connection and configuration updates to the renderer |
 | `files:processDropped` | Drag&drop processing |
 | `tests:run/coverage/e2e` | Test runner |
 | `window:minimize/maximize/close` | Window control |
 | `log:write` | Log entry from the renderer |
+
+#### App-managed MCP transport (1.26.0)
+
+`src/mcp/manager.js` owns shared remote SDK clients for Streamable HTTP and SSE.
+Configuration is stored separately in `DATA_DIR/mcp-servers.json`; OAuth
+credentials are stored atomically in `userData/mcp-auth.enc` using Electron
+`safeStorage`. No plaintext fallback (including Linux `basic_text`) is allowed.
+`oauth.js` implements the SDK OAuth provider with PKCE, random state and a
+temporary loopback callback. Only explicit **Verbinden** actions can open the
+browser; subsequent refreshes remain non-interactive.
+
+After the main window is created, `connectEnabled()` starts all enabled remote
+connections in parallel without delaying app startup. Failures are logged and
+published as individual server states; a login requirement never opens a browser
+automatically. The renderer shares one accessible ⋮ action menu between the
+sidebar and manager list, using the existing section-menu styling and placement.
+
+Copilot receives one `bridge.js` stdio server per enabled remote server through
+`--additional-mcp-config @<app-owned runtime file>` at process startup. Copilot
+rejects stdio configurations supplied by ACP clients, so `session/new` and
+`session/load` deliberately receive `mcpServers: []`. The runtime file contains
+only local `type: local` servers and their gateway environment, is updated
+atomically and removed when the app service closes. The Electron executable runs the bridge with
+`ELECTRON_RUN_AS_NODE=1`. Its credentials are only a random local gateway token,
+never the remote OAuth tokens. The gateway listens exclusively on `127.0.0.1`,
+checks Host and bearer token, rejects browser Origin headers and limits request
+bodies to 2 MiB. Tool calls, resources, resource templates and prompts retain
+their structured results; list-change notifications and cancellation are
+forwarded. Sampling, elicitation, subscriptions, logging and experimental
+tasks are deliberately not advertised. Static OAuth client registration and
+custom authentication headers are not implemented.
+
+Configuration/connection revisions trigger a Copilot process restart before
+the next prompt and reload its previous native session. Existing native MCP
+configuration remains CLI-owned and is not copied into ACP or modified. The
+app service is closed before relaunch or quit. An opt-in native test confirms
+the installed Copilot CLI initializes the Electron bridge and accepts its tools
+capability without a model prompt. Actual remote authorization and tool calls
+in a real conversation still require an end-to-end user trial.
 
 #### Namespace: `onboarding` / `tutorial` / `dev`
 
@@ -598,26 +642,35 @@ Provider-scoped instructions (`~/.agent-desktop/<provider>/instructions/*.instru
 
 ### 8.3 Cost tracking
 
-The app estimates the cost from token usage:
+Copilot displays the entire session's recorded AIC consumption and its USD
+equivalent. `src/copilot-usage.js` streams the session's `events.jsonl` and
+reads `session.usage_checkpoint.data.totalNanoAiu`. It uses the latest
+cumulative checkpoint, not the sum of checkpoints. Conversion:
+`AIC = totalNanoAiu / 1e9`, `USD = AIC / 100`.
+
+The `sessions:copilotUsage` IPC validates the session ID and returns consumption
+fields only. No transcript text crosses this bridge. Restore/resume and completed
+or cancelled turns refresh the total without a token baseline. Missing files,
+unsupported data, invalid amounts or decreasing checkpoints produce a visible
+unavailable state, never a token-based fallback. The CLI file schema is
+version-dependent; the tooltip identifies the latest confirmed checkpoint.
+
+For the cost chart, timestamped checkpoint increments replace prior confirmed
+entries for that session idempotently. Legacy estimates remain stored but are
+excluded once confirmed CLI entries exist for that session. Other sessions and
+providers remain untouched.
+
+Direct-API providers estimate the cost from token usage:
 
 ```javascript
 cost = (input * priceInput + cache * priceCache + cacheWrite * priceCacheWrite + output * priceOutput) / 1_000_000
 ```
 
-Copilot prices are read from GitHub's official pricing data table
-(`data/tables/copilot/models-and-pricing.yml`) once a day and converted from USD
-to AI Credits (100 AI Credits = $1). The static `MODEL_PRICING` entries are the
-offline fallback and retain prices for older models. Direct-API models use their
-hardcoded prices first, then the weekly LiteLLM fallback.
-
-The Copilot model list itself is discovered from the CLI over ACP. Pricing is
-matched against model IDs and official display names after normalization. GitHub's
-`Auto` selection has no single rate; the estimate is unavailable until a
-billable model ID is known. For long-context tiers, the estimate uses the
-per-prompt input-token delta reported by `/usage`; ACP does not provide
-per-request tier attribution, so this remains an estimate.
-
-Token data comes from `/usage` (via `silentCommand`). The delta per prompt is stored (`recordCostEntry`), priced at the model actually used for that prompt. The cost history is visualized on the cost page as a stacked bar chart (day/week, broken down by session). Direct-API providers return real token counts and are billed in USD; Copilot is billed in AI Credits (100 AIC = $1).
+Direct-API models use their hardcoded prices first, then the weekly LiteLLM
+fallback. Token data comes from `/usage` (via `silentCommand`); deltas are stored
+by `recordCostEntry`, priced at the model used for that prompt. Copilot's model
+catalog and pricing discovery still exist, but are not used to calculate its
+session costs.
 
 ### 8.4 Logging & diagnostics
 
@@ -671,12 +724,12 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 |---|---|---|---|
 | R-1 | **`renderer/app.js` is ~4.7k lines, procedural** (was ~8.5k before the Phase-1 modularization pass) | Hard to navigate | Phase 1 done — 9 self-contained clusters moved to `renderer/modules/`. Remaining: tab management, `initAgentIPC`, model/provider catalog, `initSettings` — deferred (Phase 2) as too tightly coupled for a mechanical split. |
 | R-2 | **ACP is an unofficial API** | A CLI update can change the protocol | `acp-client.js` encapsulates all ACP details; changes stay localized |
-| R-3 | **`/usage` reports "AI Units" instead of "AI Credits"** | The credit display is based on token calculation, not the official number | Track whether ACP will provide credits in the future; token calculation as fallback |
+| R-3 | **CLI consumption file schema may change** | Copilot costs rely on local `session.usage_checkpoint` events | Validate fields; display unavailable rather than estimating on missing or unsupported data |
 | R-4 | **No automated E2E smoke test for the chat roundtrip** | Regressions surface only manually | Playwright stub present in `e2e/` |
 | R-5 | **`--deny-tool` restart visible to the user** | Short interruption when changing session tools | Improvable via a loading indicator; acceptable trade-off |
 | R-6 | **No CI pipeline** | Tests must run locally | TODO: GitHub Actions workflow |
 | R-7 | **Direct-API providers not runtime-tested** | Alpha/Beta labelled; possible runtime bugs | Manual E2E with real keys pending |
-| R-8 | **No cost attribution for Copilot sub-agent calls** | `/usage` only reports one aggregate total for the whole session — ACP exposes no per-sub-agent model or token count, so delegated work (e.g. via `task-router`) is silently priced as if it ran on the main session's model | Would need GitHub to expose real AI-Credit accounting (and ideally a per-call breakdown) via ACP; no client-side fix possible today |
+| R-8 | **No separate Copilot sub-agent cost display** | The app displays the CLI-recorded cumulative session total, not per-agent attribution | Deliberate session-level scope; do not reprice delegated work using the main model |
 
 ---
 
@@ -699,3 +752,31 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 | **Cost log** | List of credit-delta entries per prompt stored in `preferences.json` |
 | **userData** | Electron app-specific write location: `app.getPath('userData')` |
 | **buildEnv** | Helper in `src/main-helpers.js` for PATH augmentation on Linux/macOS |
+# Geplante Copilot-Aufgaben
+
+`src/scheduled-tasks.js` verwaltet Aufgaben und Läufe atomar in
+`DATA_DIR/scheduled-tasks.json` (Write + Rename). `ScheduledTasks` bietet
+`snapshot`, `upsert`, `action`, `tick`, `event`, `attention`, `finish`, `shutdown`.
+Das gespeicherte lokale Datum und die IANA-Zone bilden den Anker; `index`
+berechnet Wochenintervalle kalendarisch statt in konstanten Millisekunden.
+`missed` bündelt verpasste Termine. Start/Resume und Timerlücken über 60 Sekunden
+markieren fällige Termine nur als verpasst. Ein Main-Prozess-Timer verarbeitet
+Aufgaben serialisiert; der persistierte Lauf wird vor ACP-Start geschrieben.
+Aktive Zustände werden beim Neustart zu `interrupted`, nie automatisch wiederholt.
+
+IPC: `scheduled:list`, `scheduled:save`, `scheduled:action(id, action, confirmed)`;
+Aktionen `pause`, `delete`, `catchUp` (nur `confirmed === true`).
+Preload stellt `window.scheduled` bereit, Ereignisse sind `changed`, `attach`,
+`attention`. `renderer/modules/scheduled-tasks.js` rendert CRUD und Verlauf.
+`createTab` kann eine bereits im Main allozierte Hintergrund-ID übernehmen,
+ohne `switchTab` oder Eingabewechsel. Gespeicherte Sitzungen sind über den
+bestehenden Wiederaufnahmeweg zugänglich.
+
+Main verwendet `sendAgentPrompt` mit Copilot, Aufgaben-CWD und Aufgabenmodell.
+ACP, native CLI-Kontexte und App-MCP-Brücken bleiben dieselben.
+Geplante Backend-IDs erzwingen manuelle Freigaben auch bei Folgeprompts;
+ACP-Prozess-Autorestart ist für sie deaktiviert. Agentenereignisse und Ergebnisse
+werden dauerhaft mitgeführt. Berechtigungs-/Fehler-/Frageereignisse eskalieren;
+Rückfragen als unstrukturierter Antworttext werden konservativ per Fragezeichen
+und typischen Bestätigungsaufforderungen erkannt. ACP liefert dafür keinen
+allgemeinen fachlichen Erfolgsindikator; `completed` bedeutet nur Turn beendet.
