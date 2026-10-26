@@ -28,12 +28,14 @@ function fileFor(sessionId) {
 /**
  * @param {string} sessionId
  * @param {Object} data - { messages, tokens, lastContextTokens, model }
+ * @param {Object} [options] - strict propagates storage errors (compaction).
  */
-function save(sessionId, data) {
+function save(sessionId, data, { strict = false } = {}) {
   try {
     fs.writeFileSync(fileFor(sessionId), JSON.stringify(data), { mode: 0o600 });
   } catch (e) {
     console.warn('[session-store] save failed:', e?.message);
+    if (strict) throw e;
   }
 }
 

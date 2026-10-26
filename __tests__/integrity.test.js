@@ -30,7 +30,7 @@ if (fs.existsSync(IPC_DIR)) {
 }
 
 describe('Copilot ACP MCP configuration', () => {
-  const promptSource = mainJs.match(/^async function sendAgentPrompt\b[\s\S]*?^\}/m)[0];
+  const promptSource = mainJs.match(/^async function runAgentPrompt\b[\s\S]*?^\}/m)[0];
 
   test('MCP automatic connections start after creating the window without blocking app startup', () => {
     const startup = mainJs.match(/^app.whenReady\(\).then\(\(\) => \{[\s\S]*?^\}\);/m)[0];
@@ -64,7 +64,7 @@ describe('Copilot ACP MCP configuration', () => {
       COPILOT_CWD: 'C:\\project', COPILOT_BIN: 'copilot', console,
     });
 
-    await send('tab', 'hello', { provider: 'copilot', cwd: 'C:\\project' });
+    await send('tab', 'hello', { provider: 'copilot', cwd: 'C:\\project' }, jest.fn());
     expect(backend.updateOptions).toHaveBeenCalledWith(expect.objectContaining({ mcpServers: [], additionalMcpConfig: bridgeConfig }));
     expect(backend.stop).toHaveBeenCalledTimes(changed ? 1 : 0);
     expect(backend.start).toHaveBeenCalledTimes(changed ? 1 : 0);
@@ -103,7 +103,7 @@ describe('Copilot ACP MCP configuration', () => {
       provider: 'copilot',
       cwd: 'C:\\project',
       sessionId,
-    });
+    }, jest.fn());
 
     expect(AcpClient).toHaveBeenCalledWith('tab-1', expect.any(Function), expect.objectContaining({
       cwd: 'C:\\project',

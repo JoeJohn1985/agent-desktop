@@ -13,6 +13,7 @@ const SLASH_COMMAND_TIMEOUT_MS = 180_000; // silent slash commands (/context, /c
 const DEBUG_ACP = process.env.ACP_DEBUG === '1'; // verbose diagnostics (models dump, unhandled events)
 const LOCAL_CMD_GRACE_MS = 2_000; // wait for a stderr <local-command-stdout> flush (Claude Code)
 const STOP_GRACE_MS = 5_000;
+const LARGEST_CONTEXT_TIER = 'long_context'; // CLI falls back to the default window for models without one
 const VALID_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 function normalizeReasoningEffort(value) {
@@ -56,6 +57,7 @@ class AcpClient extends EventEmitter {
   #appliedMode = null; // the mode (full ACP id) currently applied via session/set_mode
   #appliedEffort = null; // the reasoning-effort value currently applied via session/set_config_option('effort')
   #processEffort = null; // reasoning effort used when the current process was spawned
+  #currentModel = null;
   #reasoningRestartPending = false; // true after an effort change, applied before the next prompt
   #availableModes = []; // modes.availableModes from the last session/new|load result
 
@@ -176,6 +178,7 @@ class AcpClient extends EventEmitter {
       }
       if (this.#options.allowAll !== false) args.push('--allow-all');
       if (this.#options.model) args.push('--model', this.#options.model);
+      args.push('--context', LARGEST_CONTEXT_TIER);
       if (effort) args.push('--reasoning-effort', effort);
       if (this.#options.deniedTools) {
         for (const t of this.#options.deniedTools) args.push('--deny-tool=' + t);
@@ -664,10 +667,13 @@ class AcpClient extends EventEmitter {
     this.#contextQueryCollector = [];
     this.#localCmdBuf = '';
     try {
-      await this.#sendRequest('session/prompt', {
+      const result = await this.#sendRequest('session/prompt', {
         sessionId: this.#sessionId,
         prompt: [{ type: 'text', text: command }],
       }, typeof timeoutMs === 'number' ? timeoutMs : SLASH_COMMAND_TIMEOUT_MS);
+      if (result?.stopReason && result.stopReason !== 'end_turn') {
+        throw new Error(`Befehl ${command} nicht abgeschlossen (${result.stopReason}).`);
+      }
       // If nothing arrived via the ACP response, give adapters that emit slash
       // output on stderr (Claude Code) a moment to flush a <local-command-stdout>
       // block. Other backends return immediately.
@@ -949,7 +955,7 @@ class AcpClient extends EventEmitter {
         // `file_path` with no old_string/new_string yet — rendering the
         // eventual summary as if the call had no arguments at all.
         if (update.rawInput) this.#toolArgs.set(callId, update.rawInput);
-        if (!update.status) {
+        if (!['completed', 'failed', 'cancelled', 'canceled'].includes(update.status)) {
           // Refine only — update the pending element's displayed args, don't
           // finalize (no tool.execution_complete for this one).
           this.#emitToRenderer({
@@ -969,11 +975,11 @@ class AcpClient extends EventEmitter {
             toolCallId: callId,
             toolName: AcpClient.#mapToolKind(kind, update.title),
             arguments: this.#toolArgs.get(callId) || {},
-            success: update.error ? false : true,
+            success: !update.error && update.status === 'completed',
             result: {
               content: AcpClient.#extractToolContent(update.content),
             },
-            error: update.error || undefined,
+            error: update.error || (update.status !== 'completed' ? `Werkzeug ${update.status}` : undefined),
           },
         });
         this.#toolArgs.delete(callId);
@@ -1158,6 +1164,7 @@ class AcpClient extends EventEmitter {
       modelId = modelOption?.currentValue;
     }
     if (!modelId) return;
+    this.#currentModel = modelId;
     // Resolve the human-readable name if available.
     const match = (models?.availableModels || []).find((m) => m.modelId === modelId);
     const name = match?.name || modelId;
@@ -1332,10 +1339,10 @@ class AcpClient extends EventEmitter {
     Object.assign(this.#options, nextOptions);
     if (nextOptions.env && typeof nextOptions.env === 'object') this.#extraEnv = nextOptions.env;
     const nextEffort = this.#effectiveReasoningEffort();
-    if (this.#process) {
-      this.#reasoningRestartPending = this.#processEffort !== nextEffort;
-    }
+    if (this.#process) this.#reasoningRestartPending = this.#processEffort !== nextEffort;
   }
+
+  get model() { return this.#appliedModel || this.#currentModel || this.#options.model; }
 
   /**
    * Destroys the client completely, releasing all resources.

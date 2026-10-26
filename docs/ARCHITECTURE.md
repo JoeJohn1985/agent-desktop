@@ -327,6 +327,58 @@ User              Renderer            Preload          Main            AcpClient
 
 ### 6.2 Slash command (`/context`, `/compact`, `/clear`, `/usage`)
 
+All main-process prompts and silent commands now pass through the per-tab
+queue in `src/auto-compaction.js`. Prompt setup retains the early streaming
+acknowledgement; queue ownership lasts until the actual backend prompt promise
+settles (not an early ACP `agent_turn_end` notification) and optional automatic
+maintenance completes. The maintenance transaction queries `/context`,
+evaluates the provider policy, runs `/compact` once, and queries `/context`
+again. Renderer completion handlers only refresh displays.
+
+`settings.autoCompaction[provider]` retains `{ enabled, thresholdPercent }`.
+Copilot adds optional `models[modelId] = { mode: 'tokens', thresholdTokens }`
+or `{ mode: 'percent', thresholdPercent }`, and `modelDefaults: true` only
+for newly created policies. Existing policies without that marker retain their
+saved provider percentage for every model lacking an explicit override.
+Shared browser/Node policy resolution lives in `src/auto-compaction-policy.js`.
+Missing Copilot rules use official `longContext.threshold` metadata only when
+the tier actually increases a rate. The shared resolver matches normalized
+model IDs against the official source, never a static/fallback price list.
+Defaults use 88%, rounded to a step of `10^(floor(log10(boundary))-1)`:
+272000 → 240000. Official uniform tariffs use enabled/50 without an unknown-price
+warning; missing official entries use enabled/50 with explicit uncertainty.
+The pricing IPC carries per-source URL and successful retrieval timestamps;
+failed refreshes retain cached timestamps, never a fabricated update date.
+Suggestions are computed, not persisted. Activation-only changes do not
+materialize overrides. Reset deletes an override for modern policies, or stores
+`models[modelId] = { mode: 'auto' }` for legacy policies so other legacy rules
+remain unchanged. Both preference validation and the Main coordinator accept
+this marker. Pricing metadata does not activate long-context support.
+Only visible configured thresholds trigger maintenance; pricing adds warnings,
+never an additional cap. Token mode uses current `/context` used/size or fresh
+non-cost-bearing native context usage, not cumulative accounting.
+Preference writes validate positive safe-integer tokens, integer 1..95 percentages
+and boolean activation. Attention/error/cancellation,
+pending tools, incomplete stop reasons and natural-language question signals
+suppress the trigger. Slash-command completions cannot trigger maintenance.
+Commands and newly submitted prompts queue behind maintenance without changing
+the active tab or window. Stop also cancels pending prompt admission.
+
+`session.context_updated` updates tab context; `session.auto_compaction`
+reports started/completed/skipped/warning/error. Scheduled run persistence keeps
+compaction errors independently from the successful response status.
+Copilot context comes solely from reported percentages or native used/size,
+never a fixed model context window. Copilot always requests the largest window
+(`--context long_context`); CLI 1.0.98 keeps the default for models without one.
+Reasoning changes still use the pre-prompt process restart/session-load
+path; Claude Code adapters receive no Copilot flags. CLI ≥1.0.95 is required
+for the officially documented new/resumed ACP `--context` behavior.
+API adapters use
+reported prompt usage with their existing context metadata and perform real,
+tool-free summarization. Unknown usage and post-summary utilization remain
+unknown rather than zero. Empty/truncated summaries and command/storage errors
+are not converted to compaction success.
+
 ```
 Renderer
   │  window.copilot.chat.silentCommand(tabId, '/context')
@@ -642,8 +694,8 @@ in a real conversation still require an end-to-end user trial.
 
 ### 8.3 Cost tracking
 
-Copilot displays the entire session's recorded AIC consumption and its USD
-equivalent. `src/copilot-usage.js` streams the session's `events.jsonl` and
+Copilot displays today's session-specific recorded AIC consumption and its USD
+equivalent, retaining the cumulative total in the tooltip. `src/copilot-usage.js` streams the session's `events.jsonl` and
 reads `session.usage_checkpoint.data.totalNanoAiu`. It uses the latest
 cumulative checkpoint, not the sum of checkpoints. Conversion:
 `AIC = totalNanoAiu / 1e9`, `USD = AIC / 100`.
@@ -654,6 +706,18 @@ or cancelled turns refresh the total without a token baseline. Missing files,
 unsupported data, invalid amounts or decreasing checkpoints produce a visible
 unavailable state, never a token-based fallback. The CLI file schema is
 version-dependent; the tooltip identifies the latest confirmed checkpoint.
+
+`session.usage_record.data.usage.copilotUsage.totalNanoAiu` provides actual
+reported per-call amounts, not estimated token prices. Deduplicated records
+refine timestamps only when their sum exactly matches the next checkpoint
+delta. Otherwise the delta retains its previous-checkpoint/session-start
+interval. The pure `sessionTodayCost` helper counts only safely assigned amounts
+between local calendar midnights (`localCostDay`, DST-aware). Cross-midnight
+intervals without matching records and pending uncheckpointed records are
+explicitly incomplete, never invented midnight baselines. The renderer
+recomputes on tab switch, midnight and focus; CLI journals and persisted USD
+entries survive restart. API provider daily displays filter existing cost-log
+entries by session/provider; token-based accounting remains unchanged.
 
 For the cost chart, timestamped checkpoint increments replace prior confirmed
 entries for that session idempotently. Legacy estimates remain stored but are
@@ -757,8 +821,24 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 `src/scheduled-tasks.js` verwaltet Aufgaben und Läufe atomar in
 `DATA_DIR/scheduled-tasks.json` (Write + Rename). `ScheduledTasks` bietet
 `snapshot`, `upsert`, `action`, `tick`, `event`, `attention`, `finish`, `shutdown`.
-Das gespeicherte lokale Datum und die IANA-Zone bilden den Anker; `index`
-berechnet Wochenintervalle kalendarisch statt in konstanten Millisekunden.
+Das gespeicherte lokale Datum und die unsichtbare IANA-Zone bilden den Anker.
+Neue Aufgaben speichern `recurrence`: `type` (`once`, `daily`, `weekly`,
+`monthly`, `yearly`), `interval` (1–520, außer einmalig/täglich), `weekdays`
+(ISO 1–7 für täglich/wöchentlich), `months` (1–12 für jährlich) und `days`
+(1–31 oder `"last"` für monatlich/jährlich). Auswahlen werden validiert,
+sortiert und dedupliziert. `nextOccurrence` berechnet Kalenderperioden
+ab Startdatum (Wochen ab Montag), überspringt ungültige Monatstage und verwendet
+die lokale Startuhrzeit. Eine fehlende Sommerzeitstunde wird wie bisher nur für
+diesen Termin um eine Stunde verschoben, eine doppelte Stunde nur einmal gewählt.
+Der erste passende Termin darf nie vor dem Start liegen.
+
+Verlustfreie Altdatenmigration erfolgt durch einen Leseadapter: Einträge ohne
+`recurrence` behalten `weeks`, `index`, `nextAt`, Pause und Verpasst-Zähler sowie
+die bisherige `occurrence`-Berechnung. Auch eine unveränderte Wochenregel aus dem
+neuen Bearbeitungsformular bleibt in diesem Format. Erst eine tatsächliche
+Termin-/Regeländerung legt die strukturierte Regel mit neuem Cursor an.
+Bestehende einmalige Aufgaben bleiben einmalig; es gibt keinen Reimport und
+keine neue Interpretation gespeicherter Wochenanker.
 `missed` bündelt verpasste Termine. Start/Resume und Timerlücken über 60 Sekunden
 markieren fällige Termine nur als verpasst. Ein Main-Prozess-Timer verarbeitet
 Aufgaben serialisiert; der persistierte Lauf wird vor ACP-Start geschrieben.

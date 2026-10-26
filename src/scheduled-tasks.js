@@ -36,6 +36,85 @@ function occurrence(task, index) {
   }
 }
 
+function recurrenceRule(task) {
+  if (task.recurrence) return validateRecurrence(task.recurrence);
+  if (!Number.isInteger(task.weeks) || task.weeks < 0 || task.weeks > 520) throw new Error('Wiederholung: 0 oder 1–520 Wochen.');
+  return task.weeks ? { type: 'weekly', interval: task.weeks,
+    weekdays: [new Date(`${task.localTime}:00Z`).getUTCDay() || 7] } : { type: 'once' };
+}
+
+function validateRecurrence(rule) {
+  if (!rule || !['once', 'daily', 'weekly', 'monthly', 'yearly'].includes(rule.type)) throw new Error('Ungültige Wiederholung.');
+  const result = { type: rule.type };
+  if (rule.type === 'once') return result;
+  if (rule.type !== 'daily') {
+    if (!Number.isInteger(rule.interval) || rule.interval < 1 || rule.interval > 520) throw new Error('Intervall: 1–520.');
+    result.interval = rule.interval;
+  }
+  const selection = (key, max, last = false) => {
+    const values = rule[key];
+    if (!Array.isArray(values) || !values.length || values.some(v => !(Number.isInteger(v) && v >= 1 && v <= max) && !(last && v === 'last'))) throw new Error(`Ungültige Auswahl: ${key}`);
+    result[key] = [...new Set(values)].sort((a, b) => a === 'last' ? 1 : b === 'last' ? -1 : a - b);
+  };
+  if (['daily', 'weekly'].includes(rule.type)) selection('weekdays', 7);
+  else {
+    if (rule.type === 'yearly') selection('months', 12);
+    selection('days', 31, true);
+  }
+  return result;
+}
+
+// Calendar periods are anchored to the start, never to the last executed run.
+function nextOccurrence(task, after = -Infinity) {
+  const rule = recurrenceRule(task);
+  const start = new Date(`${task.localTime}:00Z`);
+  const lower = localEpoch(task.localTime, task.zone);
+  if (rule.type === 'once') return lower > after ? lower : null;
+  const threshold = Number.isFinite(after) ? new Date(`${localParts(after, task.zone)}:00Z`) : start;
+  const base = new Date(start);
+  base.setUTCHours(0, 0, 0, 0);
+  if (rule.type === 'weekly') base.setUTCDate(base.getUTCDate() - ((base.getUTCDay() + 6) % 7));
+  const interval = rule.interval || 1;
+  let period = 0;
+  if (rule.type === 'daily' || rule.type === 'weekly') period = Math.max(0, Math.floor((threshold - base) / (86400000 * (rule.type === 'weekly' ? 7 * interval : 1))) - 1);
+  if (rule.type === 'monthly') period = Math.max(0, Math.floor(((threshold.getUTCFullYear() - start.getUTCFullYear()) * 12 + threshold.getUTCMonth() - start.getUTCMonth()) / interval) - 1);
+  if (rule.type === 'yearly') period = Math.max(0, Math.floor((threshold.getUTCFullYear() - start.getUTCFullYear()) / interval) - 1);
+  // Gregorian calendars repeat after 400 years, including leap-day validity.
+  const limit = { daily: 9, weekly: 4, monthly: 4802, yearly: 402 }[rule.type];
+  for (let attempts = 0; attempts < limit; attempts++, period++) {
+    const candidates = [];
+    if (['daily', 'weekly'].includes(rule.type)) {
+      const days = rule.type === 'weekly' ? rule.weekdays.map(d => period * interval * 7 + d - 1) : [period];
+      for (const offset of days) {
+        const date = new Date(base);
+        date.setUTCDate(date.getUTCDate() + offset);
+        if (rule.weekdays.includes(date.getUTCDay() || 7)) candidates.push(date);
+      }
+    } else {
+      const year = start.getUTCFullYear() + (rule.type === 'yearly' ? period * interval : 0);
+      const months = rule.type === 'yearly' ? rule.months.map(m => m - 1) : [start.getUTCMonth() + period * interval];
+      for (const month of months) {
+        const first = new Date(Date.UTC(year, month, 1));
+        const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+        for (const day of rule.days) {
+          if (day !== 'last' && day > last) continue;
+          candidates.push(new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day === 'last' ? last : day)));
+        }
+      }
+    }
+    const epochs = candidates.map(date => {
+      date.setUTCHours(start.getUTCHours(), start.getUTCMinutes());
+      const local = date.toISOString().slice(0, 16);
+      try { return localEpoch(local, task.zone); } catch {
+        date.setUTCHours(date.getUTCHours() + 1);
+        return localEpoch(date.toISOString().slice(0, 16), task.zone);
+      }
+    }).filter(epoch => epoch >= lower && epoch > after);
+    if (epochs.length) return Math.min(...epochs);
+  }
+  throw new Error('Kein gültiger Folgetermin gefunden.');
+}
+
 class ScheduledTasks {
   constructor({ file, execute, notify = () => {}, now = Date.now }) {
     Object.assign(this, { file, execute, notify, now });
@@ -68,20 +147,23 @@ class ScheduledTasks {
       if (typeof input[key] !== 'string' || !input[key].trim()) throw new Error(`Pflichtfeld: ${key}`);
     }
     if (!path.isAbsolute(input.cwd) || !fs.statSync(input.cwd).isDirectory()) throw new Error('Ungültiger Projektordner.');
-    if (!Number.isInteger(input.weeks) || input.weeks < 0 || input.weeks > 520) throw new Error('Wiederholung: 0 oder 1–520 Wochen.');
+    const recurrence = recurrenceRule(input);
     const epoch = localEpoch(input.localTime, input.zone);
     const previous = this.state.tasks.find(t => t.id === input.id);
     if (input.id && !previous) throw new Error('Aufgabe nicht gefunden.');
     if (!previous && epoch <= this.now()) throw new Error('Der erste Termin muss in der Zukunft liegen.');
-    const changed = !previous || ['localTime', 'zone', 'weeks'].some(k => previous[k] !== input[k]);
+    const changed = !previous || ['localTime', 'zone'].some(k => previous[k] !== input[k]) ||
+      JSON.stringify(recurrenceRule(previous)) !== JSON.stringify(recurrence);
     if (changed && epoch <= this.now()) throw new Error('Der neue Termin muss in der Zukunft liegen.');
     const task = {
       id: previous?.id || randomUUID(), name: input.name.trim(), prompt: input.prompt,
       cwd: input.cwd, model: input.model, localTime: input.localTime, zone: input.zone,
-      weeks: input.weeks, paused: previous?.paused || false,
+      weeks: recurrence.type === 'weekly' ? recurrence.interval : 0, paused: previous?.paused || false,
       index: changed ? 0 : previous.index, missed: changed ? 0 : previous.missed,
       nextAt: changed ? epoch : previous.nextAt,
     };
+    if (previous?.recurrence || (input.recurrence && changed)) task.recurrence = recurrence;
+    if (changed && task.recurrence) task.nextAt = nextOccurrence(task);
     if (previous) Object.assign(previous, task); else this.state.tasks.push(task);
     this.save();
     return task;
@@ -102,7 +184,8 @@ class ScheduledTasks {
   }
 
   advance(task) {
-    if (!task.weeks) task.nextAt = null;
+    if (task.recurrence) { task.nextAt = nextOccurrence(task, task.nextAt); task.index++; }
+    else if (!task.weeks) task.nextAt = null;
     else task.nextAt = occurrence(task, ++task.index);
   }
 
@@ -144,6 +227,10 @@ class ScheduledTasks {
     const run = this.state.runs.find(r => r.id === runId);
     if (!run) return;
     run.events.push(event);
+    if (event.type === 'session.auto_compaction' && event.data?.status === 'error') {
+      run.needsAttention = true;
+      run.autoCompactionError = event.data.message;
+    }
     if (event.type === 'result') run.sessionId = event.sessionId;
     this.save();
   }
@@ -173,4 +260,4 @@ class ScheduledTasks {
   }
 }
 
-module.exports = { ScheduledTasks, localEpoch, occurrence, localParts };
+module.exports = { ScheduledTasks, localEpoch, occurrence, localParts, nextOccurrence, recurrenceRule, validateRecurrence };

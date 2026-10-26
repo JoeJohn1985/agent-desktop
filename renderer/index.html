@@ -117,33 +117,52 @@
         </nav>
         <section class="plugins-view" id="scheduledView" style="display:none;" aria-label="Geplante Aufgaben">
           <div class="functions-view__page-body">
-            <h2>Geplante Aufgaben</h2>
-            <p>Ausführung nur bei laufender App, auch minimiert. Verpasste Termine werden nie automatisch nachgeholt. Alle Läufe verlangen manuelle Werkzeugfreigaben.</p>
+            <h2 class="scheduled-view__title">Geplante Aufgaben</h2>
+            <p class="settings__hint">Ausführung nur bei laufender App, auch minimiert. Verpasste Termine werden nie automatisch nachgeholt. Alle Läufe verlangen manuelle Werkzeugfreigaben.</p>
             <p id="scheduledError" role="alert"></p>
             <form id="scheduledForm">
               <input name="id" type="hidden">
-              <label class="settings__label">Name <input class="settings__input" name="name" required maxlength="200"></label>
-              <label class="settings__label">Prompt <textarea class="settings__input" name="prompt" required rows="4"></textarea></label>
-              <div>
-                <label class="settings__label" for="scheduledCwd">Projektordner</label>
-                <div class="settings__folder-row">
-                  <input class="settings__folder-input" id="scheduledCwd" name="cwd" required>
-                  <button class="action-btn" type="button" id="scheduledBrowse">Ordner wählen</button>
+              <fieldset class="settings__group">
+                <legend>Aufgabe &amp; Prompt</legend>
+                <label class="settings__label">Name <input class="settings__input" name="name" required maxlength="200"></label>
+                <label class="settings__label">Prompt <textarea class="settings__input" name="prompt" required rows="4"></textarea></label>
+              </fieldset>
+              <fieldset class="settings__group">
+                <legend>Zeitplan</legend>
+                <label class="settings__label">Datum/Uhrzeit <input class="settings__input" name="localTime" type="datetime-local" required></label>
+                <input name="zone" type="hidden">
+                <label class="settings__label">Wiederholung
+                  <select class="settings__input" name="repeat" aria-controls="scheduledRecurrence">
+                    <option value="once">Einmalig</option>
+                    <option value="daily">Täglich</option>
+                    <option value="weekly">Wöchentlich</option>
+                    <option value="monthly">Monatlich</option>
+                    <option value="yearly">Jährlich</option>
+                  </select>
+                </label>
+                <div id="scheduledRecurrence"></div>
+              </fieldset>
+              <fieldset class="settings__group">
+                <legend>Copilot-Einstellungen</legend>
+                <div>
+                  <label class="settings__label" for="scheduledCwd">Projektordner</label>
+                  <div class="settings__folder-row">
+                    <input class="settings__folder-input" id="scheduledCwd" name="cwd" required>
+                    <button class="action-btn" type="button" id="scheduledBrowse">Ordner wählen</button>
+                  </div>
                 </div>
-              </div>
-              <label class="settings__label">Copilot-Modell <select class="settings__select" name="model" required></select></label>
-              <label class="settings__label">Datum/Uhrzeit <input class="settings__input" name="localTime" type="datetime-local" required></label>
-              <label class="settings__label">Gespeicherte Zeitzone <input class="settings__input" name="zone" required readonly></label>
-              <label class="settings__label">Alle N Wochen (0 = einmalig) <input class="settings__input" name="weeks" type="number" min="0" max="520" value="0" required></label>
+                <label class="settings__label">Copilot-Modell <select class="settings__select" name="model" required></select></label>
+              </fieldset>
               <div class="scheduled-form__actions">
                 <button class="action-btn action-btn--primary" type="submit">Speichern</button>
                 <button class="action-btn" type="button" id="scheduledNew">Neue Aufgabe</button>
               </div>
             </form>
-            <div id="scheduledList"></div>
-            <h3>Ausführungsverlauf</h3>
-            <p>„Beendet“ bedeutet nur: Agentenantwort abgeschlossen, kein Nachweis eines fachlichen Erfolgs.</p>
-            <div id="scheduledRuns"></div>
+            <h3 class="scheduled-view__section-title" id="scheduledListTitle">Aufgaben</h3>
+            <div id="scheduledList" aria-labelledby="scheduledListTitle"></div>
+            <h3 class="scheduled-view__section-title" id="scheduledRunsTitle">Ausführungsverlauf</h3>
+            <p class="settings__hint">„Beendet“ bedeutet nur: Agentenantwort abgeschlossen, kein Nachweis eines fachlichen Erfolgs.</p>
+            <div id="scheduledRuns" aria-labelledby="scheduledRunsTitle"></div>
           </div>
         </section>
         <section class="plugins-view" id="skillsView" style="display:none;" aria-label="Skills">
@@ -249,7 +268,7 @@
         <div class="session-actions__spacer"></div>
         <span class="session-actions__provider" id="sessionProvider" data-tooltip="Provider dieses Tabs (wird beim Erstellen über „+" festgelegt)">🔌 Copilot</span>
         <button class="session-actions__cost-btn" id="btnOpenCosts" data-tooltip="Kostenauflistung öffnen">📈</button>
-        <span class="session-actions__usage" id="sessionUsage">~$0.00</span>
+        <span class="session-actions__usage" id="sessionUsage">Heute: ~$0.00</span>
       </div>
       <div class="stream-area" id="streamArea">
         <!-- Search Bar -->
@@ -611,6 +630,7 @@
     </div>
   </div>
 
+  <script src="../src/auto-compaction-policy.js"></script>
   <script src="../src/renderer-logic.js"></script>
   <script src="provider-icons.js"></script>
   <script src="modules/utils.js"></script>

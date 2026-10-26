@@ -13,6 +13,24 @@
 - [x] Vault-Projektnotiz aktualisieren.
 - [ ] Visuelle Abnahme durch den Nutzer.
 
+## Visuelle Angleichung (freigegeben am 2026-10-13)
+
+- [x] Aktuelles HTML/CSS, Renderer und freigegebene Spezifikation lesen.
+- [x] Bestätigte Anforderungen und Grenzen ergänzen.
+- [x] Formular in Aufgabe & Prompt, Zeitplan, Copilot-Einstellungen gliedern.
+- [x] Kompakte App-Styles für Formular, Aufgabenliste und Verlauf übernehmen.
+- [x] Dynamische Buttons, Hinweise, Titel und Leerzustände angleichen.
+- [x] Responsive Umbrüche und Fokuszustände ergänzen; Logik unverändert lassen.
+- [x] Isolierte Logiktests, Lint und Diff-Check ohne App-/UI-Start durchführen.
+- [ ] Visuelle Abnahme durch den Nutzer (keine Screenshots/UI-Tests freigegeben).
+
+Prüfung der visuellen Angleichung: `scheduled-tasks`, `scheduled-integration`
+und `functions-view`: **21 Tests bestanden, 3 Suites**. Gezielter ESLint für
+`scheduled-tasks.js`, `functions.js` und `functions-view.test.js` sowie
+`git diff --check` erfolgreich. Keine App, Screenshots oder Electron-/UI-Tests.
+Die Prüfergebnisse oben beziehen sich ausschließlich auf die Folgearbeit;
+die nachstehenden 338 Tests dokumentieren die ursprüngliche Implementierung.
+
 ## Validierung und Grenzen
 
 Gezielte Jest-Suites: scheduled-tasks, scheduled-integration, functions-view,

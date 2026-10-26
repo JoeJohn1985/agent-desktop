@@ -218,7 +218,13 @@ async function getPricingMap() {
   if (!cached || cached.version !== CACHE_VERSION || copilot.refreshed || litellm.refreshed) {
     writeCache(sources);
   }
-  return { copilot: sources.copilot.map, fallback: sources.litellm.map };
+  return {
+    copilot: sources.copilot.map, fallback: sources.litellm.map,
+    sources: {
+      copilot: { url: COPILOT_PRICING_URL, updatedAt: sources.copilot.ts || null },
+      fallback: { url: LITELLM_PRICING_URL, updatedAt: sources.litellm.ts || null },
+    },
+  };
 }
 
 module.exports = {

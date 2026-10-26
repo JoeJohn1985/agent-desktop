@@ -227,6 +227,8 @@ function buildProviderConfigPanelHtml(providerId) {
     `);
   }
 
+  parts.push(buildAutoCompactionHtml(providerId));
+
   // Gemini-only: the one provider where the discovered list mixes free and
   // paid models, and iterates fast enough (a new Flash point release every
   // few weeks) that several near-identical versions pile up at once.
@@ -486,6 +488,7 @@ function wireClaudeCodeSshPanel(panel) {
  * @param {HTMLElement} panel
  */
 async function wireProviderConfigPanel(providerId, panel) {
+  wireAutoCompaction(providerId, panel);
   renderProviderModelSelect(providerId, panel.querySelector(`[data-provider-model-select="${providerId}"]`));
 
   renderProviderReasoningSelect(providerId, panel.querySelector(`[data-provider-reasoning-select="${providerId}"]`));
@@ -546,12 +549,32 @@ async function wireProviderConfigPanel(providerId, panel) {
  * whenever a key is added/removed on the "Provider" tab — without
  * accumulating duplicates. Inserted right before the Features tab.
  */
+let _autoCompactionPrices = {};
+
+function autoCompactionPriceThreshold(model) {
+  return autoCompactionPricingInfo(model).threshold;
+}
+
+function autoCompactionPricingInfo(model) {
+  return window.AutoCompactionPolicy.resolvePricingInfo(_autoCompactionPrices, model);
+}
+
 async function renderProviderConfigTabs() {
+  try { _autoCompactionPrices = await window.desktop.pricing.getMap() || {}; }
+  catch (_) { _autoCompactionPrices = {}; }
   const tabsBar = document.querySelector('.settings__tabs');
   const panelsHost = document.querySelector('.settings');
   const featuresTab = document.querySelector('.settings__tab[data-tab="features"]');
   const featuresPanel = document.querySelector('.settings__panel[data-panel="features"]');
   if (!tabsBar || !panelsHost || !featuresTab || !featuresPanel) return;
+  const copilotPanel = document.querySelector('[data-panel="provider-copilot"]');
+  if (copilotPanel) {
+    copilotPanel.querySelector('[data-auto-compaction-group]')?.remove();
+    const reasoning = copilotPanel.querySelector('#settProviderReasoning-copilot')?.closest('.settings__group');
+    if (reasoning) reasoning.insertAdjacentHTML('afterend', buildAutoCompactionHtml('copilot'));
+    else copilotPanel.insertAdjacentHTML('afterbegin', buildAutoCompactionHtml('copilot'));
+    wireAutoCompaction('copilot', copilotPanel);
+  }
 
   document.querySelectorAll('.settings__tab[data-provider-tab]').forEach(el => el.remove());
   document.querySelectorAll('.settings__panel[data-provider-panel]').forEach(el => el.remove());
@@ -575,6 +598,129 @@ async function renderProviderConfigTabs() {
     wireProviderConfigPanel(cfg.id, panel);
   }
 }
+
+function buildAutoCompactionHtml(providerId) {
+    const model = providerId === 'copilot' && typeof getDefaultModelForProvider === 'function' ? getDefaultModelForProvider(providerId) : '';
+    const priceThreshold = providerId === 'copilot' ? autoCompactionPriceThreshold(model) : null;
+    const policy = window.AutoCompactionPolicy.resolveCompactionPolicy(getSettings(), providerId, model, priceThreshold);
+    const tokens = policy.mode === 'tokens';
+    const models = providerId === 'copilot' && typeof getModelsForProvider === 'function' ? getModelsForProvider(providerId) : [];
+    const controlId = `settAutoCompaction-${providerId}`;
+    return `<div class="settings__group settings__auto-compaction" data-auto-compaction-group>
+      <div class="settings__row">
+        <label class="settings__label" for="${controlId}-enabled">📦 Automatische Komprimierung</label>
+        <label class="settings__toggle"><input id="${controlId}-enabled" type="checkbox" data-auto-compaction-enabled ${policy.enabled ? 'checked' : ''} />
+          <span class="settings__toggle-slider"></span></label>
+      </div>
+      ${providerId === 'copilot' ? `<div class="settings__auto-compaction-field">
+        <label class="settings__label" for="${controlId}-model">Regel für Modell</label>
+        <select id="${controlId}-model" class="settings__select" data-auto-compaction-model aria-label="Komprimierungsmodell" aria-describedby="${controlId}-scope">${models.map(m =>
+    `<option value="${escapeAttr(m.id)}" ${m.id === model ? 'selected' : ''}>${escapeHtml(m.name || m.label || m.id)}</option>`).join('')}</select>
+        <div class="settings__hint" id="${controlId}-scope">Die angezeigte Regel gilt für das ausgewählte Modell – auch in Tabs und geplanten Aufgaben. Aktivierung gilt für den gesamten Provider.</div>
+      </div>` : ''}
+      <div class="settings__auto-compaction-field">
+      <label class="settings__label" for="${controlId}-threshold" data-auto-compaction-threshold-label>Komprimieren ab (${tokens ? 'Tokens' : '% Kontextauslastung'})</label>
+      <input id="${controlId}-threshold" class="settings__input" type="number" min="1" ${tokens ? '' : 'max="95"'} step="1" value="${escapeAttr(String(tokens ? policy.thresholdTokens : policy.thresholdPercent))}"
+        data-auto-compaction-percent aria-label="Komprimierungsschwellwert" />
+      </div>
+      <div class="settings__hint" data-auto-compaction-price></div>
+      <div class="settings__hint" data-auto-compaction-warning role="status"></div>
+      ${providerId === 'copilot' ? '<button type="button" class="action-btn" data-auto-compaction-reset>Zurück zur Automatik</button>' : ''}
+      <div class="settings__hint"><strong>Automatik:</strong> Standard ist aktiviert ab 50 %. Die Einheit folgt dem Preismodell; nur der Schwellwert ist editierbar.
+        ${providerId === 'copilot' ? 'Modelle mit Preisstufe nutzen ohne gespeicherte Regel Tokens mit Sicherheitsabstand (240000 bei Preisgrenze 272000).' : ''}</div>
+      <div class="settings__hint"><strong>Kostengrenzen:</strong> Keine versteckte Preis-Cap und keine Kostengarantie:
+        Eine Aufgabe kann die Preisgrenze schon vor der Verdichtung überschreiten. Ohne gemeldete Auslastung wird übersprungen.</div>
+      <div class="settings__hint"><strong>Zeitpunkt:</strong> Erst nach vollständiger Antwort inklusive Tools, nicht bei Abbruch, Fehler oder Rückfrage.
+        Native CLI-Komprimierung bleibt unverändert.</div>
+      ${providerId === 'copilot' ? '<div class="settings__hint"><strong>Kontextfenster:</strong> Copilot-Sitzungen fordern immer das größte verfügbare Fenster an. Die tatsächliche Größe meldet /context; Modelle ohne größeres Fenster nutzen ihr Standardfenster.</div>' : ''}
+      <div class="settings__hint" data-auto-compaction-error role="alert"></div>
+    </div>`;
+  }
+
+function wireAutoCompaction(providerId, panel) {
+    const enabled = panel.querySelector('[data-auto-compaction-enabled]');
+    const percent = panel.querySelector('[data-auto-compaction-percent]');
+    const error = panel.querySelector('[data-auto-compaction-error]');
+    const model = panel.querySelector('[data-auto-compaction-model]');
+    const price = panel.querySelector('[data-auto-compaction-price]');
+    const warning = panel.querySelector('[data-auto-compaction-warning]');
+    const thresholdLabel = panel.querySelector('[data-auto-compaction-threshold-label]');
+    if (!enabled || !percent || !error) return;
+    const priceThreshold = () => providerId === 'copilot' ? autoCompactionPriceThreshold(model?.value) : null;
+    const ruleMode = () => priceThreshold() ? 'tokens' : 'percent';
+    const refreshWarning = () => {
+      const threshold = priceThreshold();
+      const info = autoCompactionPricingInfo(model?.value);
+      const saved = getSettings().autoCompaction?.[providerId];
+      const specific = saved?.models?.[model?.value];
+      const individual = specific ? specific.mode === ruleMode() : (saved && !saved.modelDefaults && ruleMode() === 'percent');
+      const incompatible = specific ? specific.mode !== 'auto' && specific.mode !== ruleMode()
+        : saved && !saved.modelDefaults && ruleMode() === 'tokens';
+      if (price) price.textContent = providerId !== 'copilot' ? 'Prozentregel aus dem tatsächlich gemeldeten Kontextfenster.'
+        : `${individual ? 'Individuelle Regel' : 'Automatischer Vorschlag'}. ${threshold
+          ? `Preisgrenze: ${threshold} Eingabe-Tokens pro Modellaufruf. Nicht aufsummierte Sitzungstokens.`
+          : info.known ? 'Offizieller einheitlicher Tarif: keine erhöhte Preisstufe. Prozentregel aus /context.'
+            : 'Preis unbekannt: kein offizieller Modelleintrag zuordenbar. Prozentregel aus /context möglich.'}
+          Quelle: ${info.source || 'keine offizielle Zuordnung'}${info.updatedAt ? `; Preisstand: ${new Date(info.updatedAt).toLocaleString()}` : ''}.
+          ${incompatible ? 'Die ältere Regel hat eine andere Einheit und wird nicht umgerechnet; wirksam ist der angezeigte Automatikvorschlag.' : ''}`;
+      if (warning) warning.textContent = window.AutoCompactionPolicy.compactionCostWarning({
+        enabled: enabled.checked, mode: ruleMode(), thresholdTokens: Number(percent.value), thresholdPercent: Number(percent.value),
+      }, threshold, null);
+    };
+    const selectModel = () => {
+      const rule = window.AutoCompactionPolicy.resolveCompactionPolicy(getSettings(), providerId, model?.value || '', priceThreshold());
+      if (thresholdLabel) thresholdLabel.textContent = `Komprimieren ab (${rule.mode === 'tokens' ? 'Tokens' : '% Kontextauslastung'})`;
+      percent.value = String(rule.mode === 'tokens' ? rule.thresholdTokens : rule.thresholdPercent);
+      if (rule.mode === 'tokens') percent.removeAttribute('max'); else percent.setAttribute('max', '95');
+      error.textContent = '';
+      refreshWarning();
+    };
+    const save = async (event) => {
+      const value = Number(percent.value);
+      const tokens = ruleMode() === 'tokens';
+      if (!percent.value.trim() || !Number.isSafeInteger(value) || value < 1 || (!tokens && value > 95)) {
+        error.textContent = tokens ? 'Bitte eine positive ganze Tokenzahl eingeben.' : 'Bitte eine ganze Zahl von 1 bis 95 eingeben.';
+        percent.setAttribute('aria-invalid', 'true');
+        return;
+      }
+      percent.removeAttribute('aria-invalid');
+      error.textContent = '';
+      const previous = getSettings().autoCompaction;
+      const old = previous?.[providerId] || { enabled: true, thresholdPercent: 50, modelDefaults: true };
+      const rule = tokens ? { mode: 'tokens', thresholdTokens: value } : { mode: 'percent', thresholdPercent: value };
+      const reset = event?.currentTarget?.hasAttribute('data-auto-compaction-reset');
+      const activationOnly = event?.currentTarget === enabled;
+      const models = { ...old.models };
+      if (reset) {
+        if (!old.modelDefaults) models[model.value] = { mode: 'auto' };
+        else delete models[model.value];
+      }
+      else if (!activationOnly && model?.value) models[model.value] = rule;
+      const policies = { ...previous, [providerId]: model?.value
+        ? { ...old, enabled: enabled.checked, models }
+        : { enabled: enabled.checked, thresholdPercent: value } };
+      saveSetting('autoCompaction', policies);
+      try {
+        // Unlike ordinary debounced settings, confirm durable storage here.
+        const saved = await desktop.preferences.write(_prefs);
+        if (!saved) throw new Error('Einstellungen konnten nicht gespeichert werden.');
+        if (reset) selectModel();
+        refreshWarning();
+        if (warning?.textContent) showNotification(warning.textContent, 'warning');
+      } catch (e) {
+        if (getSettings().autoCompaction === policies) saveSetting('autoCompaction', previous);
+        error.textContent = e.message || 'Speichern fehlgeschlagen.';
+        showNotification(error.textContent, 'error');
+      }
+    };
+    enabled.addEventListener('change', save);
+    panel.querySelector('[data-auto-compaction-reset]')?.addEventListener('click', save);
+    percent.addEventListener('change', save);
+    percent.addEventListener('input', refreshWarning);
+    model?.addEventListener('change', selectModel);
+    if (model) selectModel();
+    else refreshWarning();
+  }
 
 async function renderProvidersSettings() {
   const list = document.getElementById('providersKeyList');

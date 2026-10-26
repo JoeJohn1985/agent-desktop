@@ -163,9 +163,9 @@ describe('Kontext-Management (ApiAgentClient)', () => {
     expect(text).toContain('Tokens');
   });
 
-  it('/context ohne Verbrauch → 0%', async () => {
+  it('/context ohne gemeldeten Verbrauch → unbekannt', async () => {
     const text = await backend().silentCommand('/context');
-    expect(text).toMatch(/\(0%\)/);
+    expect(text).toBe('Kontextauslastung unbekannt.');
   });
 
   it('/usage liefert die Token-Zeile inkl. cachewrite', async () => {

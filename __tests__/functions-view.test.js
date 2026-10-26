@@ -9,6 +9,7 @@ function setup() {
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       style: {}, attributes: {},
+      classList: { toggle: jest.fn() },
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; },
     });
@@ -33,6 +34,7 @@ test('opens every subpage exclusively and retains last selection on return', () 
   ]) {
     context.openFunctionsView(page);
     expect(element(id).style.display).toBe('flex');
+    expect(element('functionsView').classList.toggle).toHaveBeenLastCalledWith('functions-view--compact', true);
     if (page === 'scheduled') {
       expect(element('.functions-view__nav').style.display).toBe('none');
       expect(element('btnScheduled').attributes['aria-expanded']).toBe('true');

@@ -70,7 +70,7 @@ test('preload only allows scheduled event channels and unsubscribes exact listen
 
 test('scheduled ACP prompts reuse MCP but cannot enable auto-approval or crash restart', async () => {
   const source = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-  const prompt = source.match(/^async function sendAgentPrompt\b[\s\S]*?^\}/m)[0];
+  const prompt = source.match(/^async function runAgentPrompt\b[\s\S]*?^\}/m)[0];
   const client = {
     state: 'ready', sessionId: 'fresh-session', __provider: 'copilot', __mcpRevision: 1,
     updateOptions: jest.fn(), prompt: jest.fn().mockResolvedValue(),
@@ -80,7 +80,7 @@ test('scheduled ACP prompts reuse MCP but cannot enable auto-approval or crash r
     appMcp: { revision: 1, getCopilotMcpConfig: jest.fn().mockResolvedValue('app-mcp.json') },
     COPILOT_CWD: 'C:\\project', COPILOT_BIN: 'copilot',
   });
-  await send(7, 'Prompt', { provider: 'copilot', cwd: 'C:\\project', model: 'copilot-model', manualApproval: false });
+  await send(7, 'Prompt', { provider: 'copilot', cwd: 'C:\\project', model: 'copilot-model', manualApproval: false }, jest.fn());
   expect(client.updateOptions).toHaveBeenCalledWith(expect.objectContaining({
     allowAll: false, autoApprovePermissions: false, autoRestart: false,
     additionalMcpConfig: 'app-mcp.json', model: 'copilot-model', cwd: 'C:\\project',

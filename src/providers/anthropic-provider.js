@@ -112,9 +112,11 @@ class AnthropicProvider extends ApiAgentClient {
     }
 
     const u = final.usage || {};
-    const contextTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    const contextTokens = Number.isFinite(u.input_tokens)
+      ? u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : null;
     return {
       toolUses,
+      stopReason: final.stop_reason || 'unknown',
       usage: {
         input: u.input_tokens || 0,
         output: u.output_tokens || 0,
@@ -164,16 +166,23 @@ class AnthropicProvider extends ApiAgentClient {
         ...this.#messages,
         { role: 'user', content: 'Bitte den bisherigen Verlauf wie instruiert zusammenfassen.' },
       ],
+    }, { timeout: 180_000, maxRetries: 0, signal: this._commandSignal });
+    const usage = resp.usage || {};
+    this._recordCompactionUsage({
+      input: usage.input_tokens, output: usage.output_tokens,
+      cache: usage.cache_read_input_tokens, cacheWrite: usage.cache_creation_input_tokens,
     });
     const summary = (resp.content || [])
       .filter(b => b.type === 'text')
       .map(b => b.text)
       .join('\n')
       .trim();
+    if (!summary || resp.stop_reason !== 'end_turn') throw new Error('Keine vollständige Zusammenfassung vom Backend erhalten.');
+    this._commandSignal?.throwIfAborted();
     this.#messages = [
       { role: 'user', content: `Bisheriger Kontext (automatisch zusammengefasst):\n${summary}` },
     ];
-    this._lastContextTokens = 0;
+    this._lastContextTokens = null;
   }
 }
 

@@ -79,3 +79,21 @@ Einmalige Termine oder alle N Wochen, lokale Zone gespeichert. Wiederholungen
 in einer nicht existierenden Sommerzeitstunde werden für diesen Termin um
 eine Stunde verschoben; das ursprüngliche Raster bleibt erhalten.
 Visuelle Abnahme bleibt beim Nutzer; keine App-/Electron-/UI-Tests durchgeführt.
+
+## Freigegebene visuelle Angleichung (2026-10-13)
+
+Die separate Sidebar-Ansicht wird an die bereits überarbeiteten Funktionsseiten
+angeglichen: Seitentitel 16 px, Abschnittstitel 14 px, Inhalte/Controls 12–13 px
+und konsistente Abstände von 8, 12 und 16 px. Das Formular ist semantisch in
+„Aufgabe & Prompt“, „Zeitplan“ und „Copilot-Einstellungen“ gegliedert.
+Bestehende `settings__*`-/`action-btn`-Komponenten und Theme-Variablen werden
+wiederverwendet; Aufgabenliste und Verlauf einschließlich dynamischer Buttons,
+Statuszeilen, Hinweise und Leerzustände folgen denselben Styles.
+Schmale Fenster, lange Inhalte und sichtbarer Tastaturfokus werden berücksichtigt.
+
+IDs, Feldnamen, Events, Scheduler, Nachholen, manuelle Freigaben und
+Sitzungsöffnung bleiben unverändert. Vorhandene uncommittete Änderungen an
+Funktionsseiten, täglichen Sitzungskosten und Sidebar-Höhen bleiben erhalten.
+Keine App starten, keine Screenshots, keine Electron-/UI-Tests. Prüfung nur
+über isolierte Logiktests, Lint und Diff-Check; visuelle Abnahme bleibt offen.
+Kein Commit oder Push. Vault-Pflege liegt beim Elternagenten.

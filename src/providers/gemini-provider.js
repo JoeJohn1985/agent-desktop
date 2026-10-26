@@ -169,6 +169,7 @@ class GeminiProvider extends ApiAgentClient {
     const callsByKey = new Map(); // dedupe in case a call repeats across chunks
     let usage = null;
     let grounding = null;
+    let stopReason = null;
 
     for await (const chunk of stream) {
       const t = chunk.text;
@@ -188,6 +189,7 @@ class GeminiProvider extends ApiAgentClient {
         }
       }
       if (chunk.usageMetadata) usage = chunk.usageMetadata;
+      if (chunk.candidates?.[0]?.finishReason) stopReason = chunk.candidates[0].finishReason;
       const gm = chunk.candidates && chunk.candidates[0] && chunk.candidates[0].groundingMetadata;
       if (gm) grounding = gm;
     }
@@ -215,11 +217,12 @@ class GeminiProvider extends ApiAgentClient {
     const cached = (usage && usage.cachedContentTokenCount) || 0;
     return {
       toolUses,
+      stopReason: stopReason === 'STOP' ? (toolUses.length ? 'tool_use' : 'end_turn') : stopReason || 'unknown',
       usage: {
         input: Math.max(0, prompt - cached),
         cache: cached,
         output: (usage && usage.candidatesTokenCount) || 0,
-        contextTokens: prompt,
+        contextTokens: Number.isFinite(usage?.promptTokenCount) ? prompt : null,
       },
     };
   }
@@ -238,6 +241,27 @@ class GeminiProvider extends ApiAgentClient {
   _contextWindow() { return CONTEXT_WINDOWS[this.options.model] || 1_000_000; }
   _serializeHistory() { return this.#contents; }
   _restoreHistory(arr) { this.#contents = Array.isArray(arr) ? arr : []; }
+  async _compact() {
+    if (!this.#contents.length) return;
+    const ai = await this.#getClient();
+    const response = await ai.models.generateContent({
+      model: this.options.model,
+      contents: [...this.#contents, { role: 'user', parts: [{ text: 'Fasse den bisherigen Gesprächsverlauf zusammen: Fakten, Entscheidungen, Dateipfade und offene Aufgaben. Antworte nur mit der Zusammenfassung.' }] }],
+      config: { maxOutputTokens: 2048,
+        abortSignal: this._commandSignal ? AbortSignal.any([this._commandSignal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000) },
+    });
+    const usage = response.usageMetadata || {};
+    const cached = usage.cachedContentTokenCount || 0;
+    this._recordCompactionUsage({
+      input: Math.max(0, (usage.promptTokenCount || 0) - cached),
+      cache: cached, output: usage.candidatesTokenCount,
+    });
+    const summary = response.text?.trim();
+    if (!summary || response.candidates?.[0]?.finishReason !== 'STOP') throw new Error('Keine vollständige Zusammenfassung vom Backend erhalten.');
+    this._commandSignal?.throwIfAborted();
+    this.#contents = [{ role: 'user', parts: [{ text: `Bisheriger Kontext (zusammengefasst):\n${summary}` }] }];
+    this._lastContextTokens = null;
+  }
   // Persist the active search/files mode so resuming a session (in a fresh
   // tab, which starts with the default mode) doesn't silently switch tools.
   _persistedExtras() { return { geminiMode: this.options.geminiMode }; }

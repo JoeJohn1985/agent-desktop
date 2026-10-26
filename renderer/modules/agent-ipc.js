@@ -449,6 +449,26 @@ function initAgentIPC() {
         break;
       }
 
+      case 'session.context_updated':
+        setTabContext(tabId, event.data?.text || '');
+        break;
+
+      case 'session.auto_compaction': {
+        const data = event.data || {};
+        if (data.status === 'error') {
+          const el = document.createElement('div');
+          el.className = 'stream-error';
+          el.textContent = `Automatische Komprimierung fehlgeschlagen: ${data.message}`;
+          tab.streamEl.insertBefore(el, tab.statusEl);
+          showNotification(el.textContent, 'error');
+        } else if (data.status === 'warning') {
+          showNotification(data.message, 'warning');
+        } else if (data.status === 'started') {
+          showNotification(`Kontext bei ${data.used != null ? `${data.used} Tokens` : `${Math.round(data.percent)}%`} — wird automatisch verdichtet…`, 'info');
+        }
+        break;
+      }
+
       case 'session.usage_update': {
         // Claude Code live usage: context %, subscription rate-limit, USD cost.
         const d = event.data || {};
@@ -604,25 +624,16 @@ function initAgentIPC() {
       refreshUsageDisplay(tabId);
     }
     if (code === 0) {
-      // Run /usage first, then /context — the backend handles only one silent
-      // command at a time ("Cannot run command while busy" otherwise). Refresh
-      // runs for background tabs too so cost tracking stays accurate.
+      // All commands queue behind backend-owned completion/compaction, including
+      // background tabs. The renderer only refreshes displays, never triggers it.
       if (isSubscriptionProvider(getTabProvider(tab))) {
         // Subscription (Claude Code): no per-token billing, and the context %
         // arrives live via usage_update. The rate-limit *percentage*, however,
-        // is NOT in the live stream — fetch it from /usage. The claude-code-acp
-        // adapter doesn't auto-compact on its own (unlike the interactive CLI),
-        // so check the just-updated context-% and compact here if needed.
-        refreshSubscriptionUsage(tabId).finally(() => maybeAutoCompactSubscription(tabId));
+        // is NOT in the live stream — fetch it from /usage.
+        refreshSubscriptionUsage(tabId);
       } else {
         refreshUsageDisplay(tabId).finally(() => {
-          // /context is free for all providers. Direct-API tabs additionally
-          // auto-compact when high; ACP backends (Copilot) manage their own.
-          if (isAcpProvider(getTabProvider(tab))) {
-            refreshContextDisplay(tabId);
-          } else {
-            refreshApiContext(tabId);
-          }
+          refreshContextDisplay(tabId);
         });
       }
     }

@@ -438,6 +438,83 @@ Clicking the button (`📊 18%`) opens a dropdown with three actions:
 
 > **Tip:** when usage is red, use **Compact** or **Clear** to make room.
 
+**Provider-specific automatic compaction**
+
+Each provider's settings tab has **Automatische Komprimierung** beside model
+and reasoning. Activation applies to the provider. The usual utilization rule
+is an integer **1–95%**, default **50%**. Copilot additionally offers a model
+selector and a read-only unit derived from pricing: **Tokens** with a price
+boundary, otherwise **%**. The model selector edits its
+rule, it does not change your chat model. Rules apply to existing/new tabs,
+model switches and scheduled tasks through the same main-process path.
+
+For a Copilot model with an official price tier and no saved policy in the matching unit,
+the default is **240000 current-context tokens** at a **272000 input-token
+price boundary**. All price boundaries use 88%, rounded to the nearest step
+with two significant decimal positions (for example 400000 → 350000).
+Official model entries without an increased tier use the normal 50% rule and
+are identified as a known uniform tariff, including entries without a `tier`
+field. Only a missing official model match is labelled “Preis unbekannt”;
+static or LiteLLM fallback prices are not official evidence.
+The source and its last successful retrieval time are displayed. Official
+prices refresh daily through the existing cached pricing loader, independently
+of the weekly LiteLLM fallback. Offline use retains the original cache timestamp.
+Automatic defaults follow updated prices and model selection without storing
+the suggestion as a custom value, including when toggling activation.
+**Zurück zur Automatik** removes the selected model's override (or explicitly
+opts that model out of a legacy provider rule), preserving every other rule.
+Saved rules remain stored. A rule in a different unit is not converted or used:
+the displayed automatic suggestion applies instead, with an explanatory notice.
+Matching-unit custom thresholds and provider activation remain effective.
+Editing one model preserves all other model rules.
+
+The price boundary is shown from GitHub's official pricing YAML, not inferred
+from the context-window size. Higher thresholds are **allowed**, with a visible
+“Kosten können steigen” warning. There is **no hidden price cap**. Percentage
+rules cannot be converted to input tokens without a backend-reported window;
+settings warn about that uncertainty, and the actual end-of-turn check warns
+when a measured window puts the configured percentage over the price boundary.
+Token rules need a current used-token measurement, not lifetime input/output
+totals. Invalid values and save failures are displayed.
+
+The app checks only after the complete successful response, including every
+tool, has settled. It skips running, cancelled, failed, tool-limit-exhausted
+or attention/question/approval-related responses. Permission and question
+signals conservatively suppress compaction for that response even if later
+answered. Natural-language questions are recognized heuristically, so this is
+not a guarantee that the underlying task is factually complete.
+
+This applies equally to background tabs and scheduled sessions without
+bringing successful runs to the foreground. Prompts and silent commands wait
+until the check, compaction and context refresh finish. Duplicate completion
+events and compaction's own completion cannot create a repeat loop.
+
+For Copilot, percentages refer to the context utilization actually reported by
+the backend (`/context`, or native context usage), not an assumed 272k/922k
+window. Every Copilot session starts with `--context long_context`, requesting
+the largest window for any model (CLI ≥1.0.95 applies it to new and resumed
+ACP sessions). Verified with CLI 1.0.98: a model without a larger window
+(GPT-5.3-Codex) starts and runs normally and reports its 272k default window,
+so the flag is a safe request, not a guarantee. The effective window is always
+the one reported by `/context`. Model changes need no restart for this.
+No window sizes are hardcoded. Effective capacity remains backend-reported.
+Missing usage explicitly skips automatic compaction; no model-window guess
+is used for Copilot. Native CLI compaction and manual **Compact** remain
+independent of this setting.
+
+This is not a hard cost limit: one task can cross a price boundary before the
+app is allowed to compact, and the summarization request itself can incur costs.
+Enabling long context alone is not the same as crossing the per-request input
+price tier; accumulated session tokens are not the pricing threshold.
+
+Direct APIs summarize through their own provider without executing tools;
+these summary requests can incur API costs and their reported tokens are
+included in usage accounting. After summarization, utilization
+is unknown until the next measured request, rather than displaying a fictitious
+0%. Compaction failures appear in the chat and, for scheduled sessions, in
+the run history with an attention marker. There is no automatic retry within
+the same response.
+
 #### 🔧 Session tools
 
 Opens a popup for session-specific tool denials:
@@ -450,20 +527,32 @@ Opens a popup for session-specific tool denials:
 
 #### Cost display and cost page (📈)
 
-For Copilot, the session bar shows the **entire session's CLI-recorded AIC
-consumption** and its USD equivalent, including use before an app restart.
+For Copilot, the session bar shows **today's CLI-recorded AIC consumption
+for this session** and its USD equivalent, including use before an app restart.
+Today runs from local midnight (inclusive) to the next local midnight
+(exclusive), including 23/25-hour DST days. The tooltip retains the entire
+session total; the cost page remains available.
 The source is `session.usage_checkpoint.data.totalNanoAiu` in that session's
 `events.jsonl`, not a token-price estimate. The tooltip includes the checkpoint
 time. This is recorded consumption, not proof of a GitHub account charge.
 Missing or unsupported data displays **Verbrauch nicht verfügbar**; the app
 does not fall back to an estimate or silently show zero.
 
+CLI-reported per-call Nano-AIC amounts refine timing only when they exactly
+reconcile with a checkpoint increment. Otherwise, increments crossing midnight
+cannot be split reliably: **Heute: Kosten nicht vollständig zuordenbar** is
+shown, with the safely assigned portion in the tooltip. A first cumulative
+checkpoint without a baseline is not charged to today. Pending records without
+a confirming checkpoint also prevent a complete daily figure. The display
+updates at midnight and on window focus without a new prompt.
+
 After a session's CLI data is loaded, the cost page uses checkpoint increments
 at their original timestamps. Older estimates for that session are excluded
 from the chart but retained in storage. Repeated reads do not duplicate costs.
 Clearing history removes stored entries; loading a Copilot session again
-reimports its CLI-recorded history. Direct-API and Claude subscription accounting
-are unchanged.
+reimports its CLI-recorded history. Direct-API session bars sum today's
+persisted, timestamped USD entries for that session (still marked as token-price
+estimates); their accounting and the Claude subscription quota display are unchanged.
 
 The **📈 icon** next to it opens the **cost page** — a dedicated full-screen page (like the plugin marketplace, not a modal) with:
 
@@ -609,11 +698,32 @@ Configurable shortcuts can be customized via **Settings → Shortcuts**.
 
 Unter **Funktionen → Geplante Aufgaben** lassen sich Copilot-Aufgaben anlegen,
 bearbeiten, pausieren und löschen. Name, Prompt, Projektordner, Copilot-Modell
-und erste lokale Datum/Uhrzeit sind Pflichtfelder. **0 Wochen** bedeutet
-einmalig, **1–520 Wochen** eine Wiederholung am ursprünglichen Raster.
-Die bei Anlage gespeicherte lokale Zeitzone bleibt auch nach einem Ortswechsel
+und erste lokale Datum/Uhrzeit sind Pflichtfelder. Die Auswahl **Wiederholung**
+zeigt nur die jeweils passenden Felder:
+- **Einmalig:** genau ein Termin.
+- **Täglich:** ausgewählte Wochentage (standardmäßig alle, zum Beispiel nur
+  Montag bis Freitag für Werktage).
+- **Wöchentlich:** alle N Wochen an ausgewählten Wochentagen. Die Woche beginnt
+  montags; das Raster bleibt an der Woche des Startdatums verankert.
+- **Monatlich:** alle N Monate am Tag aus dem Feld Datum/Uhrzeit.
+- **Jährlich:** alle N Jahre an Monat und Tag aus dem Feld Datum/Uhrzeit.
+  Änderungen dieses Datums werden beim Speichern in die Wiederholungsregel übernommen.
+  Bestehende komplexe Regeln bleiben beim Öffnen unverändert und werden in der Liste
+  weiterhin vollständig beschrieben. Erst ausdrückliches Speichern ersetzt sie durch
+  die aus dem Datum abgeleitete Regel; darauf weist das Formular hin.
+
+N ist eine ganze Zahl von 1 bis 520. Jede sichtbare Wochentagsauswahl braucht
+mindestens einen Eintrag. Das Startdatum mit Uhrzeit ist die Untergrenze,
+nicht zwingend der erste passende Termin. Fehlende Kalendertage werden
+übersprungen, nicht verschoben: der 31. entfällt in Monaten mit weniger Tagen,
+der 29. Februar außerhalb von Schaltjahren. Ein Plan ohne mögliche Termine
+(etwa ausschließlich 30. Februar) wird abgelehnt. Bestehende Wochenaufgaben
+behalten ihre bisherigen Termine auch beim Bearbeiten von Name oder Prompt.
+Die Zeitzone wird nicht angezeigt; die bei Anlage intern gespeicherte lokale Zeitzone bleibt auch nach einem Ortswechsel
 maßgeblich. Bei Sommerzeitwechsel bleibt die lokale Uhrzeit gleich; eine nicht
 existierende Wiederholungsstunde wird für diesen Termin um eine Stunde verschoben.
+Eine doppelte Stunde im Herbst wird nur einmal ausgeführt. Ein Startdatum in
+einer nicht existierenden Stunde wird als ungültig abgelehnt.
 
 Die App muss laufen (minimiert genügt). Bei Start oder Aufwachen verpasste
 Termine erscheinen als Erinnerung in der Funktionen-Navigation und als Anzahl

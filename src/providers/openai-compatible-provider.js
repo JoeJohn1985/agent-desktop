@@ -46,6 +46,7 @@ async function consumeSSEStream(body, onText) {
   let content = '';
   const toolCalls = []; // index → { id, name, args }
   let usage = null;
+  let stopReason = null;
 
   for await (const chunk of body) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -61,6 +62,7 @@ async function consumeSSEStream(body, onText) {
       if (json.usage) usage = json.usage;
       const choice = json.choices && json.choices[0];
       if (!choice) continue;
+      if (choice.finish_reason) stopReason = choice.finish_reason;
       const delta = choice.delta || {};
       if (delta.content) { content += delta.content; onText(delta.content); }
       for (const tc of delta.tool_calls || []) {
@@ -72,7 +74,7 @@ async function consumeSSEStream(body, onText) {
       }
     }
   }
-  return { content, toolCalls: toolCalls.filter(Boolean), usage };
+  return { content, toolCalls: toolCalls.filter(Boolean), usage, stopReason };
 }
 
 class OpenAICompatibleProvider extends ApiAgentClient {
@@ -138,7 +140,7 @@ class OpenAICompatibleProvider extends ApiAgentClient {
       throw new Error(txt || `HTTP ${res.status} ${res.statusText}`);
     }
 
-    const { content, toolCalls, usage } = await consumeSSEStream(res.body, emit.text);
+    const { content, toolCalls, usage, stopReason } = await consumeSSEStream(res.body, emit.text);
 
     // Append the assistant message (text + any tool calls) to history.
     const assistantMsg = { role: 'assistant', content: content || null };
@@ -159,11 +161,12 @@ class OpenAICompatibleProvider extends ApiAgentClient {
     const cached = usage?.prompt_tokens_details?.cached_tokens || 0;
     return {
       toolUses,
+      stopReason: stopReason === 'stop' ? 'end_turn' : stopReason === 'tool_calls' ? 'tool_use' : stopReason || 'unknown',
       usage: {
         input: Math.max(0, prompt - cached),
         cache: cached,
         output: usage?.completion_tokens || 0,
-        contextTokens: prompt,
+        contextTokens: Number.isFinite(usage?.prompt_tokens) ? prompt : null,
       },
     };
   }
@@ -176,6 +179,39 @@ class OpenAICompatibleProvider extends ApiAgentClient {
 
   _serializeHistory() { return this.#messages; }
   _restoreHistory(arr) { this.#messages = Array.isArray(arr) && arr.length ? arr : []; }
+
+  async _compact() {
+    if (this.#messages.length <= 1) return;
+    this._ensureClient();
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.options.apiKey) headers.Authorization = `Bearer ${this.options.apiKey}`;
+    const response = await fetch(`${this.#baseURL()}/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: this._commandSignal ? AbortSignal.any([this._commandSignal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+      body: JSON.stringify({
+        model: this.options.model,
+        messages: [...this.#messages, { role: 'user', content: 'Fasse den bisherigen Gesprächsverlauf zusammen: Fakten, Entscheidungen, Dateipfade und offene Aufgaben. Nur die Zusammenfassung, keine Werkzeuge.' }],
+        [this._tokenLimitParam()]: 2048,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+    const data = await response.json();
+    const usage = data.usage || {};
+    const cached = usage.prompt_tokens_details?.cached_tokens || 0;
+    this._recordCompactionUsage({
+      input: Math.max(0, (usage.prompt_tokens || 0) - cached),
+      cache: cached, output: usage.completion_tokens,
+    });
+    const summary = data.choices?.[0]?.message?.content?.trim();
+    if (!summary || data.choices?.[0]?.finish_reason !== 'stop') throw new Error('Keine vollständige Zusammenfassung vom Backend erhalten.');
+    this._commandSignal?.throwIfAborted();
+    this.#messages = [
+      this.#messages[0],
+      { role: 'user', content: `Bisheriger Kontext (zusammengefasst):\n${summary}` },
+    ];
+    this._lastContextTokens = null;
+  }
 }
 
 module.exports = { OpenAICompatibleProvider, toOpenAITools, buildSystemPrompt, consumeSSEStream };

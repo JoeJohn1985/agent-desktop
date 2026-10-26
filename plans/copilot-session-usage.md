@@ -27,3 +27,18 @@ Dollaräquivalent anzeigen, ohne Aufgabenabrechnung oder Tokenpreis-Schätzung.
 verifiziert: 56,927473 AIC beziehungsweise 0,56927473 USD insgesamt.
 Version 1.26.1. App nicht neu gestartet; Darstellung im laufenden Fenster
 nach Laden des neuen Quellstands noch offen. Kein Commit und kein Push.
+
+## Erweiterung 2026-10-13: Sessionkosten heute
+
+Freigegebene Definition und Contracts: `specs/changes/sessionkosten-heute/spec.md`.
+
+- [x] CLI-Checkpoint- und Usage-Record-Quellen verfolgt; gemeldete Nano-AIC
+  nur bei exakter Reconciliation zeitlich feiner zugeordnet.
+- [x] Tageslogik (lokale Kalendergrenzen/DST), persistente Einträge, Tooltip
+  mit Gesamtkosten und explizit unvollständige Tageszuordnung integriert.
+- [x] Restore/Resume, Modellwechsel, Tabwechsel, Mitternacht/Fokus abgesichert.
+- [x] Gezielte Unit-/IPC-/Logik-/Provider-/Restoretests: 434 Tests in 7 Suites erfolgreich.
+- [x] Vollständiger Lint erfolgreich: 0 Fehler, 36 bestehende Warnungen;
+  `git diff --check` erfolgreich.
+- Visuelle Abnahme ausschließlich durch Nutzer; App nicht starten.
+- Vault-Pflege durch Elternagent; kein Commit/Push.

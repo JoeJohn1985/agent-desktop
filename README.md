@@ -29,7 +29,7 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 - 🔑 **Secure API Keys** — Keys are encrypted via the OS keychain (`safeStorage`) and never leave the main process
 - 🔀 **Model Switcher** — Switch between models per tab; the selection persists across app restarts
 - 🆕 **Dynamic Model Discovery** — Models are discovered live per provider (via `/models` or ACP); newly appearing models are announced
-- 💲 **USD Cost Tracking** — Real per-token cost in USD, grouped by provider or session (Copilot billed via AI Credits, 100 AIC = $1)
+- 💲 **USD Cost Tracking** — Today's costs per session (local calendar day, DST-aware), with cumulative totals retained; Copilot uses confirmed CLI AI Credits (100 AIC = $1), direct APIs use recorded token-price estimates. Missing daily timing is explicit, never guessed.
 
 ### Skills & Agents
 - 🧠 **Skills, per provider** — Copilot keeps its native `~/.copilot/skills/`; every other provider (Claude Code, Anthropic, OpenAI, GLM, Ollama) has its own `~/.agent-desktop/<provider>/skills/`. Exposed to the model as a lazy index (name + description + file path) — it reads a skill's `SKILL.md` itself only when it judges it relevant, instead of everything being inlined eagerly.
@@ -55,6 +55,7 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 - 🔌 **Plugin Manager** — Browse and manage skill/agent marketplaces; install, update, and remove plugins
 - ⌨️ **Keyboard Shortcuts** — Configurable shortcuts with a built-in shortcut overlay
 - ⏱️ **Tab-Unlock Fallback** — Manual unlock button after 30s inactivity; automatic unlock after 180s for hanging sub-agent tabs
+- 📦 **Provider-specific automatic compaction** — Visible provider settings beside model/reasoning: 1–95% utilization, or per-model Copilot token thresholds. New Copilot policies use 240,000 tokens at the official 272,000-token price boundary; saved percentages remain unchanged. Higher user thresholds are allowed with cost warnings, never a hidden cap. Copilot sessions always request the largest context window (`--context long_context`, CLI ≥1.0.95); the effective window comes from `/context`. Checks only after successful complete responses, including background/scheduled sessions. Native CLI compaction remains independent; no cost guarantee.
 
 ### Customisation
 - 🎨 **Themes** — Multiple built-in color themes

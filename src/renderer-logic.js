@@ -788,6 +788,39 @@ function entryUsd(e) {
   return typeof e.usd === 'number' ? e.usd : 0;
 }
 
+function localCostDay(now = Date.now()) {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startMs: start.getTime(), endMs: end.getTime() };
+}
+
+function sessionTodayCost(entries, sessionId, provider, now = Date.now()) {
+  const { startMs, endMs } = localCostDay(now);
+  let usd = 0;
+  let complete = true;
+  for (const e of entries) {
+    if (sessionId != null && e.sessionId !== sessionId) continue;
+    if (provider && (e.provider || 'copilot') !== provider) continue;
+    if (!Number.isFinite(e.ts) || !Number.isFinite(e.usd) || e.usd < 0) {
+      complete = false;
+      continue;
+    }
+    if (provider === 'copilot' && e.usd > 0 && e.timing !== 'reported') {
+      // Old imported totals have no interval provenance and cannot become
+      // today's cost merely because they were booked/read today.
+      const from = Number.isFinite(e.fromTs) ? e.fromTs : -Infinity;
+      if (from < endMs && e.ts >= startMs && (from < startMs || e.ts >= endMs)) {
+        complete = false;
+        continue;
+      }
+    }
+    if (e.ts >= startMs && e.ts < endMs) usd += e.usd;
+  }
+  return { usd, aic: usd * 100, complete, startMs, endMs };
+}
+
 // Grouping key for a cost entry: by provider (#5) or by session.
 function costEntryKey(e, groupBy) {
   if (groupBy === 'provider') return e.provider || 'copilot';
@@ -1378,6 +1411,8 @@ const _api = {
   trimCostLog,
   visibleCostLog,
   reconcileCopilotCostLog,
+  localCostDay,
+  sessionTodayCost,
   costPeriod,
   parseQuotaError,
   buildAgentPrefix,

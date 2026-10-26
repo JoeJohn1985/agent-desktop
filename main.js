@@ -113,6 +113,17 @@ const folderConfig = readFolderConfig();
 let mainWindow = null;
 /** @type {Map<number, object>} tabId → ChatBackend instance (AcpClient or a direct-API backend) */
 const backends = new Map();
+const { createAutoCompaction } = require('./src/auto-compaction');
+const autoCompaction = createAutoCompaction({
+  getClient: tabId => backends.get(tabId),
+  getSettings: () => readPreferences().settings,
+  getPriceThreshold: async model => {
+    const prices = await pricingSource.getPricingMap();
+    return require('./src/auto-compaction-policy').resolvePricingInfo(prices, model);
+  },
+  send: (channel, ...args) => sendToRenderer(channel, ...args),
+  log: message => console.warn(message),
+});
 /** @type {number} Auto-incrementing tab identifier */
 let nextTabId = 1;
 /** @type {string} Directory for Copilot session state files */
@@ -247,6 +258,7 @@ function scheduledAttention(run, tabId) {
 }
 function sendToRenderer(channel, ...args) {
   const [tabId, event] = args;
+  autoCompaction.observe(channel, tabId, event);
   const run = scheduledTabs.get(tabId);
   if (run && scheduledTasks && !scheduledShuttingDown) {
     if (channel === 'agent:event') {
@@ -255,6 +267,7 @@ function sendToRenderer(channel, ...args) {
       if (/permission|question|user_input|error|auth/.test(event.type || '')) scheduledAttention(run, tabId);
       if (/ask.?user|question|user.?input/i.test(event.data?.toolName || '')) scheduledAttention(run, tabId);
       if (event.type === 'error') scheduledTasks.finish(run.id, event.data?.interrupted ? 'interrupted' : 'error', event.data?.message);
+      if (event.type === 'session.auto_compaction' && event.data?.status === 'error') scheduledAttention(run, tabId);
     }
     if (channel === 'agent:done') {
       const text = run.events.filter(e => /assistant.message/.test(e.type))
@@ -564,7 +577,11 @@ function resolveSshExecutable() {
   });
 }
 
-async function sendAgentPrompt(tabId, prompt, options = {}) {
+function sendAgentPrompt(tabId, prompt, options = {}) {
+  return autoCompaction.startPrompt(tabId, started => runAgentPrompt(tabId, prompt, options, started));
+}
+
+async function runAgentPrompt(tabId, prompt, options, started) {
   if (scheduledTabs.has(tabId)) options = { ...options, manualApproval: true, scheduled: true };
   // The explicit ProviderID from the renderer is authoritative; fall back to
   // deriving it from the model only for legacy callers.
@@ -596,7 +613,7 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
   // over SSH). Everything else is a direct-API backend.
   const ACP_PROVIDERS = new Set(['copilot', 'claude-code', 'claude-code-ssh']);
   if (!ACP_PROVIDERS.has(provider)) {
-    return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client });
+    return sendApiPrompt(tabId, prompt, { ...options, cwd, provider, existing: client }, started);
   }
 
   // ── ACP path (Copilot / Claude Code) ─────────────────────────
@@ -680,6 +697,7 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
   }
 
   if (provider === 'copilot') client.__mcpRevision = appMcp.revision;
+  client.__model = options.model;
 
   // No app-side context injection for ACP providers. Both Copilot and Claude
   // Code discover their own skills and agents from their native folders (see
@@ -693,14 +711,14 @@ async function sendAgentPrompt(tabId, prompt, options = {}) {
   // by itself, and which the sidebar now shows instead.
 
   // Send prompt (async — events stream to renderer via AcpClient)
-  client.prompt(prompt).catch((err) => {
+  started();
+  return client.prompt(prompt).catch((err) => {
     // Cancellation is a normal user action, not an error.
     if (err.message === 'Cancelled') return;
     if (scheduledTabs.has(tabId)) sendToRenderer('agent:event', tabId, { type: 'error', data: { message: err.message } });
     console.error(`[acp:tab${tabId}] prompt error:`, err.message);
+    throw err;
   });
-
-  return tabId;
 }
 
 /**
@@ -722,9 +740,9 @@ function resolveInstructions(provider) {
  * @param {number} tabId
  * @param {string} prompt
  * @param {Object} options - includes provider, cwd, model, deniedTools, existing
- * @returns {Promise<number>}
+ * @returns {Promise<Object|void>} Backend prompt outcome after the full tool loop
  */
-async function sendApiPrompt(tabId, prompt, options) {
+async function sendApiPrompt(tabId, prompt, options, started) {
   const { provider, cwd } = options;
   // Ollama runs locally and needs no API key.
   const KEYLESS_PROVIDERS = new Set(['ollama']);
@@ -793,12 +811,12 @@ async function sendApiPrompt(tabId, prompt, options) {
     else await client.newSession(cwd);
   }
 
-  client.prompt(prompt).catch((err) => {
+  started();
+  return client.prompt(prompt).catch((err) => {
     if (err.message === 'Cancelled') return;
     console.error(`[api:tab${tabId}] prompt error:`, err.message);
+    throw err;
   });
-
-  return tabId;
 }
 
 // ── IPC Handlers ─────────────────────────────────────────────
@@ -830,7 +848,7 @@ ipcMain.handle('agent:silentCommand', async (_event, tabId, command, timeoutMs) 
   const client = backends.get(tabId);
   if (!client) return { success: false, error: `Kein aktiver Client für Tab ${tabId}` };
   try {
-    const text = await client.silentCommand(command, timeoutMs);
+    const text = await autoCompaction.command(tabId, command, timeoutMs);
     return { success: true, text };
   } catch (err) {
     console.error(`[agent:silentCommand] ${command}:`, err?.message || String(err));
@@ -1133,6 +1151,7 @@ ipcMain.handle('agent:respondPermission', (_event, tabId, requestId, optionId) =
 /** @ipc agent:resetBackend — Destroys a tab's backend so the next prompt starts fresh
  *  (e.g. Claude Code changing folder → a new session in the new cwd). */
 ipcMain.handle('agent:resetBackend', async (_event, tabId) => {
+  autoCompaction.cancel(tabId);
   const client = backends.get(tabId);
   if (client) {
     try { await client.destroy(); } catch (_) { /* ignore */ }
@@ -1341,6 +1360,7 @@ ipcMain.handle('agent:getInstructions', () => {
 
 /** @ipc agent:stop — Cancels the running Copilot ACP prompt for a tab (fire-and-forget). */
 ipcMain.on('agent:stop', (_event, tabId) => {
+  autoCompaction.cancel(tabId);
   const client = backends.get(tabId);
   if (client) {
     client.cancel().catch(err => {

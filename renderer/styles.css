@@ -708,6 +708,12 @@ body {
   background: var(--bg-surface);
 }
 .right-sidebar[hidden] { display: none; }
+.right-sidebar .sidebar__content:not(.sidebar__content--collapsed) {
+  max-height: none;
+}
+#sessionsContent:not(.sidebar__content--collapsed) {
+  max-height: none;
+}
 #btnRightSidebar[aria-expanded="true"] { color: var(--accent); background: var(--bg-hover); }
 .window-tab-row {
   display: flex;
@@ -1167,6 +1173,33 @@ body {
 .settings__input:focus {
   border-color: var(--accent);
 }
+
+.settings__auto-compaction {
+  min-width: 0;
+  gap: 12px;
+}
+.settings__auto-compaction .settings__row { flex-wrap: wrap; }
+.settings__auto-compaction .settings__toggle { flex-shrink: 0; }
+.settings__auto-compaction-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.settings__auto-compaction .settings__select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.settings__auto-compaction .settings__input {
+  width: 16ch;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.settings__auto-compaction .action-btn { align-self: flex-start; }
+.settings__auto-compaction .settings__hint { overflow-wrap: anywhere; }
 
 /* Chromium's autofill heuristics can flag a host/password field pair as a
    login form and repaint them with its own white/yellow background,
@@ -3730,6 +3763,51 @@ button.section-menu__item:focus-visible { outline: 2px solid var(--accent); outl
 .functions-view .plugins-view { min-height: 0; }
 .functions-view .plugins-view__header { flex-wrap: wrap; gap: 10px; }
 .functions-view .plugins-view__main { min-width: 0; }
+
+/* Compact presentation shared by the function pages and scheduled tasks. */
+.functions-view--compact { font-size: 13px; line-height: 1.5; }
+.functions-view--compact .functions-view__header { padding: 12px 16px; }
+.functions-view--compact .functions-view__header h2 { font-size: 16px; }
+.functions-view--compact .functions-view__nav { padding: 0 16px 12px; }
+.functions-view--compact .functions-view__nav button { padding: 6px 12px; font-size: 13px; }
+.functions-view--compact .plugins-view__header { padding: 12px 16px; gap: 8px; }
+.functions-view--compact .plugins-view__title { font-size: 16px; }
+.functions-view--compact #connectionsView .plugin-btn { flex: none; }
+.functions-view--compact .functions-view__page-body,
+.functions-view--compact .costs-view__page-body { padding: 16px; min-height: 0; }
+.functions-view--compact .functions-view__page-body > p { margin: 0 0 12px; }
+.functions-view--compact .functions-view__context { font-size: 12px; }
+.functions-view--compact .skill-card { padding: 12px; min-width: 0; gap: 8px; font-size: 13px; }
+.functions-view--compact .skill-card__info { min-width: 0; }
+.functions-view--compact .skill-card__name { font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+.functions-view--compact .functions-view__skill-description,
+.functions-view--compact .functions-view__skill-source { margin-top: 8px; }
+.functions-view--compact .mcp-card { padding: 8px 12px; gap: 8px; }
+.functions-view--compact .mcp-card__name { font-size: 13px; }
+.functions-view--compact .mcp-card__label { font-size: 12px; }
+.functions-view--compact .mcp-manager__error { font-size: 12px; overflow-wrap: anywhere; }
+.functions-view--compact .plugins-view__list { padding: 16px; gap: 16px; }
+.functions-view--compact .plugin-section__header { gap: 8px; margin-bottom: 12px; padding-bottom: 8px; }
+.functions-view--compact .plugin-section__title,
+.functions-view--compact .costs-view__breakdown-title { font-size: 14px; }
+.functions-view--compact .plugin-tile { padding: 12px; min-height: 0; }
+.functions-view--compact .plugin-tile__name { font-size: 13px; }
+.functions-view--compact .plugin-grid { grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); }
+.functions-view--compact .plugin-section__header-text { min-width: 0; overflow-wrap: anywhere; }
+.functions-view--compact .plugin-actions__btn { padding: 6px 8px; font-size: 12px; }
+.functions-view--compact .plugins-view__search { min-width: 0; width: 240px; padding: 6px 8px; font-size: 12px; }
+.functions-view--compact .plugins-view__actions { gap: 8px; }
+.functions-view--compact .plugins-view__header-center { flex-wrap: wrap; gap: 8px; min-width: 0; }
+.functions-view--compact .costs-view__nav,
+.functions-view--compact .costs-view__provider-filter { margin-left: 0; }
+.functions-view--compact .costs-view__page-body { gap: 16px; min-width: 0; }
+.functions-view--compact #costsChart { flex-shrink: 0; width: 100% !important; max-width: 100%; }
+.functions-view--compact :is(button, input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  .functions-view--compact .plugins-view__header-center { flex-basis: 100%; order: 1; justify-content: flex-start; }
+  .functions-view--compact .plugins-view__search { width: 100%; }
+  .functions-view--compact .plugins-view__sidebar { width: 120px; min-width: 100px; }
+}
 @media (max-width: 1000px) {
   .functions-view .plugins-view__sidebar { width: 150px; min-width: 120px; }
   .functions-view .plugins-view__list { padding: 12px; }
@@ -4639,22 +4717,64 @@ button.section-menu__item:focus-visible { outline: 2px solid var(--accent); outl
   gap: 12px;
   max-width: 700px;
 }
+#scheduledView { font-size: 13px; line-height: 1.5; }
+#scheduledView .functions-view__page-body { padding: 16px; min-width: 0; }
+#scheduledView .scheduled-view__title { margin: 0 0 12px; font-size: 16px; }
+#scheduledView .scheduled-view__section-title { margin: 16px 0 12px; font-size: 14px; }
+#scheduledView .scheduled-view__task-title { margin: 0 0 8px; font-size: 13px; overflow-wrap: anywhere; }
+#scheduledView .settings__hint { margin: 0 0 12px; font-size: 12px; overflow-wrap: anywhere; }
+#scheduledForm .settings__group { margin: 0; padding: 12px 0; border: 0; border-bottom: 1px solid var(--border-subtle); min-width: 0; gap: 12px; }
+#scheduledForm legend { padding: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+#scheduledForm .settings__label { font-size: 13px; }
+#scheduledForm :is(input, textarea, select) { width: 100%; min-width: 0; box-sizing: border-box; }
+#scheduledView .action-btn { font-size: 12px; white-space: normal; overflow-wrap: anywhere; height: auto; min-height: 32px; padding: 6px 12px; max-width: 100%; }
+#scheduledView .action-btn:disabled { opacity: 0.5; cursor: default; transform: none; background: var(--bg-active); }
+#scheduledForm .action-btn--primary { flex: none; }
+#scheduledForm .settings__folder-row { gap: 8px; }
+#scheduledForm .settings__folder-row .action-btn { flex-shrink: 0; }
+#scheduledView :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#scheduledView .scheduled-view__run-summary { font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+#scheduledView .scheduled-view__result { margin: 12px 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+#scheduledView .scheduled-view__empty { padding: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+@media (max-width: 600px) {
+  #scheduledForm .settings__folder-row { flex-wrap: wrap; }
+  #scheduledForm .settings__folder-input { flex-basis: 100%; }
+}
 #scheduledForm label {
   display: grid;
-  gap: 4px;
+  gap: 8px;
 }
 .scheduled-form__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#scheduledRecurrence { display: grid; gap: 12px; }
+#scheduledRecurrence .scheduled-recurrence__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+}
+#scheduledRecurrence .scheduled-recurrence__choices legend { font-size: 12px; }
+#scheduledRecurrence .scheduled-recurrence__choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  font-size: 13px;
+}
+#scheduledRecurrence input[type="checkbox"] { width: auto; margin: 0; }
 #scheduledForm textarea { resize: vertical; min-height: 100px; }
 #scheduledForm .settings__folder-input { min-width: 0; }
 #scheduledList > section, #scheduledRuns > details {
-  margin-top: 16px;
+  margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-#scheduledList button {
-  margin: 4px;
-}
 #scheduledError {
   color: var(--red);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
+#scheduledError:empty { display: none; }

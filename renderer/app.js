@@ -1081,15 +1081,18 @@ const CONTEXT_ACTIONS = [
 ];
 
 function parseContextPercent(text) {
-  const m = text.match(/(\d+)%\)/);
-  return m ? parseInt(m[1], 10) : null;
+  const source = String(text || '');
+  const m = source.match(/\((\d+(?:[.,]\d+)?)%\)/)
+    || source.match(/(?:context|kontext)[^\n]*?\b(\d+(?:[.,]\d+)?)%/i);
+  const value = m ? Number(m[1].replace(',', '.')) : null;
+  return value != null && value >= 0 && value <= 100 ? value : null;
 }
 
 /** Set the context button to a given percentage (null → default label). */
 function updateContextButtonPct(pct) {
   const btn = document.getElementById('btnContextInfo');
   if (!btn) return;
-  btn.textContent = pct != null ? `📊 ${pct}%` : '📊 Kontext';
+  btn.textContent = pct != null ? `📊 ${Math.round(pct)}%` : '📊 Kontext';
 }
 
 /**
@@ -1297,7 +1300,7 @@ async function refreshUsageDisplay(tabId) {
     try {
       const usage = await window.desktop.chat.copilotUsage(sessionId);
       if (tabs.get(tabId) !== targetTab || targetTab.sessionId !== sessionId
-          || targetTab._copilotUsageRequest !== request) return;
+          || targetTab._copilotUsageRequest !== request || getTabProvider(targetTab) !== 'copilot') return;
       if (!usage.success) throw new Error(usage.error || 'CLI-Verbrauch nicht verfügbar');
       targetTab._copilotUsage = { ...usage, sessionId };
       targetTab._copilotUsageError = null;
@@ -1312,12 +1315,16 @@ async function refreshUsageDisplay(tabId) {
     if (tabId === activeTabId) updateUsageDisplay(null, null, null);
     return;
   }
+  const originalTab = tabs.get(tabId);
+  const originalSessionId = originalTab?.sessionId;
+  const billingModel = originalTab?._billingModel || originalTab?.selectedModel || '';
   try {
     const result = await window.desktop.chat.silentCommand(tabId, '/usage');
     if (!result.success) return;
     const parsed = parseUsageRequests(result.text);
     const tokens = parseUsageTokens(result.text);
     const tab = tabs.get(tabId);
+    if (tab !== originalTab || tab?.sessionId !== originalSessionId) return;
     if (tab && tab._usageBaselinePending) {
       // First read after reopening a session: adopt the cumulative counts as the
       // baseline WITHOUT billing — the prior tokens were already paid for earlier.
@@ -1333,7 +1340,7 @@ async function refreshUsageDisplay(tabId) {
       // frozen when this prompt was sent (_billingModel) — not tab.selectedModel,
       // which may already point at a different model chosen for the next prompt.
       // This keeps a mid-session model switch from mis-pricing prior tokens.
-      const modelId = tab._billingModel || tab.selectedModel || '';
+      const modelId = billingModel;
       // Subscription providers (Claude Code) are covered by the plan — no USD
       // billing yet (token-based accounting for add-on budgets comes later).
       const provider = getTabProvider(tab);
@@ -1422,37 +1429,9 @@ async function refreshSubscriptionUsage(tabId) {
   }
 }
 
-/** Context utilisation (%) at which a Claude Code (ACP subscription) tab auto-compacts. */
-const AUTO_COMPACT_PERCENT_SUBSCRIPTION = 65;
-
-/**
- * For Claude Code tabs (local + SSH, both driven via claude-code-acp): after a
- * turn, check the context-% already tracked live from usage_update events and,
- * if it's high, auto-compact. Unlike the interactive `claude` CLI, the
- * claude-code-acp adapter does not replicate the CLI's own auto-compact — this
- * is confirmed upstream (zed-industries/zed#37483: Zed users hit the identical
- * "context fills, nothing compacts" behaviour through the same adapter) — so
- * without this, the session just runs until the backend rejects the next
- * prompt outright.
- * @param {number} tabId
- */
-async function maybeAutoCompactSubscription(tabId) {
-  const tab = tabs.get(tabId);
-  const pct = tab?._contextPercent;
-  if (pct == null || pct < AUTO_COMPACT_PERCENT_SUBSCRIPTION) return;
-  try {
-    showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
-    await window.desktop.chat.silentCommand(tabId, '/compact');
-    const after = await window.desktop.chat.silentCommand(tabId, '/context');
-    if (after.success) setTabContext(tabId, after.text);
-  } catch (e) {
-    console.warn('[context] maybeAutoCompactSubscription fehlgeschlagen:', e?.message);
-  }
-}
-
 /**
  * Read & display the context-% for a tab without auto-compacting. Used for
- * Copilot tabs (the CLI manages its own context window). /context is free.
+ * All providers; automatic compaction is owned by the backend. /context is free.
  * @param {number} tabId
  */
 async function refreshContextDisplay(tabId) {
@@ -1461,33 +1440,6 @@ async function refreshContextDisplay(tabId) {
     if (res.success) setTabContext(tabId, res.text);
   } catch (e) {
     console.warn('[context] refreshContextDisplay fehlgeschlagen:', e?.message);
-  }
-}
-
-/** Context utilisation (%) at which a direct-API tab auto-compacts. */
-const AUTO_COMPACT_PERCENT = 80;
-
-/**
- * For direct-API tabs: refresh the context-% button after a turn and, if the
- * window is filling up, automatically compact the conversation. Copilot tabs
- * are unaffected (their context is managed by the CLI).
- * @param {number} tabId
- */
-async function refreshApiContext(tabId) {
-  try {
-    const res = await window.desktop.chat.silentCommand(tabId, '/context');
-    if (!res.success) return;
-    setTabContext(tabId, res.text);
-
-    const pct = parseContextPercent(res.text);
-    if (pct != null && pct >= AUTO_COMPACT_PERCENT) {
-      showNotification(`Kontext bei ${pct}% — wird automatisch verdichtet…`, 'info');
-      await window.desktop.chat.silentCommand(tabId, '/compact');
-      const after = await window.desktop.chat.silentCommand(tabId, '/context');
-      if (after.success) setTabContext(tabId, after.text);
-    }
-  } catch (e) {
-    console.warn('[context] refreshApiContext fehlgeschlagen:', e?.message);
   }
 }
 
@@ -1505,31 +1457,26 @@ function updateUsageDisplay(parsed, tokens, fullText) {
       el.textContent = 'Verbrauch nicht verfügbar';
       el.title = tab._copilotUsageError.message;
     } else if (usage) {
-      el.textContent = `${usage.aic.toFixed(2)} AIC · ${formatUsd(usage.usd)}`;
-      el.title = `Gesamter CLI-protokollierter Sitzungsverbrauch; 100 AIC = 1 USD. Stand: ${new Date(usage.asOf).toLocaleString('de-DE')}. Keine bestätigte Kontoabbuchung.`;
+      const today = window.RendererLogic.sessionTodayCost(usage.entries, null, 'copilot');
+      if (usage.incompleteTail || usage.pendingUsage?.some(r => r.ts === null
+        || (r.ts >= today.startMs && r.ts < today.endMs))) today.complete = false;
+      el.textContent = today.complete
+        ? `Heute: ${today.aic.toFixed(2)} AIC · ${formatUsd(today.usd)}`
+        : 'Heute: Kosten nicht vollständig zuordenbar';
+      el.title = `Diese Session, lokaler Tag 00:00 bis nächstes 00:00. ${today.complete ? '' : `Sicher zugeordnet: ${today.aic.toFixed(2)} AIC · ${formatUsd(today.usd)}. Fehlende Zeitdaten werden nicht geschätzt. `}Gesamt: ${usage.aic.toFixed(2)} AIC · ${formatUsd(usage.usd)}. Stand: ${new Date(usage.asOf).toLocaleString('de-DE')}. CLI-Verbrauch; 100 AIC = 1 USD. Keine bestätigte Kontoabbuchung.`;
     } else {
-      el.textContent = tab?.sessionId ? 'Verbrauch wird geladen …' : '0,00 AIC · $0.00';
-      el.title = 'CLI-protokollierter Sitzungsverbrauch';
+      el.textContent = tab?.sessionId ? 'Verbrauch wird geladen …' : 'Heute: 0,00 AIC · $0.00';
+      el.title = 'Heutiger CLI-protokollierter Verbrauch dieser Session';
     }
     return;
   }
 
-  let display;
-  if (getModelPricing(modelId, Date.now(), provider)) {
-    // Known pricing (hardcoded or from the dynamic source) → show the running
-    // per-prompt cost in USD (≥ 0, $0.00 before the first prompt).
-    display = '~' + formatUsd(tab?._costUsd || 0);
-  } else if (parsed) {
-    // Unknown model → fall back to the raw /usage figure.
-    const short = parsed.unit?.toLowerCase().includes('credit') ? 'AIC'
-      : parsed.unit?.toLowerCase().includes('unit') ? 'AIU'
-      : 'Req';
-    display = `${parsed.value} ${short}`;
-  } else {
-    display = '~$0.00';
-  }
-  el.textContent = display;
-  el.title = fullText ? fullText.trim() : 'Noch keine Nutzung erfasst';
+  const today = window.RendererLogic.sessionTodayCost(getCostLog(), tab?.sessionId, provider);
+  const priced = !!getModelPricing(modelId, Date.now(), provider);
+  el.textContent = !tab?.sessionId ? 'Heute: ~$0.00'
+    : today.complete && (priced || today.usd > 0)
+      ? 'Heute: ~' + formatUsd(today.usd) : 'Heute: Kosten nicht verfügbar';
+  el.title = `Diese Session, lokaler Tag 00:00 bis nächstes 00:00; erfasste USD-Einträge (API-Tokenpreisberechnung, keine bestätigte Kontoabbuchung). ${getModelPricing(modelId, Date.now(), provider) ? '' : 'Für das gewählte Modell ist kein Preis verfügbar. '}${fullText ? fullText.trim() : ''}`;
 }
 
 /**
@@ -1570,6 +1517,18 @@ function initSubscriptionUsageTicker() {
     const tab = tabs.get(activeTabId);
     if (tab) updateSubscriptionUsageDisplay(tab);
   }, SUBSCRIPTION_USAGE_TICK_MS);
+  let timer;
+  const update = () => {
+    clearTimeout(timer);
+    const tab = tabs.get(activeTabId);
+    if (tab && !isSubscriptionProvider(getTabProvider(tab))) {
+      updateUsageDisplay(tab._lastUsageParsed, tab._lastUsageTokens, tab._lastUsageText);
+      if (tab.sessionId && getTabProvider(tab) === 'copilot') refreshUsageDisplay(activeTabId);
+    }
+    timer = setTimeout(update, window.RendererLogic.localCostDay().endMs - Date.now() + 1);
+  };
+  timer = setTimeout(update, window.RendererLogic.localCostDay().endMs - Date.now() + 1);
+  window.addEventListener('focus', update);
 }
 
 // ── Permission requests (ACP session/request_permission) ─────

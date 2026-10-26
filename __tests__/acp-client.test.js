@@ -291,6 +291,15 @@ describe('AcpClient', () => {
       await flushPromises();
     });
 
+    it.each(['gpt-6.1-sol', 'gpt-5.3-codex', 'unbekannt'])('fordert für %s immer das größte Kontextfenster an', async (model) => {
+      client.updateOptions({ model });
+      const starting = client.start();
+      await flushPromises();
+      expect(mockSpawnFn.mock.calls[0][1]).toEqual(expect.arrayContaining(['--context', 'long_context']));
+      sendResponse(mockProcesses[0], { jsonrpc: '2.0', id: 1, result: {} });
+      await starting;
+    });
+
     it('spawnt mit options.cwd als lokalem Arbeitsverzeichnis, wenn kein spawnCwd gesetzt ist', async () => {
       client = new AcpClient('tab-1', mockSendToRenderer, { cwd: '/some/local/dir' });
       client.start();
@@ -1893,6 +1902,31 @@ describe('AcpClient', () => {
 
       const text = await cmdP;
       expect(text).toBe('');
+    });
+
+    it('meldet abgebrochene stille Verdichtung nicht als Erfolg', async () => {
+      const proc = await buildReadyClientWithSession();
+      const cmdP = client.silentCommand('/compact');
+      const rejection = expect(cmdP).rejects.toThrow('cancelled');
+      await flushPromises();
+      sendResponse(proc, { jsonrpc: '2.0', id: 3, result: { stopReason: 'cancelled' } });
+      await flushPromises();
+      await rejection;
+      expect(client.state).toBe('ready');
+    });
+
+    it('aktive Tool-Updates sind kein Abschluss; failed ohne error ist trotzdem ein Fehler', async () => {
+      const proc = await buildReadyClientWithSession();
+      mockSendToRenderer.mockClear();
+      sendNotification(proc, 'session/update', { sessionUpdate: 'tool_call', toolCallId: 't', title: 'Tool' });
+      sendNotification(proc, 'session/update', { sessionUpdate: 'tool_call_update', toolCallId: 't', status: 'in_progress' });
+      await flushPromises();
+      expect(mockSendToRenderer.mock.calls.some(([, , event]) => event.type === 'tool.execution_complete')).toBe(false);
+      sendNotification(proc, 'session/update', { sessionUpdate: 'tool_call_update', toolCallId: 't', status: 'failed' });
+      await flushPromises();
+      const event = mockSendToRenderer.mock.calls.find(([, , event]) => event.type === 'tool.execution_complete')[2];
+      expect(event.data.success).toBe(false);
+      expect(event.data.error).toContain('failed');
     });
   });
 });

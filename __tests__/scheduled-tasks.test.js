@@ -45,6 +45,18 @@ test('due task starts exactly once and tasks are serialized', async () => {
   expect(execute).toHaveBeenCalledTimes(2);
 });
 
+test('Komprimierungsfehler bleibt bei erfolgreichem Hintergrundlauf sichtbar und persistent', () => {
+  const task = scheduler.upsert(input());
+  scheduler.launch(task, false);
+  const run = scheduler.state.runs[0];
+  scheduler.finish(run.id, 'completed');
+  scheduler.event(run.id, { type: 'session.auto_compaction', data: { status: 'error', message: 'Verdichtung fehlgeschlagen' } });
+  expect(run.status).toBe('completed');
+  expect(run.needsAttention).toBe(true);
+  expect(run.autoCompactionError).toBe('Verdichtung fehlgeschlagen');
+  expect(fs.writeFileSync).toHaveBeenLastCalledWith(expect.any(String), expect.stringContaining('Verdichtung fehlgeschlagen'), expect.any(Object));
+});
+
 test('wake bundles missed occurrences without running and catch-up requires confirmation', async () => {
   const task = scheduler.upsert(input());
   clock = localEpoch('2026-12-01T10:00', 'Europe/Berlin');

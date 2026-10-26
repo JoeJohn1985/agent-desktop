@@ -47,7 +47,7 @@ class FakeBackend extends ApiAgentClient {
     if (step.reasoning) ctx.emit.reasoning(step.reasoning);
     if (step.throw) throw step.throw;
     this.history.push({ role: 'assistant', text: step.text || '' });
-    return { toolUses: step.toolUses || [], usage: step.usage || null };
+    return { toolUses: step.toolUses || [], usage: step.usage || null, stopReason: step.stopReason };
   }
 
   _pushToolResults(results) { this.history.push({ role: 'tool', results }); }
@@ -168,7 +168,7 @@ describe('newSession', () => {
     await b.newSession();
     expect(b.history).toEqual([]);
     expect(b._tokens).toEqual({ input: 0, output: 0, cache: 0, cacheWrite: 0 });
-    expect(b._lastContextTokens).toBe(0);
+    expect(b._lastContextTokens).toBeNull();
   });
 
   test('zwei Sessions bekommen unterschiedliche IDs', async () => {
@@ -197,7 +197,7 @@ describe('loadSession', () => {
     const { b } = makeBackend();
     await b.loadSession('api-123');
     expect(b._tokens).toEqual({ input: 0, output: 0, cache: 0, cacheWrite: 0 });
-    expect(b._lastContextTokens).toBe(0);
+    expect(b._lastContextTokens).toBeNull();
   });
 
   test('ohne gespeicherte Daten bleibt die Historie leer', async () => {
@@ -274,11 +274,11 @@ describe('silentCommand: /context', () => {
     expect(text).toBe(`Kontext: ${(250_000).toLocaleString('de-DE')} / ${(1_000_000).toLocaleString('de-DE')} Tokens (25%)`);
   });
 
-  test('rundet auf ganze Prozent', async () => {
+  test('bewahrt Bruchteile für exakte Schwellen', async () => {
     const { b } = makeBackend();
     b.ctxWindow = 200_000;
-    b._lastContextTokens = 3_000; // 1,5 % → 2 %
-    expect(await b.silentCommand('/context')).toMatch(/\(2%\)/);
+    b._lastContextTokens = 3_000;
+    expect(await b.silentCommand('/context')).toMatch(/\(1.5%\)/);
   });
 
   test('deckelt bei 100 %, auch wenn das Fenster überschritten wurde', async () => {
@@ -288,19 +288,19 @@ describe('silentCommand: /context', () => {
     expect(await b.silentCommand('/context')).toMatch(/\(100%\)/);
   });
 
-  test('Kontextfenster 0 ergibt 0 % statt NaN/Infinity (keine Division durch null)', async () => {
+  test('Kontextfenster 0 ergibt unbekannte Auslastung statt falschem 0 %', async () => {
     const { b } = makeBackend();
     b.ctxWindow = 0;
     b._lastContextTokens = 5_000;
     const text = await b.silentCommand('/context');
-    expect(text).toMatch(/\(0%\)/);
+    expect(text).toBe('Kontextauslastung unbekannt.');
     expect(text).not.toMatch(/NaN|Infinity/);
   });
 
-  test('unbekanntes Kontextfenster (undefined) ergibt ebenfalls 0 %', async () => {
+  test('unbekanntes Kontextfenster ergibt explizit unbekannte Auslastung', async () => {
     const { b } = makeBackend();
     b.ctxWindow = undefined;
-    expect(await b.silentCommand('/context')).toBe('Kontext: 0 / 0 Tokens (0%)');
+    expect(await b.silentCommand('/context')).toBe('Kontextauslastung unbekannt.');
   });
 });
 
@@ -314,15 +314,13 @@ describe('silentCommand: /compact', () => {
     expect(store.save).toHaveBeenCalledTimes(1);
   });
 
-  test('überspringt die Verdichtung während eines laufenden Turns', async () => {
+  test('weist die Verdichtung während eines laufenden Turns sichtbar ab', async () => {
     const { b } = makeBackend();
-    let antwort = null;
     b.turns = [async function () {
-      antwort = await this.silentCommand('/compact');
+      await expect(this.silentCommand('/compact')).rejects.toThrow('Antwort läuft noch');
       return { toolUses: [], usage: null };
     }];
     await b.prompt('los');
-    expect(antwort).toBe('Verdichtung übersprungen (Antwort läuft noch).');
     expect(b.compacted).toBe(0);
   });
 });
@@ -479,15 +477,16 @@ describe('prompt: Tool-Schleife', () => {
     expect(b._pushToolResults.length).toBeDefined();
   });
 
-  test('bricht nach MAX_TOOL_ITERATIONS ab und beendet den Turn regulär', async () => {
+  test('bricht nach MAX_TOOL_ITERATIONS ab ohne regulären erfolgreichen Abschluss', async () => {
     const { b, send } = makeBackend();
     executeTool.mockResolvedValue({ ok: true, content: 'weiter' });
     b.defaultStep = { toolUses: [{ id: 'x', name: 'read_file', input: {} }] };
     await b.prompt('endlos');
     expect(b.streamCalls).toBe(MAX_TOOL_ITERATIONS);
     expect(executeTool).toHaveBeenCalledTimes(MAX_TOOL_ITERATIONS);
-    expect(send.types()).toContain('assistant.turn_end');
-    expect(send.done()[0].payload).toBe(0);
+    expect(send.types()).not.toContain('assistant.turn_end');
+    expect(send.types()).toContain('error');
+    expect(send.done()[0].payload).toBe(1);
   });
 });
 
@@ -558,6 +557,17 @@ describe('prompt: Abbruch', () => {
 // ══════════════════════════════════════════════════════════════
 
 describe('prompt: Fehlerbehandlung', () => {
+  test('abgeschnittene Tool-Anfrage wird nicht ausgeführt und bekommt gültiges Fehlerresultat', async () => {
+    const { b, send } = makeBackend();
+    b.turns = [{ toolUses: [{ id: 'truncated', name: 'read_file' }], stopReason: 'max_tokens' }];
+    await b.prompt('hi');
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(send.done()[0].payload).toBe(1);
+    expect(b.history.at(-1)).toEqual({ role: 'tool', results: [{
+      id: 'truncated', name: 'read_file', ok: false,
+      content: 'Nicht ausgeführt: Antwortlauf nicht abgeschlossen (max_tokens).',
+    }] });
+  });
   test('ein Streaming-Fehler wird als error-Ereignis und Code 1 gemeldet', async () => {
     const { b, send } = makeBackend();
     b.turns = [{ throw: new Error('429 rate limit') }];
@@ -626,12 +636,12 @@ describe('Token-Buchhaltung', () => {
     expect(await b.silentCommand('/context')).toMatch(/\(10%\)/);
   });
 
-  test('ohne contextTokens bleibt der letzte Wert bestehen', async () => {
+  test('ohne frische contextTokens bleibt die Auslastung unbekannt', async () => {
     const { b } = makeBackend();
     b._lastContextTokens = 1234;
     b.turns = [{ usage: { input: 1 } }];
     await b.prompt('hi');
-    expect(b._lastContextTokens).toBe(1234);
+    expect(b._lastContextTokens).toBeNull();
   });
 });
 
@@ -703,13 +713,13 @@ describe('Basisklassen-Hooks', () => {
     await expect(c._streamAssistantTurn({})).rejects.toThrow('not implemented');
   });
 
-  test('optionale Hooks haben harmlose Standardwerte', async () => {
+  test('optionale Hooks bleiben harmlos, nicht implementiertes Compact meldet einen Fehler', async () => {
     const c = bare();
     expect(c._contextWindow()).toBe(0);
     expect(c._serializeHistory()).toEqual([]);
     expect(c._persistedExtras()).toEqual({});
     expect(c._restoreHistory([{ role: 'user' }])).toBeUndefined();
-    await expect(c._compact()).resolves.toBeUndefined();
+    await expect(c._compact()).rejects.toThrow('keine Verdichtung');
   });
 
   test('MAX_TOOL_ITERATIONS ist exportiert und plausibel', () => {

@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { validatePolicies } = require('./auto-compaction');
 
 /**
  * Preferences module — handles reading/writing with backup and defaults.
@@ -52,6 +53,7 @@ function createPreferencesManager(prefsPath) {
 
   function write(prefs) {
     try {
+      validatePolicies(prefs?.settings?.autoCompaction);
       ensureDir();
       // Create backup of current file before overwriting
       if (fs.existsSync(prefsPath)) {

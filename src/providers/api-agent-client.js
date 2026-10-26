@@ -29,7 +29,7 @@ class ApiAgentClient {
   _tokens = { input: 0, output: 0, cache: 0, cacheWrite: 0 };
   // size (in tokens) of the most recent request's full prompt — used for the
   // context-window utilisation percentage.
-  _lastContextTokens = 0;
+  _lastContextTokens = null;
 
   /**
    * @param {number} tabId
@@ -62,7 +62,7 @@ class ApiAgentClient {
     if (cwd) this.#options.cwd = cwd;
     this.#sessionId = 'api-' + crypto.randomUUID();
     this._tokens = { input: 0, output: 0, cache: 0, cacheWrite: 0 };
-    this._lastContextTokens = 0;
+    this._lastContextTokens = null;
     this._resetHistory();
     // Mirror AcpClient: tell the renderer the new session id so it persists it.
     this.#emit({ type: 'result', sessionId: this.#sessionId });
@@ -74,7 +74,7 @@ class ApiAgentClient {
     this.#sessionId = sessionId;
     this._resetHistory();
     this._tokens = { input: 0, output: 0, cache: 0, cacheWrite: 0 };
-    this._lastContextTokens = 0;
+    this._lastContextTokens = null;
 
     // Restore persisted conversation history so the session continues with
     // full context. Stateless APIs have no server session, so this is the
@@ -93,19 +93,22 @@ class ApiAgentClient {
   }
 
   /** Persist the current session history (fire-and-forget, after each turn). */
-  #persist() {
+  #persist(strict = false) {
     if (!this.#sessionId) return;
     try {
       const store = require('./session-store');
-      store.save(this.#sessionId, {
+      const data = {
         model: this.#options.model,
         tokens: this._tokens,
         lastContextTokens: this._lastContextTokens,
         messages: this._serializeHistory(),
         ...this._persistedExtras(),
-      });
+      };
+      if (strict) store.save(this.#sessionId, data, { strict: true });
+      else store.save(this.#sessionId, data);
     } catch (e) {
       console.warn('[api-agent] persist failed:', e?.message);
+      if (strict) throw new Error(`Verdichteten Kontext nicht gespeichert: ${e?.message || String(e)}`, { cause: e });
     }
   }
 
@@ -124,6 +127,7 @@ class ApiAgentClient {
 
   async prompt(text) {
     this.#state = 'busy';
+    this._lastContextTokens = null;
     this.#abort = new AbortController();
     const signal = this.#abort.signal;
 
@@ -137,13 +141,21 @@ class ApiAgentClient {
     try {
       this._pushUserText(text);
 
+      let completed = false;
       for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
         if (signal.aborted) throw new Error('Cancelled');
 
-        const { toolUses, usage } = await this._streamAssistantTurn({ emit, signal });
+        const { toolUses, usage, stopReason } = await this._streamAssistantTurn({ emit, signal });
         this.#addUsage(usage);
+        if (stopReason && !['end_turn', 'tool_use'].includes(stopReason)) {
+          if (toolUses?.length) this._pushToolResults(toolUses.map(tu => ({
+            id: tu.id, name: tu.name, ok: false,
+            content: `Nicht ausgeführt: Antwortlauf nicht abgeschlossen (${stopReason}).`,
+          })));
+          throw new Error(`Antwortlauf nicht abgeschlossen (${stopReason}).`);
+        }
 
-        if (!toolUses || toolUses.length === 0) break;
+        if (!toolUses || toolUses.length === 0) { completed = true; break; }
 
         // Execute each tool. CRITICAL: every emitted tool.execution_start must
         // get a matching tool.execution_complete (or the UI shows an orphaned
@@ -181,6 +193,8 @@ class ApiAgentClient {
         if (signal.aborted) throw new Error('Cancelled');
       }
 
+      if (!completed) throw new Error('Werkzeuglimit erreicht — Antwortlauf nicht abgeschlossen.');
+      if (signal.aborted) throw new Error('Cancelled');
       this.#emit({ type: 'assistant.turn_end', data: {} });
       this.#persist();
       this.#state = 'ready';
@@ -215,24 +229,34 @@ class ApiAgentClient {
     if (cmd === '/context') {
       const win = this._contextWindow() || 0;
       const used = this._lastContextTokens || 0;
-      const pct = win ? Math.min(100, Math.round((used / win) * 100)) : 0;
+      const pct = win && this._lastContextTokens != null ? Math.min(100, (used / win) * 100) : null;
       // The "(NN%)" suffix is what the renderer's parseContextPercent reads.
-      return `Kontext: ${used.toLocaleString('de-DE')} / ${win.toLocaleString('de-DE')} Tokens (${pct}%)`;
+      return pct == null ? 'Kontextauslastung unbekannt.'
+        : `Kontext: ${used.toLocaleString('de-DE')} / ${win.toLocaleString('de-DE')} Tokens (${pct}%)`;
     }
     if (cmd === '/compact') {
       // Don't mutate the history while a turn is streaming/using tools.
-      if (this.#state === 'busy') return 'Verdichtung übersprungen (Antwort läuft noch).';
-      await this._compact();
-      this.#persist();
-      return 'Kontext verdichtet.';
+      if (this.#state === 'busy') throw new Error('Verdichtung nicht möglich (Antwort läuft noch).');
+      this.#state = 'busy';
+      this.#abort = new AbortController();
+      try {
+        await this._compact();
+        if (this.#abort.signal.aborted) throw new Error('Cancelled');
+        this.#persist(true);
+        return 'Kontext verdichtet.';
+      } finally {
+        if (this.#state !== 'dead') this.#state = 'ready';
+      }
     }
     return '';
   }
 
   /** Context-window size (tokens) of the active model. Override per provider. */
   _contextWindow() { return 0; }
+  get _commandSignal() { return this.#abort?.signal; }
+  _recordCompactionUsage(usage) { this.#addUsage(usage); }
   /** Summarise the history in place to free context. Override per provider. */
-  async _compact() { /* default: no-op */ }
+  async _compact() { throw new Error('Dieser Provider unterstützt keine Verdichtung.'); }
   /** Return the provider-native message history as a serialisable array. */
   _serializeHistory() { return []; }
   /** Restore the provider-native message history from a serialised array. */
@@ -252,12 +276,13 @@ class ApiAgentClient {
   }
 
   #addUsage(u) {
+    this._lastContextTokens = null;
     if (!u) return;
     this._tokens.input += u.input || 0;
     this._tokens.output += u.output || 0;
     this._tokens.cache += u.cache || 0;
     this._tokens.cacheWrite += u.cacheWrite || 0;
-    if (u.contextTokens) this._lastContextTokens = u.contextTokens;
+    this._lastContextTokens = Number.isFinite(u.contextTokens) && u.contextTokens >= 0 ? u.contextTokens : null;
   }
 
   // ── Subclass hooks (must override) ─────────────────────────────

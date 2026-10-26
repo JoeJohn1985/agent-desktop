@@ -193,7 +193,12 @@ describe('pricing-source: getPricingMap', () => {
     mockCache(freshCache());
     global.fetch = jest.fn();
 
-    expect(await getPricingMap()).toEqual({
+    const prices = await getPricingMap();
+    expect(prices.sources).toEqual({
+      copilot: { url: COPILOT_PRICING_URL, updatedAt: expect.any(Number) },
+      fallback: { url: LITELLM_PRICING_URL, updatedAt: expect.any(Number) },
+    });
+    expect(prices).toMatchObject({
       copilot: EXPECTED_COPILOT_MAP,
       fallback: EXPECTED_FALLBACK_MAP,
     });
@@ -207,7 +212,7 @@ describe('pricing-source: getPricingMap', () => {
     mockCache(stale);
     mockFetchOk();
 
-    expect(await getPricingMap()).toEqual({
+    expect(await getPricingMap()).toMatchObject({
       copilot: EXPECTED_COPILOT_MAP,
       fallback: EXPECTED_FALLBACK_MAP,
     });
@@ -220,7 +225,7 @@ describe('pricing-source: getPricingMap', () => {
     mockCache({ ts: Date.now(), map: { 'model-a': { input: 1, cache: 0.1, output: 2 } } });
     mockFetchOk();
 
-    expect(await getPricingMap()).toEqual({
+    expect(await getPricingMap()).toMatchObject({
       copilot: EXPECTED_COPILOT_MAP,
       fallback: EXPECTED_FALLBACK_MAP,
     });
@@ -255,9 +260,10 @@ describe('pricing-source: getPricingMap', () => {
       return responseFor(url);
     });
 
-    expect(await getPricingMap()).toEqual({
+    expect(await getPricingMap()).toMatchObject({
       copilot: EXPECTED_COPILOT_MAP,
       fallback: EXPECTED_FALLBACK_MAP,
+      sources: { copilot: { updatedAt: stale.sources.copilot.ts } },
     });
     expect(warnSpy).toHaveBeenCalledWith('[pricing] copilot fetch failed, using cache/none:', 'offline');
   });
@@ -266,7 +272,13 @@ describe('pricing-source: getPricingMap', () => {
     mockCache(null);
     global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
 
-    expect(await getPricingMap()).toEqual({ copilot: {}, fallback: {} });
+    expect(await getPricingMap()).toEqual({
+      copilot: {}, fallback: {},
+      sources: {
+        copilot: { url: COPILOT_PRICING_URL, updatedAt: null },
+        fallback: { url: LITELLM_PRICING_URL, updatedAt: null },
+      },
+    });
     expect(warnSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -275,7 +287,7 @@ describe('pricing-source: getPricingMap', () => {
     mockFetchOk();
     fs.writeFileSync.mockImplementation(() => { throw new Error('EACCES'); });
 
-    expect(await getPricingMap()).toEqual({
+    expect(await getPricingMap()).toMatchObject({
       copilot: EXPECTED_COPILOT_MAP,
       fallback: EXPECTED_FALLBACK_MAP,
     });

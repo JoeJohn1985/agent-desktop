@@ -10,6 +10,7 @@ function openFunctionsView(page = _functionsPage) {
   window.functionsViewActive = true;
   window.pluginsViewActive = page === 'plugins';
   window.costsViewActive = page === 'costs';
+  document.getElementById('functionsView').classList.toggle('functions-view--compact', true);
   document.getElementById('functionsView').style.display = 'flex';
   document.getElementById('btnFunctions').setAttribute('aria-expanded', String(page !== 'scheduled'));
   document.getElementById('btnScheduled').setAttribute('aria-expanded', String(page === 'scheduled'));
