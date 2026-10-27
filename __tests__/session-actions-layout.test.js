@@ -4,6 +4,34 @@ const vm = require('vm');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', 'renderer', file), 'utf8');
 
+test('context diagnostics warn once per fallback and keep the measured window visible', () => {
+  const source = read('app.js');
+  const section = source.slice(source.indexOf('function parseContextPercent'), source.indexOf('/** Manual/active-tab'));
+  const tab = { provider: 'copilot' };
+  const btn = {};
+  const showNotification = jest.fn();
+  const context = vm.createContext({
+    tabs: new Map([[1, tab]]), activeTabId: 1,
+    document: { getElementById: () => btn },
+    getTabProvider: t => t.provider, showNotification,
+  });
+  vm.runInContext(section, context);
+  const fallback = 'GitHub Copilot • GPT-6.1 Sol · 23k/272k tokens (8%)';
+  context.setTabContext(1, fallback);
+  context.setTabContext(1, fallback);
+  expect(btn.textContent).toBe('📊 8%');
+  expect(showNotification).toHaveBeenCalledTimes(1);
+  expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('272k'), 'warning');
+  context.setTabContext(1, 'GitHub Copilot • GPT-6.1 Sol · 23k/922k tokens (2%)');
+  expect(tab._contextTierWarning).toBeNull();
+  context.setTabContext(1, fallback);
+  expect(showNotification).toHaveBeenCalledTimes(2);
+  expect(context.getContextTierWarning(fallback, 'claude-code')).toBeNull();
+  expect(context.getContextTierWarning('Context information is not yet available.', 'copilot')).toBeNull();
+  expect(context.getContextTierWarning('Other model · 23k/272k tokens (8%)', 'copilot')).toBeNull();
+  expect(source).toContain('warning ? `⚠ ${warning}\\n\\n${text}` : text');
+});
+
 test('one complete action bar docks immediately before the entire input bar, after auxiliary panels', () => {
   const html = read('index.html');
   expect(html.match(/id="sessionActions"/g)).toHaveLength(1);
@@ -70,11 +98,28 @@ test.each([
 });
 
 test('all three action dropdowns use viewport positioning after mounting', () => {
-  const calls = /appendChild\(dropdown\);\s*positionSessionMenu\(dropdown, btn(?:, true)?\);/g;
+  const calls = /appendChild\(dropdown\);\s*positionSessionMenu\(dropdown, btn(?:, true(?:, true)?)?\);/g;
   expect(read(path.join('modules', 'model-catalog.js')).match(calls)).toHaveLength(2);
   expect(read('app.js').match(calls)).toHaveLength(1);
   const css = read('styles.css');
   expect(css).toMatch(/\.session-actions\s*\{[^}]*flex-wrap: wrap;/);
   expect(css).toMatch(/\.session-actions \.model-dropdown\s*\{[^}]*overflow: auto;/);
   expect(css).toMatch(/\.session-actions \.model-dropdown__submenu\s*\{[^}]*position: fixed;/);
+});
+
+test.each([360, 1200])('context details open above and left within a %s px viewport', width => {
+  const context = vm.createContext({ window: { innerWidth: width, innerHeight: 800, RendererLogic: {} } });
+  vm.runInContext(read(path.join('modules', 'utils.js')), context);
+  const panelWidth = Math.min(520, width - 16);
+  const panel = { style: {}, getBoundingClientRect: () => ({ width: panelWidth }) };
+  const rect = { top: 650, bottom: 680, left: width - 120, right: width - 20 };
+  context.positionSessionMenu(panel, { getBoundingClientRect: () => rect }, true, true);
+  const left = parseFloat(panel.style.left);
+  expect(panel.style.top).toBe('auto');
+  expect(panel.style.bottom).toBe('154px');
+  expect(left).toBeGreaterThanOrEqual(8);
+  expect(left + panelWidth).toBeLessThanOrEqual(width - 8);
+  expect(left).toBeLessThan(rect.left);
+  expect(read('app.js')).toContain('positionSessionMenu(panel, btn, true, true)');
+  expect(read('app.js')).toContain('positionSessionMenu(dropdown, btn, true, true)');
 });

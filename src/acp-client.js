@@ -57,6 +57,9 @@ class AcpClient extends EventEmitter {
   #appliedMode = null; // the mode (full ACP id) currently applied via session/set_mode
   #appliedEffort = null; // the reasoning-effort value currently applied via session/set_config_option('effort')
   #processEffort = null; // reasoning effort used when the current process was spawned
+  #processModel = null;
+  #modelRestartPending = false;
+  #modelResumeRequired = false;
   #currentModel = null;
   #reasoningRestartPending = false; // true after an effort change, applied before the next prompt
   #availableModes = []; // modes.availableModes from the last session/new|load result
@@ -161,6 +164,11 @@ class AcpClient extends EventEmitter {
     this.#appliedEffort = null;
     const effort = this.#effectiveReasoningEffort();
     this.#processEffort = effort;
+    if (!this.#baseArgs && this.#sessionId && this.#processModel !== (this.#options.model || null)) {
+      this.#modelResumeRequired = true;
+    }
+    this.#processModel = this.#options.model || null;
+    this.#modelRestartPending = false;
     this.#reasoningRestartPending = false;
 
     // Non-Copilot ACP adapters (e.g. Claude Code) get their fixed args verbatim;
@@ -307,6 +315,7 @@ class AcpClient extends EventEmitter {
     const sessionId = result?.sessionId ?? result?.session?.id ?? result?.id;
     if (sessionId) {
       this.#sessionId = sessionId;
+      this.#cwd = cwd || this.#cwd;
       this.#sessionLoadedInProcess = true;
       this.#emitToRenderer({ type: 'result', sessionId });
     } else {
@@ -382,6 +391,10 @@ class AcpClient extends EventEmitter {
           if (realCwd && realCwd !== loadCwd) {
             try { return await doLoad(realCwd); } catch (_) { /* fall through to new */ }
           }
+        }
+        if (this.#modelResumeRequired) {
+          this.#emitToRenderer({ type: 'session.restore_failed', data: { sessionId } });
+          throw new Error(`Modellwechsel fehlgeschlagen: Sitzung konnte nicht geladen werden: ${err.message}`, { cause: err });
         }
         console.warn(`[acp:tab${this.#tabId}] session/load failed, falling back to new:`, err.message);
         this.#emitToRenderer({ type: 'session.restore_failed', data: { sessionId } });
@@ -506,7 +519,7 @@ class AcpClient extends EventEmitter {
    * unless already applied. No-op if no session, the level is unchanged from
    * what's already applied, or this backend doesn't speak config options at
    * all — Copilot's effort is a spawn-time flag instead, handled by
-   * #restartForReasoningIfNeeded(). The value itself is already validated
+   * #restartForOptionsIfNeeded(). The value itself is already validated
    * against the fixed low/medium/high/xhigh/max set in the constructor/
    * updateOptions() — the same set for every provider, since Anthropic's
    * effort levels aren't gated per model in practice.
@@ -542,21 +555,27 @@ class AcpClient extends EventEmitter {
   // ── Prompt + Streaming ───────────────────────────────────────
 
   /**
-   * Recreates the Copilot process when its spawn-time reasoning effort changed.
+   * Recreates the Copilot process when spawn-time reasoning or model changed.
    * The current session ID survives the restart and is loaded into the fresh
    * process before the caller applies model/mode and sends the prompt.
    */
-  async #restartForReasoningIfNeeded() {
-    if (!this.#reasoningRestartPending) return;
+  async #restartForOptionsIfNeeded() {
+    if (!this.#reasoningRestartPending && !this.#modelRestartPending) return;
     if (this.#state === 'busy') {
-      throw new Error('Reasoning kann während eines laufenden Prompts nicht gewechselt werden');
+      throw new Error('Modell/Reasoning kann während eines laufenden Prompts nicht gewechselt werden');
     }
 
     const sessionId = this.#sessionId;
+    this.#modelResumeRequired = this.#modelResumeRequired || this.#modelRestartPending;
     this.#reasoningRestartPending = false;
     await this.stop();
     await this.start();
-    if (sessionId) await this.loadSession(sessionId);
+    if (sessionId) {
+      await this.loadSession(sessionId);
+      if (this.#modelResumeRequired && this.#sessionId !== sessionId) {
+        throw new Error('Modellwechsel fehlgeschlagen: ursprüngliche Sitzung konnte nicht wiederhergestellt werden');
+      }
+    }
   }
 
   /**
@@ -576,16 +595,20 @@ class AcpClient extends EventEmitter {
     if (!this.#sessionId) {
       throw new Error('No active session. Call newSession() or loadSession() first.');
     }
-    await this.#restartForReasoningIfNeeded();
+    await this.#restartForOptionsIfNeeded();
     // After a process restart the live process has no session loaded yet,
     // even though we remember the sessionId. Reload it before prompting.
     if (!this.#sessionLoadedInProcess) {
       await this.loadSession(this.#sessionId);
     }
 
-    // Ensure the session uses the selected model. session/load restores the
-    // session's originally-stored model and ignores the --model spawn flag,
-    // so we must explicitly set it here (also covers runtime model switches).
+    if (this.#modelResumeRequired) {
+      if (this.#appliedModel !== this.#options.model) {
+        throw new Error('Modellwechsel fehlgeschlagen: CLI bestätigt das angeforderte Startmodell nicht');
+      }
+      this.#modelResumeRequired = false;
+    }
+    // Copilot new/load confirms the spawn model; adapters retain live selection.
     await this.#applyModel();
     // Apply the selected session mode (agent/plan/autopilot) the same way.
     await this.#applyMode();
@@ -1163,6 +1186,10 @@ class AcpClient extends EventEmitter {
       const modelOption = (result?.configOptions || []).find((o) => o.id === 'model');
       modelId = modelOption?.currentValue;
     }
+    // Copilot 1.0.104 resets long_context even when set_model selects the
+    // already active model. Trust new/load's confirmation, not the spawn flag.
+    // Other adapters keep their policy.
+    if (!this.#baseArgs) this.#appliedModel = modelId || null;
     if (!modelId) return;
     this.#currentModel = modelId;
     // Resolve the human-readable name if available.
@@ -1340,6 +1367,9 @@ class AcpClient extends EventEmitter {
     if (nextOptions.env && typeof nextOptions.env === 'object') this.#extraEnv = nextOptions.env;
     const nextEffort = this.#effectiveReasoningEffort();
     if (this.#process) this.#reasoningRestartPending = this.#processEffort !== nextEffort;
+    if (this.#process && !this.#baseArgs) {
+      this.#modelRestartPending = this.#processModel !== (this.#options.model || null);
+    }
   }
 
   get model() { return this.#appliedModel || this.#currentModel || this.#options.model; }

@@ -56,6 +56,10 @@ function createAutoCompaction({ getClient, getSettings, send, getPriceThreshold 
   const turns = new Map();
   const cancellations = new Map();
 
+  function diagnose(tabId, stage, details = {}) {
+    log(`[auto-compact:tab${tabId}] ${JSON.stringify({ stage, ...details })}`);
+  }
+
   function enqueue(tabId, operation) {
     const previous = queues.get(tabId) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -81,12 +85,6 @@ function createAutoCompaction({ getClient, getSettings, send, getPriceThreshold 
     if (channel !== 'agent:event') return;
     const type = event?.type || '';
     const data = event?.data || {};
-    if (/permission|question|user_input|error|auth/.test(type)
-      || /ask.?user|question|user.?input/i.test(data.toolName || '')
-      || (type === 'tool.execution_complete' && data.success === false)) turn.blocked = true;
-    if (type === 'assistant.message_delta' || type === 'assistant.message') {
-      turn.text += data.deltaContent || data.content || '';
-    }
     if (type === 'tool.execution_start') turn.tools.add(data.toolCallId);
     if (type === 'tool.execution_complete') turn.tools.delete(data.toolCallId);
     if (type === 'session.usage_update' && !data.cost
@@ -98,32 +96,59 @@ function createAutoCompaction({ getClient, getSettings, send, getPriceThreshold 
 
   async function finish(tabId, turn, result) {
     turn.phase = 'maintenance';
+    diagnose(tabId, 'prompt-settled', {
+      blocked: turn.blocked, done: turn.done, openTools: turn.tools.size,
+      stopReason: result?.stopReason ?? null,
+    });
     if (turn.blocked || turn.done !== 0 || turn.tools.size
-      || (result?.stopReason && result.stopReason !== 'end_turn')
-      || /\?|bitte (bestätig|anmeld|freigeb|entscheide)|möchtest du|please (confirm|sign in|approve)/i.test(turn.text)) return;
+      || (result?.stopReason && result.stopReason !== 'end_turn')) {
+      diagnose(tabId, 'skipped', { reason: turn.blocked ? 'cancelled-or-failed'
+        : turn.done !== 0 ? 'missing-successful-done'
+          : turn.tools.size ? 'open-tools' : 'incomplete-stop-reason' });
+      return;
+    }
     const client = getClient(tabId);
-    if (!client || client.state !== 'ready') return;
+    if (!client || client.state !== 'ready') {
+      diagnose(tabId, 'skipped', { reason: 'client-not-ready', state: client?.state ?? null });
+      return;
+    }
     try {
       const model = client.model || client.__model;
       const pricing = client.__provider === 'copilot' ? await getPriceThreshold(model) : null;
       const priceThreshold = typeof pricing === 'number' ? pricing : pricing?.threshold;
       const policy = getPolicy(getSettings(), client.__provider, model, pricing);
-      if (!policy.enabled) return;
+      diagnose(tabId, 'policy', { provider: client.__provider, model, policy, priceThreshold });
+      if (!policy.enabled) {
+        diagnose(tabId, 'skipped', { reason: 'disabled' });
+        return;
+      }
       // Never infer Copilot's context window from its model name or token totals.
+      diagnose(tabId, 'context-requested');
       const context = await client.silentCommand('/context');
       send('agent:event', tabId, { type: 'session.context_updated', data: { text: context } });
-      if (turn.blocked) return;
+      if (turn.blocked) {
+        diagnose(tabId, 'skipped', { reason: 'blocked-during-context' });
+        return;
+      }
       const percent = parseContextPercent(context) ?? turn.percent;
       const tokens = parseContextTokens(context) || turn.context;
       const warning = compactionCostWarning(policy, priceThreshold, tokens?.size);
       if (warning) send('agent:event', tabId, { type: 'session.auto_compaction', data: { status: 'warning', message: warning } });
       const measured = policy.mode === 'tokens' ? tokens?.used : percent;
+      diagnose(tabId, 'measurement', {
+        percent, used: tokens?.used ?? null, size: tokens?.size ?? null,
+        mode: policy.mode || 'percent', threshold: policy.mode === 'tokens' ? policy.thresholdTokens : policy.thresholdPercent,
+      });
       if (measured == null) {
         log(`[auto-compact:tab${tabId}] Auslastung unbekannt — übersprungen.`);
         send('agent:event', tabId, { type: 'session.auto_compaction', data: { status: 'skipped', reason: 'Auslastung unbekannt' } });
         return;
       }
-      if (measured < (policy.mode === 'tokens' ? policy.thresholdTokens : policy.thresholdPercent)) return;
+      if (measured < (policy.mode === 'tokens' ? policy.thresholdTokens : policy.thresholdPercent)) {
+        diagnose(tabId, 'skipped', { reason: 'below-threshold' });
+        return;
+      }
+      diagnose(tabId, 'compact-requested');
       send('agent:event', tabId, { type: 'session.auto_compaction', data: { status: 'started', percent, used: tokens?.used } });
       const compact = await client.silentCommand('/compact');
       if (turn.blocked) throw new Error('Verdichtung abgebrochen oder Aufmerksamkeit erforderlich.');
@@ -134,6 +159,7 @@ function createAutoCompaction({ getClient, getSettings, send, getPriceThreshold 
       const after = await client.silentCommand('/context');
       send('agent:event', tabId, { type: 'session.context_updated', data: { text: after } });
       send('agent:event', tabId, { type: 'session.auto_compaction', data: { status: 'completed' } });
+      diagnose(tabId, 'completed');
     } catch (error) {
       log(`[auto-compact:tab${tabId}] ${error.message}`);
       send('agent:event', tabId, { type: 'session.auto_compaction', data: { status: 'error', message: error.message } });
@@ -147,12 +173,13 @@ function createAutoCompaction({ getClient, getSettings, send, getPriceThreshold 
     return new Promise((resolve, reject) => {
       enqueue(tabId, async () => {
         if ((cancellations.get(tabId) || 0) !== generation) throw new Error('Cancelled');
-        const turn = { phase: 'setup', blocked: false, done: null, text: '', percent: null, tools: new Set() };
+        const turn = { phase: 'setup', blocked: false, done: null, percent: null, tools: new Set() };
         turns.set(tabId, turn);
         try {
           const result = await operation(() => {
             if (turn.blocked || (cancellations.get(tabId) || 0) !== generation) throw new Error('Cancelled');
             turn.phase = 'prompt';
+            diagnose(tabId, 'prompt-started');
             resolve(tabId);
           });
           await finish(tabId, turn, result);

@@ -2,7 +2,7 @@
 // Loaded before all other modules — provides common helpers
 'use strict';
 
-function positionSessionMenu(menu, button, preferAbove = false) {
+function positionSessionMenu(menu, button, preferAbove = false, alignRight = false) {
   const margin = 8;
   const gap = 4;
   const rect = button.getBoundingClientRect();
@@ -15,7 +15,9 @@ function positionSessionMenu(menu, button, preferAbove = false) {
   menu.style.maxHeight = `${openAbove ? above : below}px`;
   menu.style.top = openAbove ? 'auto' : `${rect.bottom + gap}px`;
   menu.style.bottom = openAbove ? `${window.innerHeight - rect.top + gap}px` : 'auto';
-  menu.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - menu.getBoundingClientRect().width - margin))}px`;
+  const width = menu.getBoundingClientRect().width;
+  const left = alignRight ? rect.right - width : rect.left;
+  menu.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - width - margin))}px`;
 }
 
 function positionSessionReasoningMenu(submenu, menu, item) {

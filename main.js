@@ -642,7 +642,6 @@ async function runAgentPrompt(tabId, prompt, options, started) {
   }
 
   if (provider === 'copilot') client.__mcpRevision = appMcp.revision;
-  client.__model = options.model;
 
   // No app-side context injection for ACP providers. Both Copilot and Claude
   // Code discover their own skills and agents from their native folders (see
@@ -657,7 +656,10 @@ async function runAgentPrompt(tabId, prompt, options, started) {
 
   // Send prompt (async — events stream to renderer via AcpClient)
   started();
-  return client.prompt(prompt).catch((err) => {
+  return client.prompt(prompt).then(result => {
+    client.__model = client.model;
+    return result;
+  }).catch((err) => {
     // Cancellation is a normal user action, not an error.
     if (err.message === 'Cancelled') return;
     if (scheduledTabs.has(tabId)) sendToRenderer('agent:event', tabId, { type: 'error', data: { message: err.message } });

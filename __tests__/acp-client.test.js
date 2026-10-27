@@ -84,7 +84,7 @@ function parseStdin(written) {
  * @param {string[]} written
  * @param {{sessionId?: string, respondToPrompt?: boolean}} [options]
  */
-function installLifecycleResponder(proc, written, { sessionId = 's1', respondToPrompt = true } = {}) {
+function installLifecycleResponder(proc, written, { sessionId = 's1', respondToPrompt = true, model, loadError = false } = {}) {
   proc.stdin = new Writable({
     write(chunk, enc, cb) {
       const line = chunk.toString();
@@ -97,10 +97,14 @@ function installLifecycleResponder(proc, written, { sessionId = 's1', respondToP
             result = { status: 'ok' };
             break;
           case 'session/new':
-            result = { sessionId };
+            result = { sessionId, ...(model ? { models: { currentModelId: model } } : {}) };
             break;
           case 'session/load':
-            result = {};
+            if (loadError) {
+              setImmediate(() => sendResponse(proc, { jsonrpc: '2.0', id: request.id, error: { code: -32603, message: 'load failed' } }));
+              break;
+            }
+            result = model ? { models: { currentModelId: model } } : {};
             break;
           case 'session/set_model':
           case 'session/set_mode':
@@ -1236,6 +1240,72 @@ describe('AcpClient', () => {
   // ════════════════════════════════════════════════════════════════
 
   describe('Modell-Anwendung', () => {
+    it('behält die Modellanwendung für andere ACP-Adapter bei', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, {
+        newSessionConfigOptions: [{ id: 'model', currentValue: 'test-model' }],
+      });
+      mockSpawnFn.mockReturnValue(proc);
+      const client = new AcpClient(1, jest.fn(), {
+        cwd: 'C:\\repo', model: 'test-model', baseArgs: ['--adapter'], useConfigOptions: true,
+      });
+      await client.start();
+      await client.newSession();
+      await client.prompt('hi');
+      expect(parseStdin(written).find(m => m.method === 'session/set_config_option')?.params)
+        .toEqual({ sessionId: 's1', configId: 'model', value: 'test-model' });
+    });
+
+    it.each(['new', 'load'])('überspringt redundantes Copilot set_model nach %s', async operation => {
+      const proc = createMockProcess();
+      const written = [];
+      proc.stdin = new Writable({
+        write(chunk, enc, cb) {
+          const request = JSON.parse(chunk.toString().trim());
+          written.push(chunk.toString());
+          const result = request.method === 'initialize' ? {}
+            : ['session/new', 'session/load'].includes(request.method)
+              ? { sessionId: 's1', models: { currentModelId: 'gpt-6.1-sol' } }
+              : { stopReason: 'end_turn' };
+          setImmediate(() => sendResponse(proc, { jsonrpc: '2.0', id: request.id, result }));
+          cb();
+        },
+      });
+      mockSpawnFn.mockReturnValue(proc);
+      const client = new AcpClient(1, jest.fn(), { cwd: 'C:\\repo', model: 'gpt-6.1-sol' });
+      await client.start();
+      if (operation === 'new') await client.newSession();
+      else await client.loadSession('s1');
+      await client.prompt('hi');
+      expect(parseStdin(written).filter(m => m.method === 'session/set_model')).toHaveLength(0);
+    });
+
+    it('setzt ein abweichendes wiederhergestelltes Copilot-Modell weiterhin explizit', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installConfigOptionsResponder(proc, written, {
+        newSessionConfigOptions: [{ id: 'model', currentValue: 'gpt-6-luna' }],
+      });
+      mockSpawnFn.mockReturnValue(proc);
+      const client = new AcpClient(1, jest.fn(), { cwd: 'C:\\repo', model: 'gpt-6.1-sol' });
+      // This responder also handles session/set_config_option, but Copilot must
+      // use session/set_model, so install its response as well.
+      const write = proc.stdin._write.bind(proc.stdin);
+      proc.stdin._write = (chunk, enc, cb) => {
+        const request = JSON.parse(chunk.toString());
+        if (request.method === 'session/set_model') {
+          written.push(chunk.toString());
+          setImmediate(() => sendResponse(proc, { jsonrpc: '2.0', id: request.id, result: {} }));
+          cb();
+        } else write(chunk, enc, cb);
+      };
+      await client.start();
+      await client.loadSession('s1');
+      await client.prompt('hi');
+      expect(parseStdin(written).find(m => m.method === 'session/set_model')?.params.modelId).toBe('gpt-6.1-sol');
+    });
+
     it('prompt() sendet session/set_model mit dem konfigurierten Modell vor session/prompt', async () => {
       const proc = createMockProcess();
       const written = [];
@@ -1319,6 +1389,141 @@ describe('AcpClient', () => {
   // ════════════════════════════════════════════════════════════════
 
   describe('Reasoning-Effort-Lifecycle', () => {
+    it('behält Live-Modellwechsel anderer ACP-Adapter ohne Neustart bei', async () => {
+      const proc = createMockProcess();
+      const written = [];
+      installLifecycleResponder(proc, written);
+      mockSpawnFn = jest.fn(() => proc);
+      client = new AcpClient('tab-1', mockSendToRenderer, { baseArgs: ['--acp'], model: 'first' });
+      await client.start();
+      await client.newSession();
+      await client.prompt('eins');
+      client.updateOptions({ model: 'second' });
+      await client.prompt('zwei');
+      expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+      expect(parseStdin(written).filter(m => m.method === 'session/set_model').map(m => m.params.modelId))
+        .toEqual(['first', 'second']);
+      const stopP = client.stop();
+      proc.emit('close', 0, null);
+      await stopP;
+    });
+
+    it('übernimmt einen Modellwechsel auch im bereits anstehenden MCP/Approval-Neustart', async () => {
+      const first = createMockProcess();
+      const second = createMockProcess();
+      const written = [];
+      installLifecycleResponder(first, [], { model: 'first' });
+      installLifecycleResponder(second, written, { model: 'second' });
+      mockSpawnFn = jest.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+      client = new AcpClient('tab-1', mockSendToRenderer, { model: 'first' });
+      await client.start();
+      await client.newSession();
+      const stopped = client.stop();
+      first.emit('close', 0, null);
+      await stopped;
+      client.updateOptions({ model: 'second', effort: 'max' });
+      await client.start();
+      await client.loadSession('s1');
+      await client.prompt('weiter');
+      expect(mockSpawnFn).toHaveBeenCalledTimes(2);
+      expect(parseStdin(written).some(m => m.method === 'session/set_model')).toBe(false);
+      const stopP = client.stop();
+      second.emit('close', 0, null);
+      await stopP;
+    });
+
+    it.each([false, true])('wechselt Copilot-Modell per einem Restart mit Resume (Reasoningwechsel: %s)', async changeEffort => {
+      const proc1 = createMockProcess();
+      const proc2 = createMockProcess();
+      const written1 = [];
+      const written2 = [];
+      installLifecycleResponder(proc1, written1, { model: 'gpt-6.1-sol', respondToPrompt: false });
+      installLifecycleResponder(proc2, written2, { model: 'claude-sonnet-5.5' });
+      mockSpawnFn = jest.fn().mockReturnValueOnce(proc1).mockReturnValueOnce(proc2);
+      client = new AcpClient('tab-1', mockSendToRenderer, {
+        model: 'gpt-6.1-sol', effort: 'high',
+        additionalMcpConfig: 'C:\\data\\mcp.json',
+      });
+      await client.start();
+      await client.newSession('C:\\original');
+      const active = client.prompt('laufend');
+      await flushPromises();
+      client.updateOptions({ model: 'claude-sonnet-5.5', ...(changeEffort ? { effort: 'max' } : {}) });
+      expect(proc1.kill).not.toHaveBeenCalled();
+      await expect(client.prompt('parallel')).rejects.toThrow('laufenden Prompts');
+      expect(proc1.kill).not.toHaveBeenCalled();
+      const request = parseStdin(written1).find(m => m.method === 'session/prompt');
+      sendResponse(proc1, { jsonrpc: '2.0', id: request.id, result: { stopReason: 'end_turn' } });
+      await active;
+      const next = client.prompt('weiter');
+      await flushPromises();
+      proc1.emit('close', 0, null);
+      await next;
+      expect(mockSpawnFn).toHaveBeenCalledTimes(2);
+      expect(mockSpawnFn.mock.calls[1][1]).toEqual(expect.arrayContaining([
+        '--model', 'claude-sonnet-5.5', '--context', 'long_context',
+        '--reasoning-effort', changeEffort ? 'max' : 'high',
+        '--additional-mcp-config', '@C:\\data\\mcp.json',
+      ]));
+      expect(parseStdin(written2).find(m => m.method === 'session/load').params)
+        .toEqual({ sessionId: 's1', cwd: 'C:\\original', mcpServers: [] });
+      expect([...parseStdin(written1), ...parseStdin(written2)].some(m => m.method === 'session/set_model')).toBe(false);
+      expect(client.model).toBe('claude-sonnet-5.5');
+      client.updateOptions({ model: 'claude-sonnet-5.5' });
+      await client.prompt('identisch');
+      expect(mockSpawnFn).toHaveBeenCalledTimes(2);
+      const stopP = client.stop();
+      proc2.emit('close', 0, null);
+      await stopP;
+    });
+
+    it.each(['gpt-6.1-sol', undefined])('meldet unpassende Modellbestätigung (%s) nach Restart ohne set_model oder Prompt', async model => {
+      const first = createMockProcess();
+      const second = createMockProcess();
+      const written = [];
+      installLifecycleResponder(first, [], { model: 'gpt-6.1-sol' });
+      installLifecycleResponder(second, written, { model });
+      mockSpawnFn = jest.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+      client = new AcpClient('tab-1', mockSendToRenderer, { model: 'gpt-6.1-sol' });
+      await client.start();
+      await client.newSession();
+      client.updateOptions({ model: 'claude-sonnet-5.5' });
+      const next = client.prompt('weiter');
+      const rejected = expect(next).rejects.toThrow('Startmodell');
+      await flushPromises();
+      first.emit('close', 0, null);
+      await rejected;
+      expect(parseStdin(written).some(m => ['session/set_model', 'session/prompt'].includes(m.method))).toBe(false);
+      const stopP = client.stop();
+      second.emit('close', 0, null);
+      await stopP;
+    });
+
+    it('ersetzt bei fehlgeschlagenem Modellwechsel-Resume nicht die ursprüngliche History', async () => {
+      const first = createMockProcess();
+      const second = createMockProcess();
+      const written = [];
+      installLifecycleResponder(first, [], { model: 'first' });
+      installLifecycleResponder(second, written, { loadError: true });
+      mockSpawnFn = jest.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+      client = new AcpClient('tab-1', mockSendToRenderer, { model: 'first' });
+      await client.start();
+      await client.newSession();
+      client.updateOptions({ model: 'second' });
+      const next = client.prompt('weiter');
+      const rejected = expect(next).rejects.toThrow('Sitzung konnte nicht geladen');
+      await flushPromises();
+      first.emit('close', 0, null);
+      await rejected;
+      expect(client.sessionId).toBe('s1');
+      expect(parseStdin(written).some(m => ['session/new', 'session/set_model', 'session/prompt'].includes(m.method))).toBe(false);
+      expect(mockSendToRenderer).toHaveBeenCalledWith('agent:event', 'tab-1',
+        expect.objectContaining({ type: 'session.restore_failed' }));
+      const stopP = client.stop();
+      second.emit('close', 0, null);
+      await stopP;
+    });
+
     it('startet bei einer geänderten Stufe erst vor dem nächsten Prompt neu', async () => {
       const proc1 = createMockProcess();
       const proc2 = createMockProcess();

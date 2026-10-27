@@ -29,9 +29,11 @@ Modelle ohne Preisstufe sowie bereits gespeicherte Prozent-Policies.
   und bei Auslastung groesser oder gleich Schwellwert verdichten.
   Ein Antwortlauf umfasst alle zugehoerigen Werkzeugaufrufe, nicht einzelne
   Nachrichten oder Tool-Ergebnisse.
-- REQ-4: Laufende, abgebrochene, fehlgeschlagene oder auf Freigaben/Rueckfragen
-  wartende Aufgaben SHALL nicht automatisch verdichtet werden.
-  Ein normales Turn-Ende ist keine Garantie fachlicher Aufgabenerledigung.
+- REQ-4 (korrigiert 27.10.2026): Laufende, abgebrochene oder als Ganzes
+  fehlgeschlagene Antwortlaeufe SHALL nicht automatisch verdichtet werden.
+  Nach erfolgreichem Abschluss des gesamten Prompt-Aufrufs SHALL weder der
+  Antworttext noch vorherige Freigaben, Rueckfragen oder einzelne
+  Werkzeugfehler die Pruefung verhindern. Noch offene Tools bleiben gesperrt.
 - REQ-5: Die Regel SHALL fuer Hintergrundtabs und geplante Sitzungen gelten,
   ohne erfolgreiche Hintergrundlaeufe in den Vordergrund zu holen.
 - REQ-6: Pruefung, Compact und Kontextaktualisierung SHALL serialisiert sein.

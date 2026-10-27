@@ -1084,6 +1084,15 @@ function parseContextPercent(text) {
   return value != null && value >= 0 && value <= 100 ? value : null;
 }
 
+function getContextTierWarning(text, provider) {
+  if (provider !== 'copilot') return null;
+  const source = String(text || '');
+  // Only flag the standard-window fallback reproduced for this exact model.
+  if (!/GPT-6\.1\s+Sol[^\n]*\/272(?:[.,]0)?k\s+tokens/i.test(source)
+      && !/GPT-6\.1\s+Sol[^\n]*\/272000\s+tokens/i.test(source)) return null;
+  return 'Long Context angefordert, aber die CLI meldet für GPT-6.1 Sol nur 272k Tokens (im isolierten Long-Context-Vergleich: 922k). Das Startflag garantiert kein erweitertes Kontextfenster.';
+}
+
 /** Set the context button to a given percentage (null → default label). */
 function updateContextButtonPct(pct) {
   const btn = document.getElementById('btnContextInfo');
@@ -1101,7 +1110,12 @@ function updateContextButtonPct(pct) {
 function setTabContext(tabId, text) {
   const tab = tabs.get(tabId);
   const pct = parseContextPercent(text);
-  if (tab) tab._contextPercent = pct;
+  if (tab) {
+    tab._contextPercent = pct;
+    const warning = getContextTierWarning(text, getTabProvider(tab));
+    if (warning && tab._contextTierWarning !== warning) showNotification(warning, 'warning');
+    tab._contextTierWarning = warning;
+  }
   if (tabId === activeTabId) updateContextButtonPct(pct);
 }
 
@@ -1179,10 +1193,12 @@ function showContextPanel(text) {
     </div>
     <pre class="context-panel__body"></pre>
   `;
-  panel.querySelector('.context-panel__body').textContent = text;
+  const warning = getContextTierWarning(text, getTabProvider(tabs.get(activeTabId)));
+  panel.querySelector('.context-panel__body').textContent = warning ? `⚠ ${warning}\n\n${text}` : text;
   panel.querySelector('.context-panel__close').addEventListener('click', () => panel.remove());
 
   btn.closest('.model-select-wrapper').appendChild(panel);
+  positionSessionMenu(panel, btn, true, true);
 
   const closeOnClick = (e) => {
     if (!panel.contains(e.target) && e.target !== btn) {
@@ -1234,7 +1250,7 @@ function initContextInfo() {
     });
 
     btn.closest('.model-select-wrapper').appendChild(dropdown);
-    positionSessionMenu(dropdown, btn);
+    positionSessionMenu(dropdown, btn, true, true);
 
     activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== btn) {

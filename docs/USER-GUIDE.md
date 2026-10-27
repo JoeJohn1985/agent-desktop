@@ -500,11 +500,11 @@ Token rules need a current used-token measurement, not lifetime input/output
 totals. Invalid values and save failures are displayed.
 
 The app checks only after the complete successful response, including every
-tool, has settled. It skips running, cancelled, failed, tool-limit-exhausted
-or attention/question/approval-related responses. Permission and question
-signals conservatively suppress compaction for that response even if later
-answered. Natural-language questions are recognized heuristically, so this is
-not a guarantee that the underlying task is factually complete.
+tool, has settled. It skips running, cancelled, failed or tool-limit-exhausted
+response runs. Questions in the response, earlier permission requests and
+individual tool failures do not suppress the check after the whole prompt
+has completed successfully. Completion is determined by the backend lifecycle,
+not by interpreting the answer text.
 
 This applies equally to background tabs and scheduled sessions without
 bringing successful runs to the foreground. Prompts and silent commands wait
@@ -518,8 +518,26 @@ the largest window for any model (CLI ≥1.0.95 applies it to new and resumed
 ACP sessions). Verified with CLI 1.0.98: a model without a larger window
 (GPT-5.3-Codex) starts and runs normally and reports its 272k default window,
 so the flag is a safe request, not a guarantee. The effective window is always
-the one reported by `/context`. Model changes need no restart for this.
-No window sizes are hardcoded. Effective capacity remains backend-reported.
+the one reported by `/context`. With CLI 1.0.104, even selecting the already
+active model via ACP resets Sol from 922k to 272k. The app now trusts the model
+confirmed by new/load and skips that redundant selection. Isolated tests with
+the corrected app client report 922k for both new and resumed Sol sessions.
+Real Copilot model changes now restart only the tab's CLI process before the
+next prompt, then reload the same session with the selected `--model` and
+`--context long_context`, without ACP model selection. Running requests are
+not interrupted. Identical models do not restart; a simultaneous reasoning
+change shares the same restart. Existing MCP/approval restarts also use the
+new selection. A failed resume or missing/contradictory model confirmation
+is reported as an error rather than silently replacing history or selecting
+the model through ACP. Other providers retain their existing behavior.
+An isolated CLI 1.0.104 test verified Sol → Sonnet 5.5 → Sol with `/context`
+936k → 922k; Sonnet's ACP usage separately reported 872k. This is not a
+provider-window guarantee for other models or CLI versions.
+The existing context check warns once per observed Sol 272k fallback, and the
+context detail panel retains that warning alongside the actual CLI output.
+This diagnostic uses the reproduced Sol comparison, not a universal model
+capacity assumption; other models are not flagged based on their window size.
+Effective capacity and compaction calculations remain backend-reported.
 Missing usage explicitly skips automatic compaction; no model-window guess
 is used for Copilot. Native CLI compaction and manual **Compact** remain
 independent of this setting.

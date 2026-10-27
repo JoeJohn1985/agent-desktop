@@ -31,9 +31,10 @@ sendAgentPrompt-Aufrufer (interaktiv und geplant) laufen ueber dieselbe Queue.
 Das Streaming-IPC-ACK bleibt frueh, die Queue bleibt jedoch bis zum Aufloesen
 des vollstaendigen prompt-Promise plus Wartung reserviert. Fruehes ACP
 agent_turn_end/done reicht nicht fuer den Ausloeser. Offene Tools,
-Fehler/Abbruch, Freigabe-/Frage-/Auth-Signale und erkennbare Rueckfragen
-blockieren den Lauf konservativ; auch beantwortete Freigaben verhindern in
-diesem Lauf vorsichtshalber automatische Verdichtung.
+Abbruch und fehlgeschlagene Prompt-Abschluesse blockieren den Lauf.
+Korrektur 27.10.2026: Antworttext, vorherige Freigabe-/Frage-/Auth-Signale
+und einzelne Werkzeugfehler sperren erfolgreiche Antwortlaeufe nicht.
+Fehler oder Aufmerksamkeit waehrend der Wartungsbefehle bleiben abgesichert.
 
 Vorhandene /context- und /compact-Anbindungen wiederverwenden. Je Sitzung
 exklusiv mit Prompts und stillen Befehlen koordinieren. Nach Compact Kontext
@@ -60,7 +61,7 @@ Stille Command-Abschluesse werden vom Ausloeser ignoriert; keine Wiederholung
 innerhalb eines Laufs. Stop sperrt laufende Pruefung und wartende Prompts.
 
 Risiken: Provider unterscheiden sich in Kontextereignissen und Slash-Support.
-Rueckfragen koennen nur anhand verfuegbarer Statussignale erkannt werden;
-unstrukturierte Rueckfragen bleiben gegebenenfalls heuristisch.
+Die Abschlussentscheidung beruht auf dem Backend-Lebenszyklus, nicht auf
+einer heuristischen Interpretation der fachlichen Aufgabenerledigung.
 Die native Copilot-CLI kann weiterhin waehrend einer Aufgabe verdichten;
 die App kann diese Garantie nur fuer ihren eigenen Ausloeser geben.

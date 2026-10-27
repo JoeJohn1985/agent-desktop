@@ -139,6 +139,28 @@ describe('Provider-Policy', () => {
 });
 
 describe('Abschlusskoordination', () => {
+  test('Diagnose benennt fehlenden Abschluss ohne Antworttext zu protokollieren', async () => {
+    const h = harness();
+    await h.prompt(async () => {
+      h.event('assistant.message', { content: 'PRIVATE_RESPONSE' });
+    });
+    await h.drain();
+    const logs = h.log.mock.calls.map(([line]) => line).join('\n');
+    expect(logs).toContain('"reason":"missing-successful-done"');
+    expect(logs).not.toContain('PRIVATE_RESPONSE');
+    expect(h.commands()).toEqual([]);
+  });
+  test('Diagnose dokumentiert Schwelle, Messung und erfolgreiche Verdichtung', async () => {
+    const h = harness();
+    await h.prompt();
+    await h.drain();
+    const logs = h.log.mock.calls.map(([line]) => line).join('\n');
+    expect(logs).toContain('"stage":"prompt-started"');
+    expect(logs).toContain('"stage":"prompt-settled"');
+    expect(logs).toContain('"stage":"policy"');
+    expect(logs).toContain('"percent":50');
+    expect(logs).toContain('"stage":"completed"');
+  });
   test.each(PROVIDERS)('%s verdichtet genau einmal nach vollem Antwortlauf', async provider => {
     const h = harness(provider);
     await h.prompt(async () => {
@@ -182,18 +204,47 @@ describe('Abschlusskoordination', () => {
     expect(h.commands()).toEqual([]);
   });
   test.each([
-    ['error', { message: 'kaputt' }],
-    ['session.permission_request', {}],
-    ['session.question', {}],
     ['tool.execution_start', { toolCallId: 'pending' }],
-    ['tool.execution_complete', { success: false }],
     ['tool.execution_start', { toolName: 'ask_user', toolCallId: 'ask' }],
-    ['assistant.message_delta', { deltaContent: 'Möchtest du fortfahren?' }],
-  ])('kein Compact bei %s / Aufmerksamkeit', async (type, data) => {
+  ])('kein Compact bei offenem Tool %s', async (type, data) => {
     const h = harness();
     await h.prompt(async () => { h.event(type, data); h.done(); });
     await h.drain();
     expect(h.commands()).toEqual([]);
+  });
+  test.each([
+    ['error', { message: 'zwischenzeitlicher Fehler' }],
+    ['session.permission_request', {}],
+    ['session.question', {}],
+    ['session.auth_required', {}],
+    ['tool.execution_complete', { toolCallId: 'failed', success: false }],
+    ['assistant.message_delta', { deltaContent: 'Möchtest du fortfahren?' }],
+    ['assistant.message', { content: 'Please confirm. Bitte anmelden.' }],
+  ])('abgeschlossener Antwortlauf verdichtet trotz vorherigem %s', async (type, data) => {
+    const h = harness();
+    const gate = deferred();
+    await h.prompt(async () => {
+      h.event(type, data);
+      h.done();
+      await gate.promise;
+      h.event('assistant.message', { content: 'Abschliessende Antwort.' });
+      return { stopReason: 'end_turn' };
+    });
+    expect(h.commands()).toEqual([]);
+    gate.resolve();
+    await h.drain();
+    expect(h.commands()).toEqual(['/context', '/compact', '/context']);
+  });
+  test('beantwortetes Fragetool verhindert Compact nach Abschluss nicht', async () => {
+    const h = harness();
+    await h.prompt(async () => {
+      h.event('tool.execution_start', { toolName: 'ask_user', toolCallId: 'ask' });
+      h.event('tool.execution_complete', { toolName: 'ask_user', toolCallId: 'ask', success: true });
+      h.done();
+      return { stopReason: 'end_turn' };
+    });
+    await h.drain();
+    expect(h.commands()).toEqual(['/context', '/compact', '/context']);
   });
   test('fehlende Auslastung ist expliziter Skip, keine feste Copilot-Fenstergröße', async () => {
     const h = harness();

@@ -2326,15 +2326,14 @@ button.section-menu__item:focus-visible { outline: 2px solid var(--accent); outl
 
 /* ── Context Info Panel ───────────────────────────────── */
 .context-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   z-index: 1000;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  min-width: 380px;
+  width: 520px;
+  min-width: 0;
   max-width: 520px;
   max-height: 60vh;
   display: flex;
@@ -2365,6 +2364,7 @@ button.section-menu__item:focus-visible { outline: 2px solid var(--accent); outl
   color: var(--text-primary);
 }
 .context-panel__body {
+  min-height: 0;
   padding: 10px 12px;
   margin: 0;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
