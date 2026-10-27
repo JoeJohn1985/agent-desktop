@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('desktop', {
     claudeCodeAuthStatus: () => ipcRenderer.invoke('claudecode:authStatus'),
     /** @ipc claudecode:logout — Opens a terminal window running `claude auth logout`. @returns {Promise<{success:boolean, pendingInTerminal:boolean, error:string|null}>} */
     claudeCodeLogout: () => ipcRenderer.invoke('claudecode:logout'),
+    claudeCodeLogin: () => ipcRenderer.invoke('claudecode:login'),
     /** @ipc claudecode:testSsh — Reachability check for the remote Claude Code provider. @param {string} host @param {string} [cwd] @returns {Promise<{ok:boolean, nodeVersion?:string, claudeVersion?:string, cwdOk?:boolean, error?:string}>} */
     testClaudeCodeSsh: (host, cwd) => ipcRenderer.invoke('claudecode:testSsh', host, cwd),
     /** @ipc claudecode:sshListDir — Lists remote subdirectories (remote folder picker). @param {string} host @param {string} [dirPath] @returns {Promise<{ok:boolean, path?:string, dirs?:string[], error?:string}>} */
@@ -377,6 +378,10 @@ contextBridge.exposeInMainWorld('desktop', {
   context: {
     /** @ipc context:listSkills @param {string} provider @param {string|null} cwd @returns {Promise<Array<Object>>} */
     listSkills: (provider, cwd) => ipcRenderer.invoke('context:listSkills', provider, cwd),
+    /** @ipc context:listGlobalSkills @returns {Promise<Array<Object>>} Local provider groups. */
+    listGlobalSkills: () => ipcRenderer.invoke('context:listGlobalSkills'),
+    /** @ipc context:setGlobalSkillEnabled Native Copilot name-scoped configuration. */
+    setGlobalSkillEnabled: (provider, identity, enabled) => ipcRenderer.invoke('context:setGlobalSkillEnabled', provider, identity, enabled),
     /** @ipc context:listAgents @param {string} provider @param {string|null} cwd @returns {Promise<Array<Object>>} */
     listAgents: (provider, cwd) => ipcRenderer.invoke('context:listAgents', provider, cwd),
     /** @ipc context:paths @param {string} provider @param {string|null} cwd @returns {Promise<{skills: {global: string[], project: string[]}, agents: {global: string[], project: string[]}}>} */
@@ -490,90 +495,6 @@ contextBridge.exposeInMainWorld('desktop', {
      * @param {string} message - Log message
      */
     write: (level, message) => ipcRenderer.send('log:write', level, message),
-  },
-
-  // ── Setup ─────────────────────────────────────────────────
-
-  /**
-   * First-run setup — creates default folders, starter agents and personalized configs.
-   *
-   * @namespace desktop.setup
-   */
-  setup: {
-    /** @ipc setup:getFolderStatus @returns {Promise<Object>} Existence status of each setup folder */
-    getFolderStatus: () => ipcRenderer.invoke('setup:getFolderStatus'),
-    /** @ipc setup:createFolders — Creates missing default folders and instructions file. @returns {Promise<Object>} */
-    createFolders: () => ipcRenderer.invoke('setup:createFolders'),
-    /** @ipc setup:getCategories @returns {Promise<Array<{id: string, icon: string, title: string, desc: string}>>} */
-    getCategories: () => ipcRenderer.invoke('setup:getCategories'),
-    /**
-     * Creates starter agent/skill files for the selected categories.
-     * @ipc setup:createStarterFiles
-     * @param {string[]} categories - Array of category IDs
-     * @returns {Promise<{success: boolean, created: string[], skipped: string[], errors: string[]}>}
-     */
-    createStarterFiles: (categories) => ipcRenderer.invoke('setup:createStarterFiles', categories),
-    /**
-     * Returns prompts for personalized skill/agent generation (non-blocking variant).
-     * @ipc setup:startPersonalizedSessions
-     * @param {Object} data
-     * @param {string} data.role
-     * @param {string[]} [data.missingRoles]
-     * @returns {Promise<{skillPrompt: string, agentPrompt: string|null}>}
-     */
-    startPersonalizedSessions: (data) => ipcRenderer.invoke('setup:startPersonalizedSessions', data),
-  },
-
-  // ── Onboarding ────────────────────────────────────────────
-
-  /**
-   * Onboarding state — tracks whether the user has completed the first-run wizard.
-   *
-   * @namespace desktop.onboarding
-   */
-  onboarding: {
-    /** @ipc onboarding:isFirstRun @returns {Promise<boolean>} True if onboarding not yet completed */
-    isFirstRun: () => ipcRenderer.invoke('onboarding:isFirstRun'),
-    /** @ipc onboarding:complete — Marks onboarding as done. @returns {Promise<{success: boolean}>} */
-    complete: () => ipcRenderer.invoke('onboarding:complete'),
-  },
-
-  // ── Tutorial ──────────────────────────────────────────────
-
-  /**
-   * Tutorial flag management — tracks which tutorial hints have been shown.
-   *
-   * @namespace desktop.tutorial
-   */
-  tutorial: {
-    /** @ipc tutorial:getFlags @returns {Promise<{tutorialSkillsShown: boolean, tutorialRenameShown: boolean}>} */
-    getFlags: () => ipcRenderer.invoke('tutorial:getFlags'),
-    /**
-     * @ipc tutorial:setFlag
-     * @param {string} key - Flag key ('tutorialSkillsShown'|'tutorialRenameShown')
-     * @param {boolean} value
-     * @returns {Promise<{success: boolean}>}
-     */
-    setFlag: (key, value) => ipcRenderer.invoke('tutorial:setFlag', key, value),
-  },
-
-  // ── Dev Tools ─────────────────────────────────────────────
-
-  /**
-   * Developer tools — inspect and manipulate onboarding state for debugging.
-   *
-   * @namespace desktop.dev
-   */
-  dev: {
-    /** @ipc dev:getOnboardingState @returns {Promise<{onboardingComplete: boolean}>} */
-    getOnboardingState: () => ipcRenderer.invoke('dev:getOnboardingState'),
-    /**
-     * Overrides the onboarding completion flag (resets tutorial flags when set to false).
-     * @ipc dev:setOnboardingComplete
-     * @param {boolean} value
-     * @returns {Promise<{success: boolean}>}
-     */
-    setOnboardingComplete: (value) => ipcRenderer.invoke('dev:setOnboardingComplete', value),
   },
 
   // ── Auth ──────────────────────────────────────────────────

@@ -18,6 +18,13 @@ const { scanSkillDirectory, scanSkillsIndex, readFolderConfig, writeFolderConfig
 const SKILLS_DIR = path.join('C:', 'test', 'skills');
 const CONFIG_PATH = path.join('C:', 'test', '.copilot-desktop', 'folders.json');
 
+test('strict global scan reports unreadable directories but treats absent directories as empty', async () => {
+  fsp.readdir.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+  await expect(scanSkillDirectory(SKILLS_DIR, 'global', () => '', () => ({}), true)).rejects.toThrow('denied');
+  fsp.readdir.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+  await expect(scanSkillDirectory(SKILLS_DIR, 'global', () => '', () => ({}), true)).resolves.toEqual([]);
+});
+
 // Helper: erzeugt Dirent-Objekte
 function dirent(name, isDir = true) {
   return { name, isDirectory: () => isDir, isFile: () => !isDir };

@@ -17,7 +17,7 @@
 // This module in turn is depended on heavily by app.js's remaining
 // clusters (agent IPC, tab management already extracted to modules/tabs.js
 // and modules/agent-ipc.js, initSettings, usage display) and by several
-// already-extracted modules (onboarding.js, plugins.js, provider-settings.js,
+// already-extracted modules (plugins.js, provider-settings.js,
 // sessions-sidebar.js, skills-mcp.js) — all via the same cross-file
 // bare-global pattern used throughout the renderer.
 'use strict';
@@ -910,7 +910,15 @@ function initTabModelSelector() {
   let activeCloseHandler = null;
   let activeDropdown = null;
 
+  const repositionDropdown = () => {
+    if (!activeDropdown) return;
+    positionSessionMenu(activeDropdown, btn, true);
+    const submenu = activeDropdown.querySelector('.model-dropdown__submenu--active');
+    if (submenu) positionSessionReasoningMenu(submenu, activeDropdown, submenu.parentElement);
+  };
+
   const closeDropdown = () => {
+    window.removeEventListener('resize', repositionDropdown);
     if (activeDropdown) {
       activeDropdown.remove();
       activeDropdown = null;
@@ -989,6 +997,12 @@ function initTabModelSelector() {
           submenu.appendChild(optionBtn);
         });
         item.appendChild(submenu);
+        const positionReasoning = () => positionSessionReasoningMenu(submenu, dropdown, item);
+        item.addEventListener('mouseenter', positionReasoning);
+        item.addEventListener('focusin', positionReasoning);
+        dropdown.addEventListener('scroll', () => {
+          if (item.matches(':hover, :focus-within')) positionReasoning();
+        });
       }
 
       item.addEventListener('click', () => {
@@ -1004,6 +1018,8 @@ function initTabModelSelector() {
     });
 
     btn.closest('.model-select-wrapper').appendChild(dropdown);
+    positionSessionMenu(dropdown, btn, true);
+    window.addEventListener('resize', repositionDropdown);
 
     activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== btn) {
@@ -1068,6 +1084,7 @@ function initTabModeSelector() {
     });
 
     btn.closest('.model-select-wrapper').appendChild(dropdown);
+    positionSessionMenu(dropdown, btn);
 
     activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== btn) {

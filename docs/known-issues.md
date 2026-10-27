@@ -4,18 +4,6 @@ List of known problems and open items. When fixing, please remove the entry or m
 
 ## Current limitations (v0.20.5)
 
-### Onboarding wizard: tab-unlock fallback
-
-The onboarding wizard applies an automatic unlock after 180 seconds if a step hangs. In rare cases (e.g. a slow network connection during `gh auth login`) the auto-unlock can trigger before the step is actually complete. The manual unlock button (after 30s) is the better option in such cases.
-
----
-
-### Tutorial popups: one-time display not resettable
-
-The tutorial popups ("Reload skills", "Rename tab") are shown only once per user. There is currently no way to reset them via the settings — only the onboarding wizard can be restarted in developer mode.
-
----
-
 ### Session resume: older messages not visible
 
 When loading a saved session, only the most recent messages are shown. The full chat history is still present in the session file but is not rendered in the UI. Manually scrolling to the older history is currently not possible.

@@ -237,8 +237,8 @@ function showClaudeAdapterUpdateBanner(currentVersion, latestVersion) {
     bar.style.bottom = (otherBottom + other.offsetHeight + 8) + 'px';
   }
   bar.innerHTML = `
-    <span class="update-banner__text">🔄 Claude-Code-Adapter <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
-    <button class="update-banner__btn" id="btnApplyClaudeAdapterUpdate">Aktualisieren</button>
+    <span class="update-banner__text">🧪 Claude-ACP <strong>v${escapeHtml(latestVersion)}</strong> für Entwicklertest verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
+    <button class="update-banner__btn" id="btnApplyClaudeAdapterUpdate">Als Entwickler-Override testen</button>
     <button class="update-banner__close" id="btnDismissClaudeAdapterUpdate" aria-label="Schließen">✕</button>`;
   document.body.appendChild(bar);
   document.getElementById('btnApplyClaudeAdapterUpdate').addEventListener('click', () => applyClaudeAdapterUpdateFromBanner(bar, latestVersion));
@@ -261,8 +261,8 @@ async function applyClaudeAdapterUpdateFromBanner(bar, targetVersion) {
       // prefs cache. Without this, the next unrelated setPref() elsewhere
       // flushes the stale in-memory copy and silently reverts the pin —
       // the banner would then reappear despite a successful update.
-      _prefs.claudeCodeAdapterVersion = res.newVersion;
-      showNotification(`Claude-Code-Adapter aktualisiert auf v${res.newVersion}.`, 'success');
+      _prefs.claudeCodeAdapterDeveloperVersion = res.developerOverride === false ? undefined : res.newVersion;
+      showNotification(`Entwickler-Override v${res.newVersion} für neue Claude-Prozesse aktiv. Laufende Sessions bleiben unverändert.`, 'success');
       bar.remove();
     } else {
       showNotification('Adapter-Update fehlgeschlagen: ' + (res.error || 'unbekannter Fehler'), 'error');

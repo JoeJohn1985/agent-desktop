@@ -140,7 +140,10 @@ describe('Tabbezogene Tool-Konfiguration entfernt', () => {
     expect(preloadJs).toContain("ipcRenderer.invoke('agent:respondPermission'");
   });
 
-  test.each(['copilot', 'anthropic'])('sendet nur globale Sperren für %s, keine alten Tab-Sperren', (provider) => {
+  test.each([
+    ['copilot', false, false], ['anthropic', false, false],
+    ['copilot', true, false], ['copilot', true, true],
+  ])('sendet globale Sperren für %s, prüft native Skill-Auswahl %s, Fehler %s', async (provider, selectedSkill, nativeFailure) => {
     const settings = {
       deniedToolsByProvider: {
         copilot: ['shell(git push)'],
@@ -153,23 +156,27 @@ describe('Tabbezogene Tool-Konfiguration entfernt', () => {
       provider,
       manualApproval: true,
       sessionDeniedTools: [{ name: 'shell(legacy-command)', enabled: true }],
-      activeSkills: new Set(),
+      activeSkills: new Set(selectedSkill ? ['stale'] : []),
       streamEl: { insertBefore: jest.fn() },
       statusEl: { style: {} },
     };
     const input = { value: 'hello', style: {} };
     const send = jest.fn().mockResolvedValue('tab-1');
-    const sendSource = rendererJs.match(/^function sendMessage\b[\s\S]*?^\}/m)[0];
+    const sendSource = rendererJs.match(/^async function sendMessage\b[\s\S]*?^\}/m)[0];
     const denySource = rendererJs.match(/^function getDeniedTools\b[\s\S]*?^\}/m)[0];
+    const listSkills = nativeFailure ? jest.fn().mockRejectedValue(new Error('CLI failure')) : jest.fn().mockResolvedValue([]);
+    const showNotification = jest.fn();
     const sendMessage = vm.runInNewContext(`(${sendSource})`, {
       document: {
         getElementById: () => input,
         createElement: () => ({ dataset: {} }),
       },
-      desktop: { chat: { send } },
+      desktop: { chat: { send }, context: { listSkills } },
+      showNotification,
       tabs: new Map([['tab-1', tab]]),
       activeTabId: 'tab-1',
       activeAgents: new Set(),
+      getActiveSkillDefinitions: () => selectedSkill ? [{ id: 'stale', name: 'Disabled skill' }] : [],
       richTextMode: false,
       inputHistory: [],
       historyIndex: -1,
@@ -192,7 +199,15 @@ describe('Tabbezogene Tool-Konfiguration entfernt', () => {
       scrollToBottom: jest.fn(),
     });
 
-    sendMessage();
+    await sendMessage();
+
+    if (selectedSkill) expect(listSkills).toHaveBeenCalledWith('copilot', null);
+    if (nativeFailure) {
+      expect(send).not.toHaveBeenCalled();
+      expect(input.value).toBe('hello');
+      expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('CLI failure'), 'error');
+      return;
+    }
 
     expect(send).toHaveBeenCalledWith('tab-1', 'hello', expect.objectContaining({
       deniedTools: settings.deniedToolsByProvider[provider],

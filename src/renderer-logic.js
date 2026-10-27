@@ -1256,7 +1256,7 @@ const USAGE_LINE_RE = /Current (session|week)(?:\s*\(([^)]+)\))?:\s*(\d+)\s*%\s*
  * parentheses. The trailing `Resets …` is optional — a window without one is
  * still worth showing.
  */
-const USAGE_LINE_MD_RE = /\*\*\s*(5-hour limit|Weekly(?:\s*[·•]\s*([^*]+?))?)\s*\*\*\s*[—–-]\s*\*\*\s*(\d+)\s*%\s*\*\*(?:\s*[·•]\s*Resets\s+([^\n`]+?))?\s*(?:\n|$)/gi;
+const USAGE_LINE_MD_RE = /\*\*\s*(5-hour limit|Weekly(?:\s*[·•]\s*([^*]+?))?)\s*\*\*\s*[—–-]\s*\*\*\s*(\d+(?:\.\d+)?)\s*%\s*\*\*(?:\s*[·•]\s*Resets\s+([^\n`]+?))?\s*(?:\n|$)/gi;
 
 /**
  * Parses the plan rate-limit lines from a Claude Code `/usage` response.
@@ -1315,7 +1315,7 @@ function parseUsageWindowsMarkdown(text, now) {
     out.push(buildUsageWindow(
       isSession,
       qualifierRaw ? qualifierRaw.trim() : '',
-      parseInt(pctRaw, 10),
+      parseFloat(pctRaw),
       resetRaw ? resetRaw.trim() : undefined,
       nowMs,
     ));

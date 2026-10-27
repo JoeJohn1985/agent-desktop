@@ -26,7 +26,7 @@ const { initLogger, writeLog, closeLogger, getLogDir } = require('./src/logger')
 const { DATA_DIR, migrateLegacyData, providerSkillsDir, providerAgentsDir, providerInstructionsDir, migrateClaudeCodeSkills, migrateApiSessions } = require('./src/data-dir');
 const { skillDirs, agentDirs, needsContextInjection } = require('./src/context-paths');
 const plansConvention = require('./src/plans-convention');
-const { validateContextTarget, buildSkillsList, buildAgentsList, buildContextPaths } = require('./src/context-list');
+const { validateContextTarget, buildSkillsList, buildGlobalSkillsList, buildAgentsList, buildContextPaths } = require('./src/context-list');
 const { syncMarketplaceSkills } = require('./src/plugin-skill-mirror');
 const { AppMcpManager } = require('./src/mcp/manager');
 const { createCredentialStore } = require('./src/mcp/oauth');
@@ -130,6 +130,7 @@ let nextTabId = 1;
 let SESSIONS_DIR = folderConfig.sessionsDir || path.join(os.homedir(), '.copilot', 'session-state');
 /** @type {string} Name of the Copilot CLI binary */
 const COPILOT_BIN = 'copilot';
+const nativeSkills = require('./src/native-skills').createNativeSkills({ binary: COPILOT_BIN, env: buildEnv() });
 /** @type {string} Current working directory for Copilot CLI processes */
 let COPILOT_CWD = folderConfig.cwd || process.cwd();
 /** @type {string} Directory for project images */
@@ -418,42 +419,11 @@ async function claudeCodeClientOptions(cwd, { sshHost } = {}) {
       // which the remote process doesn't inherit anyway.
     };
   }
-  const opts = {
-    cwd,
-    command: 'npx',
-    // Current adapter (@zed-industries/claude-code-acp is deprecated). -y installs
-    // it non-interactively on first run. Pinned to an exact version (see
-    // claude-adapter-update.js) instead of "latest" — an unpinned npx run
-    // reinstalls fresh on every session open, which is how we once hit a
-    // build where the adapter's own optional native-binary dependency
-    // silently failed to download. Check/apply an update via the "ACP-Adapter"
-    // row in Settings → Provider → Claude Code.
-    baseArgs: ['-y', `${claudeAdapterUpdate.PACKAGE_NAME}@${getClaudeAdapterVersion()}`],
-    // npx is a .cmd on Windows → must run through a shell (spawn ENOENT otherwise).
-    shell: true,
-    // The adapter returns slash-command output (/context) on stderr wrapped in
-    // <local-command-stdout>, not via the ACP response.
-    localCommandStdout: true,
-    // Bill the Claude subscription, not the API.
-    stripEnv: ['ANTHROPIC_API_KEY'],
-    // model/mode are session config options, not session/set_model/set_mode.
-    useConfigOptions: true,
-    mcpServers: [],
-  };
-  // The adapter's own @anthropic-ai/claude-agent-sdk dependency ships the real
-  // `claude` CLI as an optional native binary that npx sometimes fails to pull
-  // in (→ session/new fails with "Claude native binary not found for
-  // win32-x64"). Point it at whatever `claude` is already installed on PATH so
-  // it doesn't need its own copy.
-  if (_claudeExecutablePath) opts.env = { CLAUDE_CODE_EXECUTABLE: _claudeExecutablePath };
-  return opts;
+  return { cwd, ...claudeRuntime.localOptions(readPreferences(), { appPath: app.getAppPath() }) };
 }
 
-// Cached path to the user's installed `claude` binary (resolved lazily, once).
-// undefined = not yet looked up, '' = looked up and not found.
-let _claudeExecutablePath;
-
 const claudeAdapterUpdate = require('./src/claude-adapter-update');
+const claudeRuntime = require('./src/claude-runtime');
 const sshRemote = require('./src/ssh-remote');
 
 // Local helper that SSH_ASKPASS points ssh.exe at (see sshPasswordEnv below).
@@ -483,9 +453,9 @@ async function sshOneShotOptions() {
   return { command, args: built.args, env: { ...process.env, ...built.env } };
 }
 
-/** The pinned adapter version to launch (user override from Settings, else the built-in default). */
+/** Legacy pins are deliberately ignored, including when developer mode is enabled. */
 function getClaudeAdapterVersion() {
-  return readPreferences().claudeCodeAdapterVersion || claudeAdapterUpdate.DEFAULT_VERSION;
+  return claudeRuntime.selection(readPreferences()).version;
 }
 
 /**
@@ -501,29 +471,6 @@ function getClaudeCodeSshHost() {
 /** Default working directory on the remote host for the SSH provider ('' if unset). */
 function getClaudeCodeSshCwd() {
   return (readPreferences().claudeCodeSshCwd || '').trim();
-}
-
-/** Resolves the absolute path of the `claude` executable on PATH (cached). */
-function resolveClaudeExecutable() {
-  if (_claudeExecutablePath !== undefined) return Promise.resolve(_claudeExecutablePath);
-  return new Promise((resolve) => {
-    const finder = process.platform === 'win32' ? 'where' : 'which';
-    try {
-      const proc = spawn(finder, ['claude'], { shell: true, windowsHide: true });
-      let out = '';
-      proc.stdout?.on('data', (d) => { out += d.toString(); });
-      proc.on('error', () => { _claudeExecutablePath = ''; resolve(''); });
-      proc.on('close', () => {
-        const first = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean) || '';
-        _claudeExecutablePath = first;
-        resolve(first);
-      });
-      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } if (_claudeExecutablePath === undefined) { _claudeExecutablePath = ''; resolve(''); } }, 4000);
-    } catch (_) {
-      _claudeExecutablePath = '';
-      resolve('');
-    }
-  });
 }
 
 // Cached path to the `ssh` binary (resolved lazily, once). undefined = not
@@ -623,8 +570,6 @@ async function runAgentPrompt(tabId, prompt, options, started) {
     if (provider === 'claude-code-ssh' && !sshHost) {
       throw new Error('Kein SSH-Host konfiguriert (Einstellungen → Provider → Claude Code (SSH)).');
     }
-    // Only relevant locally: the remote host resolves its own `claude` binary.
-    if (!sshHost) await resolveClaudeExecutable();
     clientOptions = {
       ...(await claudeCodeClientOptions(cwd, { sshHost })),
       // No app-side auto-approve override here: Claude Code's own permission
@@ -882,22 +827,15 @@ ipcMain.handle('agent:setApproval', async (_event, tabId, manualApproval) => {
   }
 });
 
-/** @ipc claudecode:status — Whether the Claude Code CLI is installed (via `claude --version`). */
+/** @ipc claudecode:status — Bundled runtime integrity and active developer selection. */
 ipcMain.handle('claudecode:status', async () => {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (r) => { if (!done) { done = true; resolve(r); } };
-    try {
-      const proc = spawn('claude', ['--version'], { shell: true, windowsHide: true });
-      let out = '';
-      proc.stdout?.on('data', (d) => { out += d.toString(); });
-      proc.on('error', () => finish({ installed: false }));
-      proc.on('close', (code) => finish({ installed: code === 0, version: out.trim() }));
-      setTimeout(() => { try { proc.kill(); } catch (_) { /* ignore */ } finish({ installed: false }); }, 6000);
-    } catch (_) {
-      finish({ installed: false });
-    }
-  });
+  try {
+    claudeRuntime.bundledPaths({ appPath: app.getAppPath() });
+    const selected = claudeRuntime.selection(readPreferences());
+    return { installed: true, ...selected, releaseVersion: claudeRuntime.RELEASE_VERSION, sdkVersion: claudeRuntime.SDK_VERSION };
+  } catch (error) {
+    return { installed: false, error: error.message };
+  }
 });
 
 /**
@@ -913,7 +851,8 @@ ipcMain.handle('claudecode:authStatus', async () => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     try {
-      const proc = spawn('claude', ['auth', 'status'], { shell: true, windowsHide: true });
+      const { native } = claudeRuntime.bundledPaths({ appPath: app.getAppPath() });
+      const proc = spawn(native, ['auth', 'status'], { shell: false, windowsHide: true });
       let out = '';
       proc.stdout?.on('data', (d) => { out += d.toString(); });
       proc.on('error', () => finish({ loggedIn: false }));
@@ -945,35 +884,40 @@ ipcMain.handle('claudecode:authStatus', async () => {
  * instead of a piped child process with no TTY.
  * @returns {Promise<{success:boolean, pendingInTerminal:boolean, error:string|null}>}
  */
-ipcMain.handle('claudecode:logout', async () => {
-  console.log('[claudecode:logout] Opening claude auth logout in a new terminal window');
+async function claudeAuthTerminal(action) {
   try {
+    const { native } = claudeRuntime.bundledPaths({ appPath: app.getAppPath() });
+    let child;
     if (process.platform === 'win32') {
-      // See auth:login below for why `start` + -NoExit is needed on Windows.
-      const cmd = 'start "Claude Code Logout" powershell -NoLogo -NoExit -Command "claude auth logout"';
-      const child = require('child_process').spawn(cmd, {
+      const literal = native.replace(/'/g, "''");
+      const encoded = Buffer.from(`& '${literal}' auth ${action}`, 'utf16le').toString('base64');
+      child = spawn(`start "Claude Code Auth" powershell -NoLogo -NoExit -EncodedCommand ${encoded}`, {
         shell: true,
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
       });
-      child.unref();
     } else if (process.platform === 'darwin') {
-      const child = require('child_process').spawn(
-        'osascript', ['-e', 'tell app "Terminal" to do script "claude auth logout"'],
+      child = spawn(
+        'osascript', ['-e', `tell app "Terminal" to do script ${JSON.stringify(`${sshRemote.shellQuote(native)} auth ${action}`)}`],
         { detached: true, stdio: 'ignore' },
       );
-      child.unref();
     } else {
-      const child = require('child_process').spawn('x-terminal-emulator', ['-e', 'claude', 'auth', 'logout'], { detached: true, stdio: 'ignore' });
-      child.unref();
+      child = spawn('x-terminal-emulator', ['-e', native, 'auth', action], { detached: true, stdio: 'ignore' });
     }
+    await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('spawn', resolve);
+    });
+    child.unref();
     return { success: true, pendingInTerminal: true, error: null };
   } catch (err) {
-    console.error('[claudecode:logout]', err.message);
+    console.error('[claudecode:auth]', err.message);
     return { success: false, pendingInTerminal: false, error: err.message };
   }
-});
+}
+ipcMain.handle('claudecode:logout', () => claudeAuthTerminal('logout'));
+ipcMain.handle('claudecode:login', () => claudeAuthTerminal('login'));
 
 /**
  * @ipc claudecode:testSsh — One-shot reachability check for the remote Claude
@@ -1093,6 +1037,7 @@ ipcMain.handle('claudecode:sshDeletePassword', () => {
  * @returns {Promise<{ok:boolean, currentVersion:string, latestVersion:string|null, updateAvailable:boolean, error?:string}>}
  */
 ipcMain.handle('claudecode:checkAdapterUpdate', async () => {
+  if (readPreferences().settings?.devMode !== true) return { ok: false, error: 'Nur im Entwicklermodus verfügbar' };
   return claudeAdapterUpdate.checkForAdapterUpdate(getClaudeAdapterVersion());
 });
 
@@ -1100,21 +1045,27 @@ ipcMain.handle('claudecode:checkAdapterUpdate', async () => {
  * @ipc claudecode:applyAdapterUpdate — Pins the adapter to `version`: spawns
  * it once via npx to prove the version installs and answers ACP `initialize`
  * (a generous timeout covers npx's first-time download of that version),
- * then persists the pin and tears down any live Claude Code tabs so their
- * next prompt starts fresh on the new version.
+ * then persists a developer-only override for newly spawned processes.
+ * Existing processes are never interrupted.
  * @param {string} version
  * @returns {Promise<{ok:boolean, newVersion?:string, error?:string}>}
  */
 ipcMain.handle('claudecode:applyAdapterUpdate', async (_event, version) => {
-  if (!version || typeof version !== 'string') return { ok: false, error: 'Keine Version angegeben' };
+  if (readPreferences().settings?.devMode !== true) return { ok: false, error: 'Nur im Entwicklermodus verfügbar' };
+  if (typeof version !== 'string' || !claudeRuntime.EXACT_VERSION.test(version)) return { ok: false, error: 'Exakte stabile Version erforderlich' };
   const probe = new AcpClient(-1, () => {}, {
     command: 'npx',
     baseArgs: ['-y', `${claudeAdapterUpdate.PACKAGE_NAME}@${version}`],
     shell: true,
     initializeTimeoutMs: 120_000, // first install of an uncached version can be slow
+    stripEnv: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_EXECUTABLE'],
   });
   try {
-    await probe.start();
+    if (version === claudeRuntime.RELEASE_VERSION) {
+      claudeRuntime.bundledPaths({ appPath: app.getAppPath() });
+    } else {
+      await probe.start();
+    }
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   } finally {
@@ -1122,21 +1073,12 @@ ipcMain.handle('claudecode:applyAdapterUpdate', async (_event, version) => {
   }
 
   const prefs = readPreferences();
-  prefs.claudeCodeAdapterVersion = version;
+  if (prefs.settings?.devMode !== true) return { ok: false, error: 'Entwicklermodus wurde beendet' };
+  if (version === claudeRuntime.RELEASE_VERSION) delete prefs.claudeCodeAdapterDeveloperVersion;
+  else prefs.claudeCodeAdapterDeveloperVersion = version;
   if (!writePreferences(prefs)) return { ok: false, error: 'Einstellung konnte nicht gespeichert werden' };
 
-  // Existing Claude Code tabs keep running the old (already-spawned) process
-  // until it's next torn down — force that now so the pin takes effect
-  // immediately instead of only for brand-new tabs.
-  for (const [tabId, client] of backends) {
-    // Both variants launch the same pinned adapter, so both need tearing down.
-    if (client.__provider === 'claude-code' || client.__provider === 'claude-code-ssh') {
-      try { await client.destroy(); } catch (_) { /* ignore */ }
-      backends.delete(tabId);
-    }
-  }
-
-  return { ok: true, newVersion: version };
+  return { ok: true, newVersion: version, developerOverride: version !== claudeRuntime.RELEASE_VERSION };
 });
 
 /** @ipc agent:respondPermission — Answers an agent permission request (ACP). */
@@ -1655,10 +1597,23 @@ ipcMain.handle('preferences:write', async (_event, prefs) => {
  * @param {string|null} cwd - Active project directory.
  * @returns {Promise<Array<Object>>} Skills with source 'builtin' | 'global' | 'project'
  */
+/** @ipc context:listGlobalSkills — Local user-wide provider sources; no renderer paths accepted. */
+ipcMain.handle('context:listGlobalSkills', async () => nativeSkills.groups(await buildGlobalSkillsList({
+  skillDirs,
+  skillsDirOverride: readFolderConfig().skillsDir,
+  scanSkillDirectory: (dir, source, icon, parse) => _scanSkillDirectory(dir, source, icon, parse, true),
+  userSkillIcon,
+  yamlParse: yaml.parse,
+})));
+
+ipcMain.handle('context:setGlobalSkillEnabled', async (_event, provider, identity, enabled) => {
+  await nativeSkills.setEnabled(provider, identity, enabled);
+});
+
 ipcMain.handle('context:listSkills', async (_event, provider, cwd) => {
   const target = validateContextTarget(provider, cwd);
   if (!target) return [];
-  return buildSkillsList(target, {
+  const list = await buildSkillsList(target, {
     skillDirs,
     skillsDirOverride: readFolderConfig().skillsDir,
     scanBuiltinCopilotSkills,
@@ -1667,6 +1622,7 @@ ipcMain.handle('context:listSkills', async (_event, provider, cwd) => {
     userSkillIcon,
     yamlParse: yaml.parse,
   });
+  return target.provider === 'copilot' ? nativeSkills.filterEnabled(list, target.cwd) : list;
 });
 
 /**
@@ -2028,363 +1984,6 @@ ipcMain.handle('instructions:writeClaudeCode', async (_event, content) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
-});
-
-// ── Onboarding ─────────────────────────────────────────────────
-/** @ipc onboarding:isFirstRun — Checks whether onboarding has been completed. @returns {Promise<boolean>} */
-ipcMain.handle('onboarding:isFirstRun', async () => {
-  try {
-    const config = readFolderConfig();
-    return config.onboardingComplete !== true;
-  } catch (_) {
-    return true;
-  }
-});
-
-/** @ipc onboarding:complete — Marks onboarding as done in folder config. @returns {Promise<{success: boolean}>} */
-ipcMain.handle('onboarding:complete', async () => {
-  try {
-    const config = readFolderConfig();
-    config.onboardingComplete = true;
-    writeFolderConfig(config);
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// ── Dev Tools ──────────────────────────────────────────────────
-/** @ipc dev:getOnboardingState — Returns current onboarding state for debugging. @returns {Promise<{onboardingComplete: boolean}>} */
-ipcMain.handle('dev:getOnboardingState', async () => {
-  try {
-    const config = readFolderConfig();
-    return { onboardingComplete: config.onboardingComplete === true };
-  } catch (_) {
-    return { onboardingComplete: false };
-  }
-});
-
-/**
- * @ipc dev:setOnboardingComplete — Overrides onboarding flag.
- * Resets tutorial flags when set to false.
- * @param {boolean} value
- * @returns {Promise<{success: boolean}>}
- */
-ipcMain.handle('dev:setOnboardingComplete', async (_event, value) => {
-  try {
-    const config = readFolderConfig();
-    config.onboardingComplete = value === true;
-    if (value === false) {
-      delete config.tutorialSkillsShown;
-      delete config.tutorialRenameShown;
-    }
-    writeFolderConfig(config);
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-/** @ipc tutorial:getFlags — Returns which tutorial hints have been shown. @returns {Promise<Object>} */
-ipcMain.handle('tutorial:getFlags', async () => {
-  try {
-    const config = readFolderConfig();
-    return {
-      tutorialSkillsShown: config.tutorialSkillsShown === true,
-      tutorialRenameShown: config.tutorialRenameShown === true,
-    };
-  } catch (_) {
-    return { tutorialSkillsShown: false, tutorialRenameShown: false };
-  }
-});
-
-/** @type {string[]} Allowed tutorial flag keys for validation */
-const TUTORIAL_FLAG_KEYS = ['tutorialSkillsShown', 'tutorialRenameShown'];
-
-/**
- * @ipc tutorial:setFlag — Persists a tutorial flag.
- * @param {string} key - One of TUTORIAL_FLAG_KEYS
- * @param {boolean} value
- * @returns {Promise<{success: boolean}>}
- */
-ipcMain.handle('tutorial:setFlag', async (_event, key, value) => {
-  try {
-    if (!TUTORIAL_FLAG_KEYS.includes(key)) {
-      return { success: false, error: `Invalid tutorial flag key: ${key}` };
-    }
-    const config = readFolderConfig();
-    config[key] = value === true;
-    writeFolderConfig(config);
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// ── Starter Agent Templates ────────────────────────────────────
-/**
- * Predefined agent/skill templates for common development roles.
- * Used by the setup wizard to create starter .agent.md files.
- *
- * @type {Object<string, {agent: {filename: string, content: string}|null, skill: {filename: string, content: string}|null}>}
- */
-const STARTER_TEMPLATES = {
-  'code-review': {
-    agent: {
-      filename: 'code-reviewer.agent.md',
-      content: `---\nname: code-reviewer\ndescription: Führt Code Reviews durch und findet Bugs, Sicherheitslücken und Verbesserungspotenzial.\n---\n\nDu bist ein erfahrener Code-Reviewer. Analysiere den gegebenen Code auf:\n- Bugs und Logikfehler\n- Sicherheitslücken\n- Performance-Probleme\n- Code-Qualität und Lesbarkeit\n\nGib konkrete, umsetzbare Verbesserungsvorschläge.`
-    },
-    skill: null
-  },
-  'testing': {
-    agent: {
-      filename: 'tester.agent.md',
-      content: `---\nname: tester\ndescription: Schreibt Unit-Tests, Integrationstests und hilft bei Test-Strategien.\n---\n\nDu bist ein Test-Experte. Schreibe vollständige, aussagekräftige Tests.\nNutze das Test-Framework das im Projekt verwendet wird.\nTeste Edge Cases, Error Paths und Happy Paths.`
-    },
-    skill: null
-  },
-  'planning': {
-    agent: {
-      filename: 'planner.agent.md',
-      content: `---\nname: planner\ndescription: Erstellt strukturierte Pläne, Aufgabenlisten und Roadmaps.\n---\n\nDu bist ein strukturierter Planer. Zerlege Anforderungen in klare, umsetzbare Aufgaben.\nErstelle Pläne mit klaren Schritten, Abhängigkeiten und Prioritäten.`
-    },
-    skill: null
-  },
-  'documentation': {
-    agent: {
-      filename: 'documenter.agent.md',
-      content: `---\nname: documenter\ndescription: Erstellt und verbessert Dokumentation, READMEs und API-Docs.\n---\n\nDu bist ein Dokumentations-Experte. Schreibe klare, vollständige Dokumentation.\nPasse den Stil an die Zielgruppe an (Entwickler, Endnutzer, API-Nutzer).`
-    },
-    skill: null
-  },
-  'security': {
-    agent: {
-      filename: 'security-auditor.agent.md',
-      content: `---\nname: security-auditor\ndescription: Findet Sicherheitslücken, OWASP-Risiken und unsichere Patterns.\n---\n\nDu bist ein Security-Experte. Analysiere Code auf:\n- OWASP Top 10 Risiken\n- Injection-Angriffe (SQL, XSS, Command)\n- Authentifizierungs- und Autorisierungsprobleme\n- Unsichere Abhängigkeiten und Konfigurationen`
-    },
-    skill: null
-  },
-  'performance': {
-    agent: {
-      filename: 'performance-analyzer.agent.md',
-      content: `---\nname: performance-analyzer\ndescription: Analysiert Performance-Probleme und schlägt Optimierungen vor.\n---\n\nDu bist ein Performance-Experte. Identifiziere:\n- N+1 Queries und ineffiziente DB-Zugriffe\n- Unnötige Re-Renders und Memory Leaks\n- Algorithmen mit schlechter Komplexität\n- Caching-Möglichkeiten`
-    },
-    skill: null
-  }
-};
-
-// ── Setup (Folder creation) ────────────────────────────────────
-/**
- * Folder definitions for the first-run setup wizard.
- * @type {Array<{key: string, rel: string}>}
- */
-const SETUP_FOLDERS = [
-  { key: 'skills', rel: '.copilot/skills' },
-  { key: 'agents', rel: '.copilot/agents' },
-  { key: 'sessions', rel: '.copilot/session-state' },
-];
-/** @type {{key: string, rel: string, isFile: boolean}} Instructions file setup definition */
-const SETUP_INSTRUCTIONS = { key: 'instructions', rel: '.copilot/copilot-instructions.md', isFile: true };
-
-/** @ipc setup:getFolderStatus — Checks which setup folders/files already exist. @returns {Object} */
-ipcMain.handle('setup:getFolderStatus', () => {
-  const home = os.homedir();
-  const result = {};
-  for (const item of SETUP_FOLDERS) {
-    const fullPath = path.join(home, item.rel);
-    result[item.key] = { path: '~/' + item.rel, exists: fs.existsSync(fullPath) };
-  }
-  const instrPath = path.join(home, SETUP_INSTRUCTIONS.rel);
-  result.instructions = { path: '~/' + SETUP_INSTRUCTIONS.rel, exists: fs.existsSync(instrPath), isFile: true };
-  return result;
-});
-
-/**
- * @ipc setup:createFolders — Creates all missing setup folders and the default instructions file.
- * @returns {Promise<{success: boolean, created: string[], errors: string[]}>}
- */
-ipcMain.handle('setup:createFolders', async () => {
-  const home = os.homedir();
-  const created = [];
-  const errors = [];
-
-  for (const item of SETUP_FOLDERS) {
-    const fullPath = path.join(home, item.rel);
-    if (!fs.existsSync(fullPath)) {
-      try {
-        fs.mkdirSync(fullPath, { recursive: true });
-        created.push(item.rel);
-      } catch (e) {
-        errors.push(`${item.rel}: ${e.message}`);
-      }
-    }
-  }
-
-  const instrPath = path.join(home, SETUP_INSTRUCTIONS.rel);
-  if (!fs.existsSync(instrPath)) {
-    try {
-      const dir = path.dirname(instrPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(instrPath, '# Copilot Instructions\n\nAntworte immer auf Deutsch.\n', 'utf-8');
-      created.push(SETUP_INSTRUCTIONS.rel);
-    } catch (e) {
-      errors.push(`${SETUP_INSTRUCTIONS.rel}: ${e.message}`);
-    }
-  }
-
-  return { success: errors.length === 0, created, errors };
-});
-
-/** @ipc setup:getCategories — Returns available starter template categories for the wizard. */
-// ── Setup (Starter Agents & Skills) ────────────────────────────
-ipcMain.handle('setup:getCategories', () => {
-  return [
-    { id: 'code-review', icon: '🔍', title: 'Code Review', desc: 'Analysiert Code und findet Probleme' },
-    { id: 'testing', icon: '🧪', title: 'Testen', desc: 'Schreibt Unit- und Integrationstests' },
-    { id: 'planning', icon: '📋', title: 'Planung', desc: 'Erstellt Pläne und Aufgabenlisten' },
-    { id: 'documentation', icon: '📝', title: 'Dokumentation', desc: 'Schreibt Doku und README-Dateien' },
-    { id: 'security', icon: '🔒', title: 'Security', desc: 'Findet Sicherheitslücken' },
-    { id: 'performance', icon: '⚡', title: 'Performance', desc: 'Analysiert und optimiert Code' },
-  ];
-});
-
-/**
- * @ipc setup:createStarterFiles — Creates agent/skill files from predefined templates.
- * @param {string[]} categories - Category IDs to create
- * @returns {Promise<{success: boolean, created: string[], skipped: string[], errors: string[]}>}
- */
-ipcMain.handle('setup:createStarterFiles', async (_event, categories) => {
-  const config = readFolderConfig();
-  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-  const created = [];
-  const skipped = [];
-  const errors = [];
-
-  for (const catId of categories) {
-    const template = STARTER_TEMPLATES[catId];
-    if (!template) {
-      errors.push(`Unbekannte Kategorie: ${catId}`);
-      continue;
-    }
-
-    if (template.agent) {
-      const filePath = path.join(agentsDir, template.agent.filename);
-      if (fs.existsSync(filePath)) {
-        skipped.push(template.agent.filename);
-      } else {
-        try {
-          if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
-          fs.writeFileSync(filePath, template.agent.content, 'utf-8');
-          created.push(template.agent.filename);
-        } catch (e) {
-          errors.push(`${template.agent.filename}: ${e.message}`);
-        }
-      }
-    }
-
-    if (template.skill) {
-      const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
-      const filePath = path.join(skillsDir, template.skill.filename);
-      if (fs.existsSync(filePath)) {
-        skipped.push(template.skill.filename);
-      } else {
-        try {
-          if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
-          fs.writeFileSync(filePath, template.skill.content, 'utf-8');
-          created.push(template.skill.filename);
-        } catch (e) {
-          errors.push(`${template.skill.filename}: ${e.message}`);
-        }
-      }
-    }
-  }
-
-  return { success: errors.length === 0, created, skipped, errors };
-});
-
-// ── Setup (Personalized Role → Skills & Agents) ───────────────
-
-/**
- * Builds a Copilot CLI prompt that instructs it to generate 3 role-specific
- * SKILL.md files in the given directory.
- *
- * @param {string} role - User's professional role description
- * @param {string} skillsDir - Absolute path where skill folders should be created
- * @returns {string} Complete prompt string for Copilot CLI
- */
-function buildSkillGenerationPrompt(role, skillsDir) {
-  return `Ich arbeite als ${role}. Erstelle genau 3 passende Skills für meinen Aufgabenbereich.
-
-Jeder Skill wird als SKILL.md-Datei in einem eigenen Unterordner angelegt:
-${skillsDir}/<skill-name>/SKILL.md
-
-Das SKILL.md-Format ist exakt wie folgt aufgebaut:
-\`\`\`
----
-name: <kebab-case-name>
-description: >
-  <1-3 Sätze: Was tut dieser Skill, wann wird er aktiviert?>
----
-
-# <Skill-Titel>
-
-<Hauptinstruktionen: Ausführliche Anleitung wie der Skill arbeiten soll, mindestens 10 Zeilen>
-\`\`\`
-
-Anforderungen:
-- Erstelle genau 3 Skills die für "${role}" besonders nützlich sind
-- Jeder Skill hat einen klaren, praktischen Fokus (kein generischer Kram)
-- Die Instruktionen im Body sind konkret und umsetzbar (mindestens 150 Wörter pro Skill)
-- Der Name ist kebab-case, deutsch oder englisch je nach Kontext
-- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen
-- Antworte auf Deutsch`;
-}
-
-/**
- * Builds a Copilot CLI prompt to generate .agent.md files for missing team roles.
- *
- * @param {string[]} missingRoles - List of missing team position names
- * @param {string} agentsDir - Absolute path where agent files should be created
- * @returns {string} Complete prompt string for Copilot CLI
- */
-function buildAgentGenerationPrompt(missingRoles, agentsDir) {
-  const roleList = missingRoles.map(r => `- ${r}`).join('\n');
-  return `In meinem Team fehlen folgende Positionen:\n${roleList}\n\nErstelle für jede dieser Positionen einen passenden Agent als .agent.md-Datei in diesem Verzeichnis:\n${agentsDir}\n\nDas .agent.md-Format ist exakt wie folgt aufgebaut:\n\`\`\`\n---\nname: <kebab-case-name>\ndescription: <1-2 Sätze: Was tut dieser Agent, wann wird er genutzt?>\n---\n\n<Hauptinstruktionen: Ausführliche Beschreibung wie der Agent arbeitet, seine Stärken, typische Aufgaben und wie er kommuniziert. Mindestens 200 Wörter.>\n\`\`\`\n\nAnforderungen:\n- Erstelle genau ${missingRoles.length} Agent-Datei(en), eine pro fehlende Position\n- Der Dateiname ist <kebab-case-name>.agent.md\n- Jeder Agent hat eine klare Persönlichkeit und konkrete Arbeitsweise\n- Die Instruktionen beschreiben detailliert wie der Agent denkt, kommuniziert und arbeitet\n- Lege die Dateien direkt an — kein Erklären, kein Nachfragen, einfach anlegen\n- Antworte auf Deutsch`;
-}
-
-/**
- * @ipc setup:startPersonalizedSessions — Non-blocking variant: returns the prompts
- * for skill/agent generation so the renderer can start them independently.
- * Also marks onboarding as complete.
- * @param {Object} data
- * @param {string} data.role
- * @param {string[]} [data.missingRoles]
- * @returns {Promise<{skillPrompt: string, agentPrompt: string|null}>}
- */
-ipcMain.handle('setup:startPersonalizedSessions', async (_event, { role, missingRoles }) => {
-  const config = readFolderConfig();
-  const skillsDir = config.skillsDir || path.join(os.homedir(), '.copilot', 'skills');
-  const agentsDir = config.agentsDir || path.join(os.homedir(), '.copilot', 'agents');
-
-  // Ensure directories exist
-  if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
-  if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
-
-  // Mark onboarding as complete
-  const configPath = path.join(os.homedir(), '.copilot', 'config.json');
-  let copilotConfig = {};
-  try {
-    if (fs.existsSync(configPath)) copilotConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (_) {}
-  copilotConfig.onboardingComplete = true;
-  fs.writeFileSync(configPath, JSON.stringify(copilotConfig, null, 2), 'utf8');
-
-  const skillPrompt = buildSkillGenerationPrompt(role, skillsDir);
-  const agentPrompt = (missingRoles && missingRoles.length > 0)
-    ? buildAgentGenerationPrompt(missingRoles, agentsDir)
-    : null;
-
-  return { skillPrompt, agentPrompt };
 });
 
 // ── Auth (Copilot CLI) ─────────────────────────────────────────

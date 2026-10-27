@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.27.0] - 2026-10-27
+
+### Added
+- Providerbezogene automatische Komprimierung mit dynamischen Preisgrenzen,
+  individuellen Modellregeln und Kostenwarnungen.
+- Kalenderbasierte Wiederholungen für geplante Aufgaben sowie Tageskosten
+  der aktuellen Sitzung.
+- Skills-Auswahl pro Session und providergetrennte Verwaltung benutzerweiter
+  Skills mit nativer Copilot-Aktivierung.
+- Mitgelieferte Claude-Runtime: ACP 0.97.0, SDK 0.3.310 und CLI 2.1.310.
+  Normale Nutzer erhalten die geprüfte Runtime mit dem App-Release.
+
+### Changed
+- Session-Aktionen an der Eingabeleiste, neue Reihenfolge und anklickbare Kosten.
+  Modell- und Reasoning-Auswahl öffnen als getrennte Panels.
+- Copilot fordert für alle Modelle das größte verfügbare Kontextfenster an.
+- Skills erscheinen je verbundenem Provider in einem responsiven Kachelraster.
+- Entwickler-Setup und CI verwenden Node.js 22 oder neuer.
+
+### Removed
+- Veraltetes Onboarding einschließlich Tutorial und Neustart-Option.
+
+### Notes
+- Die native Copilot-Skill-Deaktivierung ist persistent; ihre Wirkung auf
+  ACP-Erkennung ist auch nach Wiederaufnahme oder neuer Session nicht bestätigt.
+- Frühere Claude-Versionspins blockieren die mitgelieferte Runtime nicht mehr;
+  explizite Versionsabweichungen sind Entwicklertests vorbehalten.
+
 ## [1.26.1] - 2026-10-09
 
 ### Fixed

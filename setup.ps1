@@ -42,25 +42,25 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Fail "Node.js nicht gefunden / Auto-Installation fehlgeschlagen."
-    Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
+    Write-Host "  Bitte installiere Node.js 22+ von https://nodejs.org/" -ForegroundColor White
     Write-Host "  und oeffne danach das Terminal neu (PATH aktualisieren)." -ForegroundColor White
     exit 1
 }
 
 $nodeVersion = & node --version
 $major = [int]($nodeVersion -replace 'v(\d+).*','$1')
-if ($major -ge 18) {
+if ($major -ge 22) {
     Write-OK "Node.js $nodeVersion"
 } else {
-    Write-Fail "Node.js $nodeVersion ist zu alt (mind. 18 benötigt)."
-    Write-Host "  Bitte installiere Node.js 18+ von https://nodejs.org/" -ForegroundColor White
+    Write-Fail "Node.js $nodeVersion ist zu alt (mind. 22 benötigt)."
+    Write-Host "  Bitte installiere Node.js 22+ von https://nodejs.org/" -ForegroundColor White
     exit 1
 }
 
 # ── 2. npm install ───────────────────────────────────────────
 Write-Step "Dependencies installieren (npm install)..."
 Set-Location $appRoot
-npm install 2>&1 | Out-Null
+npm install --include=optional 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "npm install fehlgeschlagen."
     Write-Host "  Versuche manuell: npm install" -ForegroundColor White

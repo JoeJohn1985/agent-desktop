@@ -288,7 +288,7 @@ den Plan vor einem automatischen Downgrade erneut abstimmen.
       invalidieren.
 - [ ] GitHub-Login aus der App mit derselben Runtime starten; interaktive
       Anmeldung bleibt bei fehlender/abgelaufener Autorisierung notwendig.
-- [ ] CLI-Verfuegbarkeitspruefung und bestehende Provider-Onboardingpfade.
+- [ ] CLI-Verfuegbarkeitspruefung und regulaere Provider-Einrichtung (alter Wizard entfernt).
 - [ ] Built-in-Skills aus der aktiven CLI-Laufzeit aufloesen, nicht aus
       dem zufaellig neuesten globalen Paketcache. Vorhandene oeffentliche
       CLI-Schnittstellen bevorzugen.

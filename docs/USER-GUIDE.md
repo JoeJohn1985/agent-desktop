@@ -2,6 +2,32 @@
 
 **Version 1.0.0** · Electron-based desktop app for multiple LLM providers
 
+### Claude Code: mitgelieferte Runtime
+
+Die App liefert Claude ACP **0.97.0**, Agent SDK **0.3.310** und die passende
+native CLI **2.1.310** gemeinsam aus. App-Updates bringen die geprüfte Runtime;
+alte Adapter-Versionspräferenzen blockieren dies nicht. Lokaler Start benötigt
+keine npm-/npx-Installation und keine separat installierte `claude`-CLI.
+Anmeldung und Modellkommunikation benötigen weiterhin Internet.
+
+Unter **Einstellungen → Provider → Claude Code → Anmelden** öffnet sich die
+mitgelieferte CLI im Terminal. Danach **Status prüfen**. **Trennen** meldet über
+dieselbe CLI ab; die übliche Claude-Anmeldung kann mit anderen Claude-Werkzeugen
+geteilt sein. Die App aktualisiert keine separate System-Claude-Installation.
+Fehlt die mitgelieferte Runtime, App neu installieren statt globale CLI updaten.
+
+Nur im **Entwicklermodus** kann eine exakte andere Adapterversion bewusst getestet
+werden (Download möglich). Die Einstellungen zeigen Release und aktiven
+**Entwickler-Override**. Zum Zurücksetzen die angezeigte Release-Version eingeben
+und bestätigen. Ohne Entwicklermodus gilt wieder das App-Release. Bereits laufende
+Prozesse bleiben bei ihrer Version bis zum regulären Neustart; nichts wird im
+Gespräch ausgetauscht. Es gibt kein automatisches npm-latest-Runtimeupdate.
+
+**Claude Code (SSH)** läuft auf dem Remotehost mit derselben ausgewählten
+Adapterversion, nicht mit den lokalen App-Dateien. Dort sind Node ≥22, npm,
+gegebenenfalls Downloadzugang und eine Remote-Claude-Anmeldung nötig.
+Die App richtet ohne ausdrückliche Aktion keinen Remotehost ein.
+
 ---
 
 ## Table of contents
@@ -10,7 +36,7 @@
 2. [Getting started](#getting-started)
    - [Requirements](#requirements)
    - [Installation](#installation)
-   - [Onboarding wizard](#onboarding-wizard)
+   - [Initial configuration](#initial-configuration)
    - [First chat](#first-chat)
 3. [User interface](#user-interface)
    - [Titlebar](#titlebar)
@@ -20,7 +46,6 @@
 4. [Features in detail](#features-in-detail)
    - [Multi-session management](#multi-session-management)
    - [Chat](#chat)
-   - [Tutorial popups](#tutorial-popups)
    - [File drag & drop](#file-drag--drop)
    - [Skills](#skills)
    - [Agents](#agents)
@@ -48,7 +73,7 @@ Agent Desktop wraps multiple LLM providers (primarily the GitHub Copilot CLI, pl
 |---|---|
 | Operating system | Windows 11 (primary), Linux, macOS |
 | License | GitHub Copilot (active subscription) — only for the Copilot provider |
-| Runtime | Node.js 18 or higher |
+| Runtime | Node.js 22 or higher for source checkout / SSH; packaged app includes its runtime |
 | CLI | GitHub CLI with the Copilot extension installed (optional; only for Copilot) |
 
 ### Installation
@@ -62,20 +87,13 @@ npm start
 
 > **Tip:** the setup script `setup.ps1` installs all dependencies automatically.
 
-### Onboarding wizard
+### Initial configuration
 
-On the **first app start**, a 4-step onboarding wizard guides you through setup:
-
-| Step | Content |
-|---|---|
-| **1. GitHub auth check** | Checks `gh auth status` and initiates `gh auth login` if needed |
-| **2. Folder setup** | Creates the `~/.agent-desktop/` directory with all required subfolders |
-| **3. Starter agents & skills** | Choice from 6 categories — each togglable on/off |
-| **4. Feature intro** | 3-slide carousel of the most important app features |
-
-> **Tab-unlock fallback:** if a step doesn't complete automatically, a manual unlock button appears after 30 seconds. After 180 seconds the next step is unlocked automatically.
-
-> **Reset onboarding:** in developer mode (Settings) the wizard can be restarted at any time.
+The app opens directly in the chat interface, including on first launch.
+Select and configure your provider in Settings; the regular provider login
+and API-key controls remain available. Working directories and skill/agent
+folders can be configured through the existing settings.
+No setup wizard, tutorial popups or automatic starter-file generation runs.
 
 ### First chat
 
@@ -130,10 +148,12 @@ The sidebar is on the left edge. **Funktionen**, above **Project**, opens a full
 
 #### 🧠 Skills (Funktionen)
 
-- List of all available AI skills with icon, name, and description — follows the active tab's provider (Copilot's native `~/.copilot/skills/`, or the tab provider's own `~/.agent-desktop/<provider>/skills/`).
+- Lists only user-wide skills, grouped by provider and source directory, independently of the active chat (also works without a chat). Copilot uses the actual native CLI catalog (personal, custom and plugin sources), not an app-configured folder the CLI may not discover; Claude Code uses `~/.claude/skills/`; API providers use their existing app-managed directories.
 - The model decides on its own whether a skill is relevant and reads it via its file tool — nothing is force-fed into every prompt by default.
-- **Toggle switch** force-activates a skill for the next message as an explicit override, on top of the automatic selection.
-- The page shows the active chat's provider/project and each skill's description and source. Activation remains per chat tab, not global.
+- All skill rows use the app-standard toggle. Copilot's **Aktiv / Deaktiviert** toggles persist the native CLI configuration by skill **name**, across all same-name sources, including project skills. Status comes from `copilot skill list --json`, never an app preference. Failures are shown. Other providers and unsupported shared sources show a disabled, indeterminate toggle with an explicit unavailable/unknown-status label; this does not imply the skill is disabled or add a new activation backend.
+- This is separate from the **🛠️ Skills** dropdown in Session Actions, which controls only the active tab's explicit prompt overrides. Disabled Copilot names are filtered from discovery and checked again before prompt enrichment. Other selections survive reloads and tab switches.
+- Previously loaded instructions are not erased. **Do not assume restart, resume or a new session removes a disabled skill from Copilot ACP:** the isolated live probe did not establish runtime exclusion. See [live evidence and limits](NATIVE-SKILLS-LIVE-TEST.md).
+- Project skills, CLI builtins and remote SSH sources are not user-wide local management sources. Equal names across providers remain separate; an identical shared directory is displayed once with its provider identities.
 - The header's **⋮ menu** holds **↻ Skills neu laden**. Skill files are managed in the provider's folders.
 
 #### 🔌 Anbindungen (Funktionen)
@@ -172,16 +192,27 @@ Backlog is in the right sidebar, not the left navigation. The icon immediately l
 
 #### Session actions bar
 
-Directly below the tab bar you control the active session:
+Immediately above the entire message input bar you control the active session.
+The actions remain outside the text editor and share the lower input area's
+background and top boundary; the conversation scrolls independently above it.
+On narrow windows the actions wrap. Model, mode and context menus open upwards
+when there is more room above, stay within the viewport and scroll if needed.
+Reasoning choices open in a separate panel beside the model menu, switching to
+the left when space on the right is insufficient. Both panels stay above the
+composer and scroll independently when needed.
+Left to right: provider label, model, mode/agent and approval controls, followed
+by Gemini's provider-specific action when applicable. Context and today's costs
+sit on the right. The cost amount itself opens the existing cost overview
+(click, Enter or Space); there is no separate cost icon. Usage details remain
+available in its tooltip.
 
 | Element | Description |
 |---|---|
-| **🔌 Provider** | Selects the backend per tab: *GitHub Copilot* or a direct API (Anthropic, Gemini, OpenAI, GLM, Ollama). API providers need a key (Settings → API providers) |
+| **🔌 Provider** | Read-only backend label for this tab, chosen when creating it. API providers need a key (Settings → API providers) |
 | **🧠 Model name** | Opens the model dropdown (shows only the selected provider's models; per tab, persistent) |
 | **🤖 Mode** | Opens the mode/agent selection dropdown |
 | **📊 XX%** | Context dropdown — shows usage, opens a detail panel, or runs compact/clear |
-| **📈** | Opens the cost page (cost listing as a dedicated full-screen page) |
-| **XX.XX AIC · $X.XX** | Copilot: total CLI-recorded session consumption and its USD equivalent (100 AIC = $1). Other API providers retain their token-based estimates. |
+| **Heute: XX.XX AIC · $X.XX** | Opens the cost overview. Copilot: today's CLI-recorded consumption for this session and its USD equivalent (100 AIC = $1); total consumption remains in the tooltip. Other API providers retain their daily token-based estimates; subscriptions show their quota status. |
 
 #### Chat area
 
@@ -239,15 +270,6 @@ At the bottom, the statusbar shows contextual information about the active sessi
 - **Tool calls** as collapsible cards.
 - **Search:** `Ctrl+F` opens the chat search.
 
-### Tutorial popups
-
-Certain actions show one-time tutorial popups:
-
-| Popup | Trigger | Auto-close |
-|---|---|---|
-| **"Reload skills"** | First click on the reload button | On another reload or after 30 seconds |
-| **"Rename tab"** | First double-click on a tab title | After renaming or after 30 seconds |
-
 ### File drag & drop
 
 Drag files directly into the chat area — the file paths are sent as context to the provider.
@@ -263,12 +285,12 @@ Drag files directly into the chat area — the file paths are sent as context to
 - Exposed to the model as a lazy index (name + description + file path), not
   inlined eagerly. The model reads a specific `SKILL.md` itself, via its file
   tool, only once it judges it relevant to the current task.
-- The sidebar list always shows the active tab's provider's skills.
-- **Toggle switch** in the sidebar force-activates a skill for the next
+- Functions / Skills lists user-wide local sources only, including empty directories and source-specific errors.
+- **Toggle switch** in the Session Actions dropdown force-activates a skill for the next
   message — an explicit override on top of the automatic, model-driven
   selection.
-- The **⊘ button** disables skills CLI-wide (`~/.copilot/settings.json`) — Copilot only.
-- **Project skills** (`Project` badge): from `.github/skills/` in the active CWD.
+- Files are managed in provider folders; this page adds no editor. Copilot alone offers native, name-scoped global enable/disable configuration; this is not the per-tab prompt override.
+- Project skills remain available in Session Actions through each provider's existing discovery rules.
 
 ### Agents
 
@@ -625,7 +647,7 @@ Here you store API keys for the direct LLM providers (e.g. Anthropic). The keys 
 
 #### Per-provider tabs
 
-A dedicated tab per provider that's actually usable right now: **Copilot** is always present (static, its native CLI configuration); **Claude Code** appears once its CLI is installed; the direct-API providers appear once a key is stored. Ollama needs no key, so its equivalent signal is a saved base URL on the Provider tab (defaults to `http://localhost:11434/v1`) — the tab appears once you've saved one. Each tab only shows what applies to that provider:
+A dedicated tab per provider that's actually usable right now: **Copilot** is always present (static, its native CLI configuration); **Claude Code** appears when its bundled runtime is available; the direct-API providers appear once a key is stored. Ollama needs no key, so its equivalent signal is a saved base URL on the Provider tab (defaults to `http://localhost:11434/v1`) — the tab appears once you've saved one. Each tab only shows what applies to that provider:
 
 | Tab | Contains |
 |---|---|
@@ -743,3 +765,12 @@ sich die Sitzung öffnen. **Beendet (fachlich ungeprüft)** bestätigt nur das E
 der Agentenantwort, nicht beispielsweise eine erfolgreiche Wiki-Veröffentlichung.
 Unterbrochene Läufe werden nach App-Neustart nicht erneut gestartet. Das Löschen
 einer Aufgabe löscht nicht ihren Verlauf und stoppt keinen bereits laufenden Chat.
+# Skills direkt an der Session
+
+Neben **Auto** öffnet **🧩 Skills (Anzahl)** die verfügbaren Skills des aktuellen
+Providers und Projekts. Jeder Eintrag zeigt nur Name und Ein/Aus-Schalter.
+Die Auswahl gilt pro Tab für folgende Prompts, bis sie ausgeschaltet wird;
+die Skills-Verwaltung unter Funktionen bleibt synchron.
+Während des Ladens oder bei Fehlern werden keine veralteten Skills angehängt.
+Das Menü ist scrollbar: Tab oder Pfeiltasten navigieren, Enter/Leertaste
+schalten um, Escape schließt und setzt den Fokus zurück. Außenklick schließt ebenfalls.

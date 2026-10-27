@@ -131,7 +131,7 @@ async function applyUpdate(repoDir) {
       // untrusted input, so shell:true here carries no injection risk.
       const isWindows = process.platform === 'win32';
       const npmCmd = isWindows ? 'npm.cmd' : 'npm';
-      const install = await run(npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: isWindows });
+      const install = await run(npmCmd, ['install', '--include=optional', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: isWindows });
       if (!install.ok) {
         return { ok: false, reason: 'npm-install-failed', error: (install.stderr || install.error?.message || '').trim() };
       }

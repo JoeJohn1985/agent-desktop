@@ -107,8 +107,8 @@ Review mit besonderer Aufmerksamkeit behandeln:
   _Fokus: `secure-store.js` — wie werden API-Keys tatsächlich verschlüsselt/
   abgelegt, Plattform-Fallbacks (kein DPAPI unter Linux/Mac?)._
 
-- [ ] **B7 — Onboarding, Setup & Updater (Backend)**
-  `main.js` Onboarding-/Setup-/Auth-IPC (ca. Zeilen 1452–1833),
+- [ ] **B7 — Auth & Updater (Backend)**
+  `main.js` Auth-IPC (Wizard-/Setup-IPC entfernt),
   `src/updater.js`, `main.js` `updates:*` IPC (ca. Zeilen 655–688)
   _Fokus: Update-Mechanismus (Quelle/Signatur-Prüfung der Updates?),
   Erststart-Flow._
@@ -149,13 +149,12 @@ Review mit besonderer Aufmerksamkeit behandeln:
   Built-in-)Einträgen sichtbar (bekannter Bug-Typ)._
 
 - [ ] **R6 — Settings, DevConsole, Shortcuts, Drag&Drop, Tooltips**
-  `renderer/app.js` Zeilen 4571–6057 (ohne Onboarding/Updates)
+  `renderer/app.js` Settings-/Interaktionslogik (ohne Updates)
   _Fokus: Shortcut-Konflikte, Drag&Drop-Dateivalidierung vor Verarbeitung._
 
-- [ ] **R7 — Onboarding & Update-Banner-UI**
-  `renderer/app.js` Zeilen 6057–6952
-  _Fokus: Abbruch-/Zurück-Pfade im Wizard, ob Onboarding-State konsistent
-  mit `dev:*`-Flags bleibt._
+- [ ] **R7 — Startup & Update-Banner-UI**
+  `renderer/app.js` Initialisierung und Update-Prüfung
+  _Fokus: Direkter Chat-Start, Splash-Cleanup bei Fehlern._
 
 - [ ] **R8 — Gemeinsame Renderer-Logic & Utils**
   `src/renderer-logic.js`, `src/utils.js`, `src/frontend-helpers.js`,

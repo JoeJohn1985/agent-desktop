@@ -1,7 +1,7 @@
 // ── Skills, Agents & MCP Module ───────────────────────────────
 // Extracted from app.js — sidebar rendering for skills/agents/MCP servers,
 // per-tab context loading, and MCP status probing.
-// NOTE: unlike onboarding.js/plugins.js, this module's state (skills, agents,
+// NOTE: unlike plugins.js, this module's state (skills, agents,
 // mcpServers, globalMcpServers, activeAgents, _liveMcpStatus) is also read
 // or written from app.js itself (Tab Management, Send Message, Agent IPC,
 // startup data load) — the same cross-file bare-global pattern already used
@@ -15,6 +15,56 @@
 let skills = [];
 let _skillsLoading = false;
 let _skillsLoadError = '';
+let _globalSkillGroups = [];
+let _globalSkillProviders = [];
+let _globalSkillsLoading = false;
+let _globalSkillsError = '';
+let _globalSkillsLoaded = false;
+let _globalSkillsGeneration = 0;
+let _globalSkillMutation = false;
+
+async function setGlobalSkillEnabled(identity, enabled) {
+  if (_globalSkillMutation) return;
+  _globalSkillMutation = true;
+  renderSkills();
+  try {
+    await desktop.context.setGlobalSkillEnabled('copilot', identity, enabled);
+    await loadGlobalSkills();
+    const tab = tabs.get(activeTabId);
+    if (tab) await loadContextForTab(getTabProvider(tab), tab.cwd || null, { force: true });
+  } catch (error) {
+    showNotification(`Skill-Änderung fehlgeschlagen: ${error.message}`, 'error');
+    await loadGlobalSkills();
+  } finally {
+    _globalSkillMutation = false;
+    renderSkills();
+  }
+}
+
+async function loadGlobalSkills() {
+  const generation = ++_globalSkillsGeneration;
+  _globalSkillsLoading = true;
+  _globalSkillsLoaded = true;
+  _globalSkillsError = '';
+  renderSkills();
+  try {
+    const [groups, providers] = await Promise.all([
+      desktop.context.listGlobalSkills(),
+      getConnectedProviders(),
+    ]);
+    if (generation === _globalSkillsGeneration) {
+      _globalSkillGroups = groups || [];
+      _globalSkillProviders = providers;
+    }
+  } catch (error) {
+    if (generation === _globalSkillsGeneration) _globalSkillsError = `Skills konnten nicht geladen werden: ${error.message}`;
+  } finally {
+    if (generation === _globalSkillsGeneration) {
+      _globalSkillsLoading = false;
+      renderSkills();
+    }
+  }
+}
 /** @type {Array<{id: string, name: string, icon: string, description: string, fileSlug?: string}>} Agent definitions loaded from main process. */
 let agents = [];
 /** @type {Set<string>} IDs of currently enabled agents (persisted to preferences). */
@@ -34,58 +84,62 @@ let globalMcpServers = []; // eslint-disable-line prefer-const -- reassigned in 
 const _liveMcpStatus = new Map();
 
 /**
- * Render the skills list in the sidebar. Each skill card shows an icon,
- * name, active toggle, and an optional delete button for user-created skills.
+ * Render user-wide provider groups independently of the session skill context.
  */
 function renderSkills() {
+  renderSessionSkills();
   const container = document.getElementById('skillList');
   if (!container) return;
-  const tab = tabs.get(activeTabId);
+  if (!_globalSkillsLoaded) { void loadGlobalSkills(); return; }
   const context = document.getElementById('skillsContext');
-  if (context) context.textContent = tab
-    ? `Provider: ${getTabProvider(tab)} · Projekt: ${tab.cwd || 'Kein Projekt gewählt'}`
-    : 'Kein Chat-Tab ausgewählt.';
-  if (_skillsLoading || _skillsLoadError) {
-    container.innerHTML = emptyStateHtml('🛠️', _skillsLoadError || 'Skills werden geladen…');
+  if (context) context.textContent = 'Benutzerweite Skills · Copilot: nativer CLI-Status, namensgleich über alle Quellen. Bestehende Gesprächsinhalte bleiben erhalten. ACP-Wirkung ist nicht bestätigt, auch nicht durch Neustart oder neue Session.';
+  if (_globalSkillsLoading || _globalSkillsError) {
+    container.innerHTML = emptyStateHtml('🛠️', _globalSkillsError || 'Skills werden geladen…');
     return;
   }
-
-  // Kein Filtern mehr: die Liste enthält per Konstruktion genau die Skills,
-  // die der Provider dieses Tabs in diesem Projekt tatsächlich liest (siehe
-  // loadContextForTab / src/context-paths.js). Alles, was hier ankommt, ist
-  // verfügbar — und alles Verfügbare kommt hier an.
-  if (skills.length === 0) {
-    container.innerHTML = emptyStateHtml('🛠️', 'Keine Skills für diesen Provider und dieses Projekt verfügbar.');
-    return;
-  }
-
-  // Der Aktiv-Zustand ist dagegen pro Tab: ein in einem Tab erzwungener Skill
-  // darf in anderen Tabs nicht als aktiv erscheinen.
-  const activeTabSkills = tabs.get(activeTabId)?.activeSkills || new Set();
-
-  // No inline onclick with interpolated values: skill names/dirs come from
-  // third-party SKILL.md frontmatter (incl. marketplace plugins) — HTML-entity
-  // decoding would let a crafted name break out of the JS string inside an
-  // onclick attribute. Actions run via delegated listeners reading data-*
-  // attributes instead (see initListActionDelegation).
-  container.innerHTML = skills.map(s => {
-    const isActive = activeTabSkills.has(s.id);
-    const isProject = s.source === 'project';
-    return `
-      <button type="button" class="skill-card ${isActive ? 'skill-card--active' : ''} ${isProject ? 'skill-card--project' : ''}"
-           aria-pressed="${isActive}" ${!tab ? 'disabled' : ''}
-           data-skill-id="${escapeAttr(s.id)}" data-tooltip="${escapeAttr(s.description)}">
+  const providers = [..._globalSkillProviders].sort((a, b) => {
+    const rank = id => id === 'copilot' ? 0 : id === 'claude-code' ? 1 : 2;
+    return rank(a.id) - rank(b.id);
+  });
+  container.innerHTML = providers.map(provider => {
+    const groups = _globalSkillGroups.filter(group => group.providers.includes(provider.id));
+    if (!groups.length) return '';
+    return `<section class="functions-view__skill-provider" data-skill-provider="${escapeAttr(provider.id)}">
+      <h3>${escapeHtml(provider.label)}</h3>
+      ${groups.map(group => `
+    <section class="functions-view__skill-group">
+      ${group.providers.length > 1 ? '<p class="functions-view__skill-source">Geteilte Quelle</p>' : ''}
+      <p class="functions-view__skill-source">${escapeHtml(group.directory)}</p>
+      ${group.error ? emptyStateHtml('⚠️', `Skills konnten nicht geladen werden: ${group.error}`)
+        : !group.skills.length ? emptyStateHtml('🛠️', 'Keine benutzerweiten Skills in diesem Verzeichnis.')
+          : `<div class="functions-view__skill-grid">${group.skills.map(s => `
+      <div class="skill-card" data-tooltip="${escapeAttr(s.description || '')}">
         <span class="skill-card__icon">${escapeHtml(s.icon || '🧩')}</span>
         <span class="skill-card__info">
           <span class="skill-card__name">${escapeHtml(s.name)}</span>
           <span class="functions-view__skill-description">${escapeHtml(s.description || '')}</span>
-          <span class="functions-view__skill-source">${escapeHtml(s.source || 'Unbekannte Herkunft')}</span>
         </span>
-        <span class="skill-card__toggle"></span>
-      </button>
-    `;
-  }).join('');
+        ${group.native ? `<label class="settings__toggle">
+          <input type="checkbox" data-native-skill="${escapeAttr(s.id)}" ${s.enabled ? 'checked' : ''} ${_globalSkillMutation ? 'disabled' : ''} aria-label="${escapeAttr(s.name)}: ${s.enabled ? 'Aktiv · Deaktivieren' : 'Deaktiviert · Aktivieren'}" />
+          <span class="settings__toggle-slider" aria-hidden="true"></span>
+        </label>` : `<label class="settings__toggle" title="Status unbekannt">
+          <input type="checkbox" data-unsupported-skill disabled aria-label="${escapeAttr(s.name)}: Status unbekannt" />
+          <span class="settings__toggle-slider" aria-hidden="true"></span>
+        </label>`}
+      </div>`).join('')}</div>`}
+    </section>`).join('')}</section>`;
+  }).join('') || emptyStateHtml('🛠️', 'Keine lokalen benutzerweiten Skill-Quellen für verbundene Provider verfügbar.');
+  container.querySelectorAll('[data-unsupported-skill]').forEach(input => {
+    input.indeterminate = true;
+  });
+  container.querySelectorAll('[data-native-skill]').forEach(input => {
+    input.addEventListener('change', () => void setGlobalSkillEnabled(input.dataset.nativeSkill, input.checked));
+  });
 }
+
+window.addEventListener('focus', () => {
+  if (_globalSkillsLoaded) void loadGlobalSkills();
+});
 
 /**
  * Toggle a skill's active state for the current tab only.
@@ -93,10 +147,91 @@ function renderSkills() {
  */
 function toggleSkill(skillId) {
   const tab = tabs.get(activeTabId);
-  if (!tab) return;
+  if (!tab || _skillsLoading || _skillsLoadError || !skills.some(s => s.id === skillId)) return;
   if (tab.activeSkills.has(skillId)) tab.activeSkills.delete(skillId);
   else tab.activeSkills.add(skillId);
   renderSkills();
+}
+
+/** Only resolved skills for the current context may enrich a prompt. */
+function getActiveSkillDefinitions(tab) {
+  if (!tab || _skillsLoading || _skillsLoadError || _globalSkillMutation) return [];
+  if (_lastContextKey !== null && _lastContextKey !== `${getTabProvider(tab)} ${tab.cwd || ''}`) return [];
+  return skills.filter(skill => tab.activeSkills.has(skill.id));
+}
+
+function renderSessionSkills() {
+  const button = document.getElementById('btnSessionSkills');
+  if (!button) return;
+  const tab = tabs.get(activeTabId);
+  button.disabled = !tab;
+  button.textContent = `🛠️ Skills (${getActiveSkillDefinitions(tab).length})`;
+  const menu = document.getElementById('sessionSkillsDropdown');
+  if (!menu) return;
+  if (!tab) { closeSessionSkills(); return; }
+  const focusedId = document.activeElement?.dataset?.sessionSkillId;
+  const message = _skillsLoading ? 'Skills werden geladen…' : _skillsLoadError
+    || (!skills.length ? 'Keine Skills für diesen Provider und dieses Projekt verfügbar.' : '');
+  menu.innerHTML = message
+    ? `<div role="status" class="session-skills__status">${escapeHtml(message)}</div>`
+    : skills.map(skill => `<button type="button" class="session-skills__toggle" role="switch"
+        aria-checked="${tab.activeSkills.has(skill.id)}" data-session-skill-id="${escapeAttr(skill.id)}">
+        <span>${escapeHtml(skill.icon || '🧩')} ${escapeHtml(skill.name)}</span><span class="skill-card__toggle" aria-hidden="true"></span>
+      </button>`).join('');
+  if (focusedId) [...menu.querySelectorAll('[data-session-skill-id]')]
+    .find(el => el.dataset.sessionSkillId === focusedId)?.focus();
+  positionSessionMenu(menu, button, true);
+}
+
+function closeSessionSkills(restoreFocus = false) {
+  document.getElementById('sessionSkillsDropdown')?.remove();
+  const button = document.getElementById('btnSessionSkills');
+  button?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) button?.focus();
+}
+
+function initSessionSkills() {
+  const button = document.getElementById('btnSessionSkills');
+  if (!button) return;
+  button.addEventListener('click', () => {
+    if (document.getElementById('sessionSkillsDropdown')) { closeSessionSkills(); return; }
+    const menu = document.createElement('div');
+    menu.id = 'sessionSkillsDropdown';
+    menu.className = 'model-dropdown session-skills';
+    menu.setAttribute('role', 'group');
+    menu.setAttribute('aria-label', 'Skills für diese Session');
+    button.parentElement.appendChild(menu);
+    button.setAttribute('aria-expanded', 'true');
+    menu.addEventListener('click', event => {
+      const toggle = event.target.closest('[data-session-skill-id]');
+      if (toggle) toggleSkill(toggle.dataset.sessionSkillId);
+    });
+    menu.addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const controls = [...menu.querySelectorAll('[role="switch"]')];
+      if (!controls.length) return;
+      event.preventDefault();
+      const index = controls.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length;
+      controls[next].focus();
+    });
+    renderSessionSkills();
+    menu.querySelector('[role="switch"]')?.focus();
+  });
+  document.addEventListener('click', event => {
+    if (!event.composedPath().includes(button.parentElement)) closeSessionSkills();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('sessionSkillsDropdown')) {
+      event.preventDefault();
+      closeSessionSkills(true);
+    }
+  });
+  document.addEventListener('focusin', event => {
+    if (!button.parentElement.contains(event.target)) closeSessionSkills();
+  });
+  window.addEventListener('resize', renderSessionSkills);
 }
 
 /**
@@ -243,7 +378,10 @@ async function loadContextForTab(provider, cwd, opts = {}) {
 /** Erzwingt einen Neuaufbau der Skill-/Agent-Liste (Reload-Button im ⋮-Menü). */
 async function reloadSkills() {
   const tab = tabs.get(activeTabId);
-  await loadContextForTab(getTabProvider(tab), tab?.cwd || null, { force: true });
+  await Promise.all([
+    loadGlobalSkills(),
+    tab ? loadContextForTab(getTabProvider(tab), tab.cwd || null, { force: true }) : Promise.resolve(),
+  ]);
 }
 
 /** Gleiche Quelle wie reloadSkills — Skills und Agents kommen zusammen. */

@@ -66,12 +66,12 @@ describe('shellQuote', () => {
 describe('buildAdapterCommand', () => {
   test('wechselt ins Verzeichnis und ersetzt die Shell durch den Adapter', () => {
     expect(buildAdapterCommand('/home/pi/projekt', 'pkg@1.2.3'))
-      .toBe(`${SOURCE_NVM_PREFIX}cd '/home/pi/projekt' && exec npx -y 'pkg@1.2.3'`);
+      .toBe(`${SOURCE_NVM_PREFIX}unset CLAUDE_CODE_EXECUTABLE ANTHROPIC_API_KEY; export DISABLE_AUTOUPDATER=1; cd '/home/pi/projekt' && exec npx -y 'pkg@1.2.3'`);
   });
 
   test('quotet sowohl Verzeichnis als auch Paketangabe', () => {
     const cmd = buildAdapterCommand('/tmp; evil', 'pkg@1.0; evil');
-    expect(cmd).toBe(`${SOURCE_NVM_PREFIX}cd '/tmp; evil' && exec npx -y 'pkg@1.0; evil'`);
+    expect(cmd).toBe(`${SOURCE_NVM_PREFIX}unset CLAUDE_CODE_EXECUTABLE ANTHROPIC_API_KEY; export DISABLE_AUTOUPDATER=1; cd '/tmp; evil' && exec npx -y 'pkg@1.0; evil'`);
   });
 
   test('nutzt exec, damit kein Shell-Prozess zwischen SSH und Adapter bleibt', () => {

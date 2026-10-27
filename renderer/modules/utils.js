@@ -2,6 +2,44 @@
 // Loaded before all other modules — provides common helpers
 'use strict';
 
+function positionSessionMenu(menu, button, preferAbove = false) {
+  const margin = 8;
+  const gap = 4;
+  const rect = button.getBoundingClientRect();
+  const above = Math.max(0, rect.top - margin - gap);
+  const below = Math.max(0, window.innerHeight - rect.bottom - margin - gap);
+  const openAbove = preferAbove || above >= below;
+  menu.style.position = 'fixed';
+  menu.style.minWidth = `${Math.min(220, Math.max(0, window.innerWidth - margin * 2))}px`;
+  menu.style.maxWidth = `${Math.max(0, window.innerWidth - margin * 2)}px`;
+  menu.style.maxHeight = `${openAbove ? above : below}px`;
+  menu.style.top = openAbove ? 'auto' : `${rect.bottom + gap}px`;
+  menu.style.bottom = openAbove ? `${window.innerHeight - rect.top + gap}px` : 'auto';
+  menu.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - menu.getBoundingClientRect().width - margin))}px`;
+}
+
+function positionSessionReasoningMenu(submenu, menu, item) {
+  menu.querySelectorAll('.model-dropdown__submenu--active').forEach(panel => {
+    panel.classList.remove('model-dropdown__submenu--active');
+  });
+  submenu.classList.add('model-dropdown__submenu--active');
+  const margin = 8;
+  const panelWidth = Math.min(160, (window.innerWidth - margin * 2) / 2);
+  menu.style.maxWidth = `${Math.max(0, window.innerWidth - margin * 2 - panelWidth)}px`;
+  menu.style.minWidth = `${Math.min(220, window.innerWidth - margin * 2 - panelWidth)}px`;
+  let rect = menu.getBoundingClientRect();
+  const fitsRight = rect.right + panelWidth <= window.innerWidth - margin;
+  if (!fitsRight && rect.left - panelWidth < margin) {
+    menu.style.left = `${margin + panelWidth}px`;
+    rect = menu.getBoundingClientRect();
+  }
+  const row = item.getBoundingClientRect();
+  submenu.style.width = `${panelWidth}px`;
+  submenu.style.maxHeight = `${Math.max(0, rect.bottom - margin)}px`;
+  submenu.style.left = `${fitsRight ? rect.right : rect.left - panelWidth}px`;
+  submenu.style.top = `${Math.max(margin, Math.min(row.top, rect.bottom - submenu.getBoundingClientRect().height))}px`;
+}
+
 // ── UI Constants (shared across all modules) ─────────────────
 const SCROLL_BOTTOM_THRESHOLD = 60;
 const NOTIFICATION_FREQUENCY_HZ = 880;

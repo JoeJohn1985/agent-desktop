@@ -43,7 +43,6 @@ mechanical Phase 1 move.
 | `provider-settings.js` | API-provider key/base-URL settings, per-provider config tabs, SSH remote-folder picker |
 | `chat-search.js` | In-chat search bar (Ctrl+F) |
 | `plugins.js` | Plugin/marketplace manager + chat/plugins/costs view switching |
-| `onboarding.js` | First-run wizard + post-onboarding tutorial popups |
 
 A module's own state (e.g. `sessions`, `mcpServers`, `activeAgents`) is
 sometimes read or mutated from `app.js` too — same cross-file bare-global

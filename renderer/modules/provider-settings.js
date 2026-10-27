@@ -32,11 +32,11 @@ const PROVIDER_SETTINGS = [
     info: [
       'Claude Code – voll agentisch über das Abo (kein API-Key).',
       '',
-      'Läuft über den ACP-Adapter (npx @agentclientprotocol/claude-agent-acp).',
+      'ACP-Adapter, SDK und native CLI werden mit der App ausgeliefert.',
       'Abrechnung über dein Claude-Abo (Pro/Max) statt pro Token —',
       'sofern kein ANTHROPIC_API_KEY gesetzt ist (wird bewusst entfernt).',
       '',
-      'Voraussetzung: einmalig „claude" (Claude Code CLI) mit dem Abo einloggen.',
+      'Einmalig über „Anmelden" mit der mitgelieferten CLI ins Abo einloggen.',
     ].join('\n'),
   },
   {
@@ -48,8 +48,8 @@ const PROVIDER_SETTINGS = [
       'Dadurch liegt die Session dort — du kannst sie auf dem Zielrechner',
       'jederzeit im Terminal mit „claude --resume <id>" weiterführen.',
       '',
-      'Voraussetzungen auf dem Zielrechner: Node.js/npx und die „claude"-CLI',
-      'mit Abo eingeloggt. Anmeldung per SSH-Key oder per im eigenen Tab',
+      'Voraussetzungen auf dem Zielrechner: Node.js ≥22/npm, ggf. Runtime-Download',
+      'und Claude-Abo-Anmeldung dort. SSH-Anmeldung per Key oder im eigenen Tab',
       'hinterlegtem Passwort — eine interaktive Abfrage kann die App nicht',
       'anzeigen.',
       '',
@@ -162,6 +162,7 @@ async function getConnectedProviders() {
  */
 async function getConnectedProviderConfigs() {
   const providers = await getConnectedProviders();
+  if (_globalSkillsLoaded) void loadGlobalSkills();
   return providers.filter(p => p.id !== 'copilot');
 }
 
@@ -769,6 +770,7 @@ async function renderProvidersSettings() {
           input.value = '';
           showNotification(`${PROVIDER_LABELS[p.id]}-Key gespeichert.`, 'success');
           renderProvidersSettings();
+          if (_globalSkillsLoaded) void loadGlobalSkills();
           refreshProviderModels(p.id); // discover this provider's models now that it has a key
         } else {
           showNotification(res.error || 'Speichern fehlgeschlagen.', 'error');
@@ -778,6 +780,7 @@ async function renderProvidersSettings() {
         await window.desktop.providers.deleteKey(p.id);
         showNotification(`${PROVIDER_LABELS[p.id]}-Key entfernt.`, 'info');
         renderProvidersSettings();
+        if (_globalSkillsLoaded) void loadGlobalSkills();
       }));
     }
 
@@ -801,6 +804,7 @@ function saveProviderBaseUrl(provider, url) {
   const map = { ...(getSettings().providerBaseUrls || {}) };
   if (url) map[provider] = url; else delete map[provider];
   saveSetting('providerBaseUrls', map);
+  if (_globalSkillsLoaded) void loadGlobalSkills();
 }
 
 /**
@@ -824,7 +828,7 @@ async function renderCopilotProviderRow(list, p) {
   const statusEl = row.querySelector('.providers-row__status');
   const controls = row.querySelector('.providers-row__controls');
 
-  // Claude Code: launched on demand via npx; billed through the subscription.
+  // Claude Code: release-bundled runtime; billed through the subscription.
   // `claude auth status` reports the actual login state non-interactively
   // (clean JSON) — claudeCodeStatus() above only checks CLI presence.
   if (p.id === 'claude-code') {
@@ -838,17 +842,48 @@ async function renderCopilotProviderRow(list, p) {
       statusEl.textContent = '● angemeldet' + (authStatus.email ? ` als ${authStatus.email}` : '') + (authStatus.subscriptionType ? ` (${authStatus.subscriptionType})` : '');
       statusEl.classList.add('is-set');
     } else if (cc.installed) {
-      statusEl.textContent = '○ CLI installiert' + (cc.version ? ` (v${cc.version})` : '') + ', nicht angemeldet';
+      statusEl.textContent = '○ Runtime vorhanden, nicht angemeldet';
     } else {
-      statusEl.textContent = '⚠ „claude"-CLI nicht gefunden';
+      statusEl.textContent = '⚠ Claude-Release-Runtime fehlt';
     }
     const hint = document.createElement('span');
     hint.className = 'providers-row__hint';
     hint.textContent = !cc.installed
-      ? 'Installiere die „claude"-CLI (npm i -g @anthropic-ai/claude-code) und melde dich mit dem Abo an.'
+      ? 'App neu installieren. ' + (cc.error || '')
       : 'Kein API-Key nötig — ANTHROPIC_API_KEY wird für Claude Code entfernt.'
-        + (authStatus.loggedIn ? '' : ' Melde dich einmalig mit dem Abo an (Terminal: „claude" → Login).');
+        + ` Release-Adapter ${cc.releaseVersion}, SDK ${cc.sdkVersion}.`
+        + (cc.developerOverride ? ` ⚠ Entwickler-Override ${cc.version} (nur neue Prozesse, Download möglich).` : '')
+        + (authStatus.loggedIn ? '' : ' Einmalig über „Anmelden" mit dem Abo anmelden.');
     controls.appendChild(hint);
+    if (getSettings().devMode === true && cc.installed) {
+      const version = document.createElement('input');
+      version.className = 'providers-row__input';
+      version.placeholder = `Entwicklerversion (Release: ${cc.releaseVersion})`;
+      version.value = cc.version || cc.releaseVersion;
+      version.setAttribute('aria-label', 'Exakte Claude-ACP-Entwicklerversion');
+      const apply = document.createElement('button');
+      apply.className = 'action-btn';
+      apply.textContent = 'Entwicklerversion testen';
+      apply.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+        const result = await window.desktop.chat.applyAdapterUpdate(version.value.trim());
+        if (result.ok) {
+          _prefs.claudeCodeAdapterDeveloperVersion = result.newVersion === cc.releaseVersion ? undefined : result.newVersion;
+          showNotification('Version gilt für neue Prozesse; laufende Sessions bleiben unverändert. Release-Version eingeben zum Zurücksetzen.', 'info');
+          await renderProvidersSettings();
+        } else showNotification(result.error, 'error');
+      }));
+      controls.append(version, apply);
+    }
+    if (cc.installed && !authStatus.loggedIn) {
+      const login = document.createElement('button');
+      login.className = 'action-btn';
+      login.textContent = 'Anmelden';
+      login.addEventListener('click', (e) => withButtonBusy(e.currentTarget, async () => {
+        const result = await window.desktop.chat.claudeCodeLogin();
+        showNotification(result.success ? 'Anmeldung im geöffneten Terminal abschließen, danach Status prüfen.' : result.error, result.success ? 'info' : 'error');
+      }));
+      controls.appendChild(login);
+    }
     if (authStatus.loggedIn) {
       const logoutBtn = document.createElement('button');
       logoutBtn.className = 'action-btn';
@@ -880,6 +915,17 @@ async function renderCopilotProviderRow(list, p) {
     const host = getClaudeCodeSshHost();
     statusEl.textContent = host ? '● eingerichtet' : '○ nicht eingerichtet';
     statusEl.classList.toggle('is-set', Boolean(host));
+    const runtimeHint = document.createElement('span');
+    runtimeHint.className = 'providers-row__hint';
+    try {
+      const runtime = await window.desktop.chat.claudeCodeStatus();
+      runtimeHint.textContent = `Remote: ACP ${runtime.version || runtime.releaseVersion || 'Release-Version'}. `
+        + (runtime.developerOverride ? '⚠ Entwickler-Override. ' : '')
+        + 'Ausführung auf dem SSH-Host (Node ≥22); erstmaliger npm-Download möglich, nicht offline gebündelt. Remote-Anmeldung erforderlich.';
+    } catch (_) {
+      runtimeHint.textContent = 'Remote-Ausführung benötigt Node ≥22 und ggf. npm-Download sowie Remote-Anmeldung.';
+    }
+    controls.appendChild(runtimeHint);
 
     const input = document.createElement('input');
     input.type = 'text';

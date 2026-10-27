@@ -84,9 +84,35 @@ async function buildSkillsList(target, deps) {
 
   for (const dir of dirs.global) lists.push(await scanSkillDirectory(dir, 'global', userSkillIcon, yamlParse));
   for (const dir of dirs.project) lists.push(await scanSkillDirectory(dir, 'project', userSkillIcon, yamlParse));
-
   return dedupeFirstWins(lists, s => s.dirName);
 }
+
+  /**
+   * Local user-wide sources only. No CLI builtins, project or SSH context.
+   * Keep provider identities even when names match; shared folders are scanned once.
+   */
+  async function buildGlobalSkillsList(deps) {
+    const groups = new Map();
+    for (const provider of ALL_PROVIDERS) {
+      const dirs = deps.skillDirs(provider, null, { skillsDirOverride: deps.skillsDirOverride });
+      for (const dir of dirs.global) {
+        if (!path.isAbsolute(dir)) continue;
+        const key = path.resolve(dir);
+        if (groups.has(key)) {
+          groups.get(key).providers.push(provider);
+          continue;
+        }
+        const group = { providers: [provider], directory: dir, skills: [], error: '' };
+        groups.set(key, group);
+        try {
+          group.skills = await deps.scanSkillDirectory(dir, 'global', deps.userSkillIcon, deps.yamlParse);
+        } catch (error) {
+          group.error = error.message;
+        }
+      }
+    }
+    return [...groups.values()];
+  }
 
 /**
  * Builds the full agent list for a validated (provider, cwd) target: every
@@ -134,6 +160,7 @@ module.exports = {
   validateContextTarget,
   dedupeFirstWins,
   buildSkillsList,
+  buildGlobalSkillsList,
   buildAgentsList,
   buildContextPaths,
 };

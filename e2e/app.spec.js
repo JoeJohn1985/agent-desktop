@@ -161,7 +161,7 @@ test.describe('App Start', () => {
     await window.locator('#functionsView [aria-label="Zurück zum Chat"]').click();
     await expect(input).toBeVisible();
     await expect(input).toHaveValue('Entwurf bleibt erhalten');
-    await window.locator('#btnOpenCosts').click();
+    await window.locator('#sessionUsage').click();
     await expect(window.locator('#costsView')).toBeVisible();
     await window.locator('#functionsView [aria-label="Zurück zum Chat"]').click();
     await window.locator('#btnFunctions').click();

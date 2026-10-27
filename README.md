@@ -12,7 +12,15 @@
 | Google Gemini | **Beta** | "Tested, not final" — research-oriented (live search / grounding) |
 | Anthropic · OpenAI · GLM (Zhipu) · Ollama | **Alpha** | "Untested" — fully agentic; Ollama is local & keyless |
 
-Every provider emits the same internal event vocabulary, so chat, cost tracking, tools and UI work identically across providers. Other highlights: multiple named sessions, toggleable skills/agents, an onboarding wizard, a plugin marketplace, todos, markdown rendering, file drag & drop, per-tab model switching, dynamic model discovery, and USD-accurate cost tracking — all in a clean, themeable UI.
+Every provider emits the same internal event vocabulary, so chat, cost tracking, tools and UI work identically across providers. Other highlights: multiple named sessions, toggleable skills/agents, a plugin marketplace, todos, markdown rendering, file drag & drop, per-tab model switching, dynamic model discovery, and USD-accurate cost tracking — all in a clean, themeable UI.
+
+## Claude Code runtime
+
+Claude ACP **0.97.0**, Agent SDK **0.3.310** and native CLI **2.1.310**
+ship with the app. Local startup uses those files without npx or a system
+Claude install. Only developer mode permits explicit alternate adapter versions.
+SSH runs the exact selected version remotely and may need a download.
+See [runtime validation and limits](specs/changes/claude-runtime-im-app-release/validation.md).
 
 ## Features
 
@@ -33,19 +41,15 @@ Every provider emits the same internal event vocabulary, so chat, cost tracking,
 
 ### Skills & Agents
 - 🧠 **Skills, per provider** — Copilot keeps its native `~/.copilot/skills/`; every other provider (Claude Code, Anthropic, OpenAI, GLM, Ollama) has its own `~/.agent-desktop/<provider>/skills/`. Exposed to the model as a lazy index (name + description + file path) — it reads a skill's `SKILL.md` itself only when it judges it relevant, instead of everything being inlined eagerly.
-- ⊘ **CLI Skill Disable** — Globally disable skills in the Copilot CLI via `~/.copilot/settings.json` (persisted across sessions; Copilot only)
+- ⊘ **Native CLI skill configuration** — Funktionen / Skills runs Copilot's native `skill enable/disable` and reads `skill list --json`. Name-scoped across sources; disabled names are excluded from app prompt overrides. Native ACP runtime exclusion is **not confirmed**, even for new sessions (see `docs/NATIVE-SKILLS-LIVE-TEST.md`). Other providers have no native activation controls.
 - 🤖 **Agents, per provider** — same folder structure as Skills (`~/.agent-desktop/<provider>/agents/`), but agents are a **persona switch**: once the model judges a task matches an agent's description, it reads that agent's `.agent.md` and adopts its approach for the rest of the task.
 - 🔘 **Manual toggle (override)** — Skills/Agents can still be force-activated per session on top of the automatic selection; for Copilot this uses its native `/agent <name>` prefix, for every other provider a plain-language hint.
 - 🔍 **Skill & Agent Tags** — Visual indicators under each message showing which skills/agents were force-activated
 - 📋 **Instructions, direct-API providers only** — Anthropic/OpenAI/GLM/Ollama get a provider-scoped `~/.agent-desktop/<provider>/instructions/`; every `.instructions.md` file placed there is always inlined in full into the system prompt (not a lazy index like Skills/Agents — instructions are meant to apply unconditionally, no toggle needed). Copilot and Claude Code already have their own native instructions discovery and don't use this.
 
-### Onboarding & Tutorials
-- 🚀 **First-Run Onboarding Wizard** — Guided setup on first launch:
-  1. GitHub authentication check (`gh auth login`)
-  2. Folder structure setup (`~/.agent-desktop/`)
-  3. Starter agents & skills selection (6 categories, individually toggleable)
-  4. Feature introduction via a 3-slide carousel
-- 💡 **Tutorial Popups** — Contextual hints for Skills reload and Tab rename; auto-close on action or after 30 seconds
+### Direct startup
+- The app opens directly in chat, including on first launch. Provider login,
+  API keys and folder configuration remain available in the regular settings.
 
 ### Productivity
 - ✅ **Todos** — Project/CWD-scoped task list (stored as a markdown checklist under `<cwd>/todo/todos.md`); survives session deletion
@@ -77,7 +81,7 @@ Direct-API providers only (Anthropic, OpenAI, GLM, Ollama) — Copilot and Claud
 ## Requirements
 
 - **Windows 11** (other platforms and versions not tested)
-- **Node.js 18+** — [nodejs.org](https://nodejs.org/)
+- **Node.js 22+** (source checkout / remote SSH) — [nodejs.org](https://nodejs.org/)
 - **Optional — GitHub Copilot CLI** — only needed for the Copilot provider (`gh extension install github/gh-copilot`, requires a GitHub Copilot license). The direct-API providers (Anthropic, Gemini, OpenAI, GLM, Ollama) work without it — just add an API key in the settings.
 
 ## Getting Started
@@ -106,7 +110,7 @@ npm start
 
 ```
 agent-desktop/
-├── main.js              # Electron main process, IPC handlers, skill/agent/tutorial scanner
+├── main.js              # Electron main process, IPC handlers, skill/agent scanner
 ├── src/
 │   ├── data-dir.js      # App data directory + one-shot legacy-data migration; per-provider skills/agents dirs
 │   ├── providers/       # Provider backends (Anthropic, Gemini, OpenAI-compatible, agent loop)
@@ -117,10 +121,10 @@ agent-desktop/
 │   ├── claude-code-transcript.js # Reads Claude Code's own session transcript (history restore)
 │   └── ipc/             # IPC handler modules
 ├── renderer/
-│   ├── app.js           # Frontend logic, chat UI, skill/agent toggles, onboarding, tutorials
+│   ├── app.js           # Frontend logic, startup, chat UI, skill/agent toggles
 │   ├── modules/         # Renderer modules (costs, todos, images, …)
-│   ├── index.html       # App shell, onboarding wizard markup
-│   └── styles.css       # Styles, themes, onboarding, shortcuts overlay
+│   ├── index.html       # App shell
+│   └── styles.css       # Styles, themes, shortcuts overlay
 ├── preload.js           # Electron preload script (IPC bridge)
 ├── __tests__/           # Jest test suites (1300+ tests)
 ├── CHANGELOG.md         # Version history

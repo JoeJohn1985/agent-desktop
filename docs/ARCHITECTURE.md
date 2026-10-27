@@ -1,5 +1,51 @@
 # Agent Desktop — Architecture (arc42)
 
+## Release-bound Claude runtime
+
+`src/claude-runtime.js` derives ACP **0.97.0** / Agent SDK **0.3.310**
+(native CLI **2.1.310**) from exact production dependencies. Local ACP starts
+`process.execPath` with `ELECTRON_RUN_AS_NODE=1`, no shell or runtime download.
+Packaged paths map `app.asar` to `app.asar.unpacked`; electron-builder unpacks
+the complete production dependency tree so ESM resolution and native subprocesses
+use real files. `src/claude-runtime-after-pack.js` rejects missing or mismatched
+target-platform native packages. Do not install with `--omit=optional`.
+
+Legacy `claudeCodeAdapterVersion` never wins. The distinct
+`claudeCodeAdapterDeveloperVersion` is honored only with `settings.devMode === true`;
+IPC enforces the same gate. Explicit stable versions use npx only for developer
+experiments or remote SSH execution. Applying/resetting a preference never
+destroys live clients; only newly spawned processes use the changed selection.
+SSH needs remote Node ≥22, potentially downloads the exact selected package,
+and must not be described as locally bundled/offline. Host API-key and executable
+overrides are cleared; the separately installed remote `claude` is not replaced.
+
+Local status checks validate bundle integrity; auth status/login/logout invoke
+the bundled native CLI, not PATH's `claude`. Account configuration remains the
+standard Claude configuration, not app-stored credentials. A developer runtime
+may differ from the release-native auth helper; that experiment is not a
+release compatibility guarantee.
+
+Verification and limits:
+[`validation.md`](../specs/changes/claude-runtime-im-app-release/validation.md).
+
+The existing app updater is Git-checkout based, not an installer updater.
+When an app update changes dependency manifests it runs npm install (including
+optional native packages); normal subsequent Claude startup performs no install.
+Packaged distributions receive this runtime with replacement app artifacts;
+automatic installer distribution/signing is not implemented by this change.
+
+## Global skill management
+
+`context:listGlobalSkills` (preload: `desktop.context.listGlobalSkills()`)
+returns `{providers, directory, skills, error}[]` for local user-wide roots.
+Main resolves these with the existing `skillDirs(provider, null)` and Copilot
+folder override; no path/provider argument is accepted from the renderer.
+Projects, CLI builtins and SSH sources are excluded. Identical roots share a
+group; equal names across distinct roots are not merged.
+Functions keeps independent loading/error state and request generations.
+Session Actions still uses `context:listSkills(provider, cwd)` and tab-local
+selection. Reload/plugin actions refresh lists without resetting tab sets.
+
 > **Version:** 1.0.0 · **Date:** July 2026 · **Stack:** Electron 35, ACP (JSON-RPC/NDJSON), @anthropic-ai/sdk, @google/genai, marked, highlight.js, jest
 >
 > Note: internally the app was called `copilot-desktop` until 1.0. With 1.0 the
@@ -266,7 +312,6 @@ mechanics. Loaded before `app.js`, in this order:
 | `provider-settings.js` | API-provider key/base-URL settings, dynamically-generated per-provider config tabs, Claude Code (SSH) remote-folder picker |
 | `chat-search.js` | In-chat search bar (Ctrl+F) |
 | `plugins.js` | Plugin/marketplace manager + chat/plugins/costs main-view switching |
-| `onboarding.js` | First-run wizard (cwd/provider/folders/role) + post-onboarding tutorial popups |
 
 The last nine were extracted from `renderer/app.js` in one pass; tab
 management, the agent-IPC event dispatcher, and the model/provider catalog
@@ -281,16 +326,13 @@ Contains all functions with no DOM or Electron dependencies:
 - **Cost-log helpers:** `buildCostBuckets`, `aggregateCostBySession`, `trimCostLog`
 - **Display helpers:** `shortenPath`, `truncatePath`, `formatDate`, `escapeHtml`, `toolIcon`, …
 
-### 5.7 First-run onboarding wizard
+### 5.7 Direct startup
 
-A multi-step wizard that guides the user through authentication, folder configuration, and a feature intro on the very first app start.
-
-| Step | Description |
-|---|---|
-| 1. Auth | Check/guidance for `gh auth login` |
-| 2. Folder setup | Choose the working directory |
-| 3. Category selection | Choose skill categories to pre-install |
-| 4. Feature intro | Overview of app features |
+First launch uses the normal chat startup path without a wizard or tutorial
+gate. Authentication and provider/folder configuration remain in their regular
+settings. `app.js` releases the loading splash in a `finally` block, even if
+initialization fails. Legacy completion/tutorial flags are ignored; stored user
+configuration and generated files are not migrated or deleted.
 
 ---
 
@@ -475,7 +517,7 @@ session or a sent message first.
 10. preferences:read → persistent state
 11. tabs restored from openTabs
 12. for each tab: AcpClient created + started (session/new or session/load)
-13. check onboarding → wizard if needed
+13. continue directly in chat (no first-run wizard)
 ```
 
 `app.whenReady()` also kicks off `syncPlansConvention()` (fire-and-forget, see
@@ -626,14 +668,6 @@ the installed Copilot CLI initializes the Electron bridge and accepts its tools
 capability without a model prompt. Actual remote authorization and tool calls
 in a real conversation still require an end-to-end user trial.
 
-#### Namespace: `onboarding` / `tutorial` / `dev`
-
-| Channel | Description |
-|---|---|
-| `onboarding:getStatus/setComplete/getCategories/installCategory` | First-run wizard |
-| `tutorial:getFlags/setFlag` | Tutorial flags (key whitelist: `tutorialSkillsShown`, `tutorialRenameShown`) |
-| `dev:setOnboardingComplete` | Reset onboarding |
-
 ---
 
 ## 7. Deployment view
@@ -658,7 +692,7 @@ in a real conversation still require an end-to-end user trial.
 | Data | Location | Owner |
 |---|---|---|
 | Preferences (theme, tabs, settings, cost log) | `userData/preferences.json` (+ `.bak`) | `src/preferences.js` |
-| Folders config, onboarding, tutorial flags | `~/.agent-desktop/folders.json` | `src/scanners.js`, `main.js` |
+| Folders config (legacy wizard flags ignored) | `~/.agent-desktop/folders.json` | `src/scanners.js`, `main.js` |
 | Sessions | `~/.copilot/session-state/<uuid>/` | CLI (read-only) |
 | Todos | `<cwd>/todo/todos.md` | `src/todos.js` |
 | Logs | `~/.agent-desktop/logs/agent-desktop-<YYYY-MM-DD>.log` | `src/logger.js` |
@@ -775,8 +809,7 @@ Two themes via CSS custom properties (`:root`, `[data-theme="dark"]`).
 | 6 | PATH augmentation for Linux/macOS | User must edit `.bashrc` | Pragmatic, covers 95% of cases |
 | 7 | Markdown init in the preload | In the renderer | `marked`/`hljs`/`DOMPurify` loaded once |
 | 8 | Cost log in `preferences.json` (key `costLog`) | Own file | No extra file I/O; reuses existing persistence infrastructure |
-| 9 | Tutorial flags in `folders.json` | `preferences.json` | `folders.json` already exists; flags should *not* travel with a preferences export |
-| 10 | Onboarding wizard with tab locking | Separate window | Single-window UX; auto-unlock after 180s as a safety net |
+| 10 | Direct chat startup | First-run wizard | No setup gate; provider configuration remains in normal settings |
 | 11 | **Multi-provider via a shared event vocabulary** | Provider-specific renderer paths | The renderer stays backend-agnostic; new providers only re-emit the same events |
 | 12 | **Rename `copilot-desktop` → `agent-desktop` with data migration** | Keep the internal name | Provider-neutral identity; one-shot Windows-safe migration (DPAPI keeps keys) |
 

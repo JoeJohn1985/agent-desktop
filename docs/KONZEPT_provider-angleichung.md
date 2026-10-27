@@ -64,7 +64,11 @@ Affected: `PROVIDER_SETTINGS` (+ `copilot` entry with `type:'cli'`), `renderProv
 
 ---
 
-## Phase C — Copilot optional (onboarding rework)
+## Phase C — Copilot optional (onboarding rework, historisch)
+
+> Stand 2026-10-26: Der alte Wizard wurde auf Nutzerauftrag entfernt.
+> Die folgenden Wizard-Bezüge beschreiben den historischen Konzeptstand;
+> aktuelle Provider-Einrichtung erfolgt über die regulären Einstellungen.
 
 Today the **Copilot login is a mandatory step**. New:
 - **Provider selection step** on first start: "What would you like to start with?" → Copilot **or** an API provider (enter a key) **or** Ollama (local).

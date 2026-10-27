@@ -18,11 +18,12 @@ const path = require('path');
  * @param {(yamlString: string) => Object} yamlParse - YAML-Parser-Funktion
  * @returns {Promise<Array<{id: string, dirName: string, name: string, description: string, source: string, icon: string}>>}
  */
-async function scanSkillDirectory(dir, source, iconFn, yamlParse) {
+async function scanSkillDirectory(dir, source, iconFn, yamlParse, strict = false) {
   let dirEntries;
   try {
     dirEntries = await fsp.readdir(dir, { withFileTypes: true });
-  } catch (_) {
+  } catch (error) {
+    if (strict && error.code !== 'ENOENT') throw error;
     return []; // Verzeichnis fehlt oder ist nicht lesbar — beides kein Fehlerfall.
   }
 
@@ -44,6 +45,7 @@ async function scanSkillDirectory(dir, source, iconFn, yamlParse) {
         icon: meta.icon || iconFn(meta.name || entry.name),
       };
     } catch (e) {
+      if (strict && e.code !== 'ENOENT') throw e;
       // Ordner ohne SKILL.md ist der Normalfall, kein Fehler \u2014 nur echte
       // Lese-/Parse-Probleme melden.
       if (e.code !== 'ENOENT') console.warn(`[skills:scan:${source}] Fehler:`, e.message || e);

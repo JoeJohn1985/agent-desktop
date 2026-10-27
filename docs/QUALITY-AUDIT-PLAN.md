@@ -85,8 +85,8 @@ Metriken-Übersicht des Abschlussberichts ein).
   `src/model-discovery.js`, `src/secure-store.js`, `main.js`
   `todos:*`/`preferences:*`/`folders:*`/`instructions:*` IPC
 
-- [ ] **B7 — Onboarding, Setup & Updater (Backend)**
-  `main.js` Onboarding-/Setup-/Auth-IPC (ca. Zeilen 1452–1833),
+- [ ] **B7 — Auth & Updater (Backend)**
+  `main.js` Auth-IPC (Wizard-/Setup-IPC entfernt),
   `src/updater.js`, `main.js` `updates:*` IPC
 
 ### Renderer (`renderer/`)
@@ -112,8 +112,8 @@ Metriken-Übersicht des Abschlussberichts ein).
 - [ ] **R6 — Settings, DevConsole, Shortcuts, Drag&Drop, Tooltips**
   `renderer/app.js` Zeilen 4571–6057
 
-- [ ] **R7 — Onboarding & Update-Banner-UI**
-  `renderer/app.js` Zeilen 6057–6952
+- [ ] **R7 — Startup & Update-Banner-UI**
+  `renderer/app.js` Initialisierung und Update-Prüfung
 
 - [ ] **R8 — Gemeinsame Renderer-Logic & Utils**
   `src/renderer-logic.js`, `src/utils.js`, `src/frontend-helpers.js`,

@@ -54,8 +54,6 @@ const tabs = new Map();
 // pendingToolCalls → modules/agent-ipc.js
 /** @type {string|null} Tab ID of the currently visible/active tab. */
 let activeTabId = null; // eslint-disable-line prefer-const -- reassigned in modules/tabs.js (switchTab, startTabRename)
-/** @type {Set<string>} Tab IDs waiting for onboarding generation to finish. */
-let _pendingOnboardingTabs = new Set();
 
 // ── UI Constants → modules/utils.js ──────────────────────────
 
@@ -596,10 +594,6 @@ function applyDevMode(enabled) {
     const panel = document.getElementById('devConsolePanel');
     if (panel) panel.style.display = 'none';
   }
-  const onboardingResetGroup = document.getElementById('settOnboardingResetGroup');
-  const onboardingResetSeparator = document.getElementById('settOnboardingResetSeparator');
-  if (onboardingResetGroup) onboardingResetGroup.style.display = enabled ? '' : 'none';
-  if (onboardingResetSeparator) onboardingResetSeparator.style.display = enabled ? '' : 'none';
   // The adapter-update banner is a developer affordance (see
   // checkClaudeAdapterUpdate) — a banner already on screen has to go when dev
   // mode is switched off, otherwise it would sit there un-dismissable by the
@@ -617,8 +611,7 @@ function applyDevMode(enabled) {
 // ── Tab Status ───────────────────────────────────────────────
 // Status: 'idle' | 'working' | 'question' | 'done' | 'error'
 /**
- * Update the visual status badge of a tab and trigger tutorial popups
- * when all pending onboarding tabs reach 'done'.
+ * Update the visual status badge of a tab.
  * @param {string} tabId
  * @param {'idle'|'working'|'question'|'done'|'error'} status
  */
@@ -627,13 +620,6 @@ function setTabStatus(tabId, status) {
   if (!tab) return;
   tab.tabStatus = status;
   renderTabs();
-
-  if (status === 'done' && _pendingOnboardingTabs.has(tabId)) {
-    _pendingOnboardingTabs.delete(tabId);
-    if (_pendingOnboardingTabs.size === 0) {
-      setTimeout(() => showTutorialPopup(), 1500);
-    }
-  }
 }
 
 // ── Inactivity Timeout & Force Unlock ────────────────────────
@@ -780,7 +766,7 @@ function convertHtmlToMarkdown(html) {
  * Handles slash-command detection, input history, skill/agent prefix
  * injection, provider tool permissions, and UI state updates.
  */
-function sendMessage() {
+async function sendMessage() {
   const input = document.getElementById('chatInput');
   const richInput = document.getElementById('chatInputRich');
   let text;
@@ -810,6 +796,18 @@ function sendMessage() {
   if (tab.isProcessing) return;
 
   const tabProvider = getTabProvider(tab);
+  // Recheck the real native configuration at send time, including changes
+  // made outside the app. A failed check must not reinject a disabled skill.
+  let nativeEnabledSkills = null;
+  if (tabProvider === 'copilot' && tab.activeSkills.size) {
+    try {
+      nativeEnabledSkills = await desktop.context.listSkills(tabProvider, tab.cwd || null);
+    } catch (error) {
+      showNotification(`Skill-Status konnte nicht geprüft werden: ${error.message}`, 'error');
+      return;
+    }
+    if (tabs.get(activeTabId) !== tab || tab.isProcessing) return;
+  }
   // Guard: a Copilot model that the CLI no longer offers (removed from the
   // dynamic list) can't be used — tell the user instead of failing opaquely.
   if (tabProvider === 'copilot' && tab.selectedModel && !isCopilotModelAvailable(tab.selectedModel)) {
@@ -836,18 +834,16 @@ function sendMessage() {
   // Build skill instructions prefix for this tab's active skills
   let skillPrefix = '';
   const activeSkillInfos = [];
-  if (tab.activeSkills.size > 0) {
-    for (const id of tab.activeSkills) {
-      const s = skills.find(sk => sk.id === id);
+  const selectedSkills = getActiveSkillDefinitions(tab).filter(skill =>
+    !nativeEnabledSkills || nativeEnabledSkills.some(s => s.name === skill.name));
+  if (selectedSkills.length > 0) {
+    for (const s of selectedSkills) {
       if (s) {
         activeSkillInfos.push({ name: s.name, icon: s.icon || '🧩' });
       }
     }
     if (activeSkillInfos.length > 0) {
-      const skillNames = [...tab.activeSkills].map(id => {
-        const s = skills.find(sk => sk.id === id);
-        return s ? `- ${s.name}` : null;
-      }).filter(Boolean);
+      const skillNames = selectedSkills.map(s => `- ${s.name}`);
       skillPrefix = `Verwende folgende Skills für diese Aufgabe:\n${skillNames.join('\n')}\n\n`;
     }
   }
@@ -1238,6 +1234,7 @@ function initContextInfo() {
     });
 
     btn.closest('.model-select-wrapper').appendChild(dropdown);
+    positionSessionMenu(dropdown, btn);
 
     activeCloseHandler = (ev) => {
       if (!dropdown.contains(ev.target) && ev.target !== btn) {
@@ -1882,7 +1879,8 @@ async function initStatusbar() {
  * @returns {Promise<void>}
  */
 async function initDataLoad() {
-  // Skills/Agents werden nicht hier geladen: sie hängen an Provider und
+  void loadGlobalSkills();
+  // Session-Skills/Agents hängen an Provider und
   // Projekt des aktiven Tabs, und der existiert zu diesem Zeitpunkt noch
   // nicht. Das übernimmt loadContextForTab() beim ersten switchTab().
   const savedActiveAgents = getSettings().activeAgents || [];
@@ -2218,7 +2216,6 @@ function initSettings() {
   document.getElementById('btnSettings').addEventListener('click', () => {
     settTheme.value = getCurrentTheme();
     settingsOverlay.classList.add('overlay--visible');
-    loadDevOnboardingState();
   });
 
   document.getElementById('btnSettingsClose').addEventListener('click', () => {
@@ -2336,38 +2333,6 @@ function initSettings() {
     renderProviderConfigTabs(); // a key may have just been added/removed
   });
   document.querySelector('.settings__tab[data-tab="features"]')?.addEventListener('click', renderFeatureMatrix);
-
-  // Dev tools: Onboarding toggle
-  async function loadDevOnboardingState() {
-    const { onboardingComplete } = await desktop.dev.getOnboardingState();
-    const statusEl = document.getElementById('devOnboardingStatus');
-    const btnEl = document.getElementById('btnDevOnboardingToggle');
-    if (onboardingComplete) {
-      statusEl.textContent = 'Status: ● Abgeschlossen';
-      statusEl.style.color = 'var(--accent)';
-      btnEl.textContent = 'Zurücksetzen';
-    } else {
-      statusEl.textContent = 'Status: ○ Ausstehend';
-      statusEl.style.color = 'var(--text-muted)';
-      btnEl.textContent = 'Als erledigt markieren';
-    }
-  }
-
-  document.getElementById('btnDevOnboardingToggle').addEventListener('click', async () => {
-    const { onboardingComplete } = await desktop.dev.getOnboardingState();
-    const result = await desktop.dev.setOnboardingComplete(!onboardingComplete);
-    if (result.success) {
-      await loadDevOnboardingState();
-      showNotification(
-        !onboardingComplete ? 'Onboarding als erledigt markiert' : 'Onboarding zurückgesetzt — Wizard erscheint beim nächsten Start',
-        'success'
-      );
-    } else {
-      showNotification(`Fehler: ${result.error}`, 'error');
-    }
-  });
-
-  document.querySelector('.settings__tab[data-tab="ui"]')?.addEventListener('click', loadDevOnboardingState);
 }
 
 // ── Instructions Editor Modal ──────────────────────────────────────
@@ -2492,11 +2457,6 @@ function initListActionDelegation() {
     if (el) el.addEventListener('click', handler);
   };
 
-  on('skillList', (e) => {
-    const card = e.target.closest('.skill-card');
-    if (card?.dataset.skillId) toggleSkill(card.dataset.skillId);
-  });
-
   on('agentList', (e) => {
     const card = e.target.closest('.agent-card');
     if (card?.dataset.agentId) toggleAgent(card.dataset.agentId);
@@ -2576,10 +2536,15 @@ function initListActionDelegation() {
 
 // initTooltips → modules/utils.js
 
-// initOnboarding, showOnboardingStep, render*Step, handleOnboardingLogin,
-// handleCreateFolders, nextOnboardingStep, showTutorialPopup,
-// showTutorialRenamePopup, finishOnboarding, hideAppLoadingSplash →
-// modules/onboarding.js
+/**
+ * Always release the loading splash, including when startup fails.
+ */
+function hideAppLoadingSplash() {
+  const el = document.getElementById('appLoading');
+  if (!el) return;
+  el.classList.add('app-loading--hidden');
+  setTimeout(() => el.remove(), 300);
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -2630,11 +2595,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     initDragDrop();
     initTooltips();
     initListActionDelegation();
+    initSessionSkills();
     initTabModelSelector();
     initTabModeSelector();
     initGeminiModeToggle();
     initContextInfo();
-    initOnboarding();
     refreshProviderStatus();
     initUpdateChecker();
     initClaudeAdapterUpdateChecker();

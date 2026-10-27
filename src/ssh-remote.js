@@ -54,7 +54,7 @@ const SOURCE_NVM_PREFIX = '[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >
  * @returns {string}
  */
 function buildAdapterCommand(cwd, adapterSpec) {
-  return `${SOURCE_NVM_PREFIX}cd ${shellQuote(cwd)} && exec npx -y ${shellQuote(adapterSpec)}`;
+  return `${SOURCE_NVM_PREFIX}unset CLAUDE_CODE_EXECUTABLE ANTHROPIC_API_KEY; export DISABLE_AUTOUPDATER=1; cd ${shellQuote(cwd)} && exec npx -y ${shellQuote(adapterSpec)}`;
 }
 
 /**

@@ -25,7 +25,7 @@ function openFunctionsView(page = _functionsPage) {
   for (const selector of ['#sessionActions', '#streamArea', '.chat-input-bar']) {
     document.querySelector(selector).style.display = 'none';
   }
-  if (page === 'skills') renderSkills();
+  if (page === 'skills') { void loadGlobalSkills(); renderSkills(); }
   if (page === 'connections') renderMcpServers();
   if (page === 'plugins') renderPlugins();
   if (page === 'costs') requestAnimationFrame(renderCostsPanel);

@@ -140,7 +140,7 @@ function initCostsPanel() {
     }
   });
   // Open the costs page from the session-actions bar.
-  document.getElementById('btnOpenCosts')?.addEventListener('click', () => {
+  document.getElementById('sessionUsage')?.addEventListener('click', () => {
     window.switchToCostsView();
   });
 }

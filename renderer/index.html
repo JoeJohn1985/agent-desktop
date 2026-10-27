@@ -248,28 +248,6 @@
         </div>
       </div>
       </section><!-- functionsView -->
-      <!-- Session Actions (slash command buttons, under tabs) -->
-      <div class="session-actions" id="sessionActions">
-        <div class="model-select-wrapper">
-          <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model und Reasoning für diesen Tab auswählen">🧠 Model</button>
-        </div>
-        <div class="model-select-wrapper">
-          <button class="session-actions__btn" id="btnModeSelect" data-tooltip="Modus für diesen Tab auswählen">🤖 Agent</button>
-        </div>
-        <div class="model-select-wrapper">
-          <button class="session-actions__btn" id="btnContextInfo" data-tooltip="Kontext-Auslastung anzeigen">📊 Kontext</button>
-        </div>
-        <div class="model-select-wrapper">
-          <button class="session-actions__btn" id="btnApprovalToggle" data-tooltip="Aktionen bestätigen / alles erlauben (pro Tab)">🔓 Auto</button>
-        </div>
-        <div class="model-select-wrapper" id="geminiModeWrapper" style="display:none;">
-          <button class="session-actions__btn" id="btnGeminiMode" data-tooltip="Gemini: Live-Suche oder Datei-Tools (nicht gleichzeitig möglich)">🔍 Recherche</button>
-        </div>
-        <div class="session-actions__spacer"></div>
-        <span class="session-actions__provider" id="sessionProvider" data-tooltip="Provider dieses Tabs (wird beim Erstellen über „+" festgelegt)">🔌 Copilot</span>
-        <button class="session-actions__cost-btn" id="btnOpenCosts" data-tooltip="Kostenauflistung öffnen">📈</button>
-        <span class="session-actions__usage" id="sessionUsage">Heute: ~$0.00</span>
-      </div>
       <div class="stream-area" id="streamArea">
         <!-- Search Bar -->
         <div class="chat-search" id="chatSearchBar">
@@ -318,6 +296,30 @@
         <div class="dev-console__body" id="devConsoleBody"></div>
       </div>
       <div class="permission-dropup" id="permissionDropup" style="display:none;"></div>
+      <!-- Session actions dock above the entire input bar, outside the editor. -->
+      <div class="session-actions" id="sessionActions">
+        <span class="session-actions__provider" id="sessionProvider" data-tooltip="Provider dieses Tabs (wird beim Erstellen über „+“ festgelegt)">🔌 Copilot</span>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnModelSelect" data-tooltip="Model und Reasoning für diesen Tab auswählen">🧠 Model</button>
+        </div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnModeSelect" data-tooltip="Modus für diesen Tab auswählen">🤖 Agent</button>
+        </div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnApprovalToggle" data-tooltip="Aktionen bestätigen / alles erlauben (pro Tab)">🔓 Auto</button>
+        </div>
+        <div class="model-select-wrapper">
+          <button type="button" class="session-actions__btn" id="btnSessionSkills" aria-expanded="false" aria-controls="sessionSkillsDropdown">🛠️ Skills (0)</button>
+        </div>
+        <div class="model-select-wrapper" id="geminiModeWrapper" style="display:none;">
+          <button class="session-actions__btn" id="btnGeminiMode" data-tooltip="Gemini: Live-Suche oder Datei-Tools (nicht gleichzeitig möglich)">🔍 Recherche</button>
+        </div>
+        <div class="session-actions__spacer"></div>
+        <div class="model-select-wrapper">
+          <button class="session-actions__btn" id="btnContextInfo" data-tooltip="Kontext-Auslastung anzeigen">📊 Kontext</button>
+        </div>
+        <button type="button" class="session-actions__usage" id="sessionUsage" data-tooltip="Kostenübersicht öffnen">Heute: ~$0.00</button>
+      </div>
       <div class="chat-input-bar">
         <div class="chat-input-wrapper">
           <div class="rich-text-toolbar" id="richTextToolbar">
@@ -442,15 +444,6 @@
               </label>
             </div>
             <div class="settings__hint">Aktiviert Entwickler-Werkzeuge: Test Runner (🧪) und Developer Console (🖥️) in der Sidebar.</div>
-          </div>
-          <div class="settings__separator" id="settOnboardingResetSeparator" style="display:none;"></div>
-          <div class="settings__group" id="settOnboardingResetGroup" style="display:none;">
-            <label class="settings__label">Onboarding zurücksetzen</label>
-            <div class="settings__hint">Zeigt den Einrichtungs-Wizard beim nächsten App-Start erneut an.</div>
-            <div class="settings__row" style="margin-top:8px;align-items:center;gap:12px;">
-              <span id="devOnboardingStatus"></span>
-              <button class="action-btn" id="btnDevOnboardingToggle"></button>
-            </div>
           </div>
         </div>
         <!-- Tab: API-Provider (Keys) -->
@@ -607,29 +600,6 @@
 
   <script src="../node_modules/dompurify/dist/purify.min.js"></script>
   <!-- Extracted modules (loaded before app.js, share global scope) -->
-  <!-- Onboarding Wizard Overlay -->
-  <div id="onboarding-overlay" class="onboarding-overlay" style="display:none">
-    <div class="onboarding-wizard">
-      <div class="onboarding-wizard__header">
-        <div class="onboarding-wizard__steps">
-          <span class="onboarding-step onboarding-step--active" data-step="1">1</span>
-          <span class="onboarding-step__line"></span>
-          <span class="onboarding-step" data-step="2">2</span>
-          <span class="onboarding-step__line"></span>
-          <span class="onboarding-step" data-step="3">3</span>
-          <span class="onboarding-step__line"></span>
-          <span class="onboarding-step" data-step="4">4</span>
-        </div>
-        <span class="onboarding-wizard__title">Willkommen bei Agent Desktop</span>
-      </div>
-      <div class="onboarding-wizard__body" id="onboarding-body">
-      </div>
-      <div class="onboarding-wizard__footer">
-        <button class="action-btn action-btn--primary" id="btnOnboardingNext" disabled>Weiter →</button>
-      </div>
-    </div>
-  </div>
-
   <script src="../src/auto-compaction-policy.js"></script>
   <script src="../src/renderer-logic.js"></script>
   <script src="provider-icons.js"></script>
@@ -653,7 +623,6 @@
   <script src="modules/plugins.js"></script>
   <script src="modules/functions.js"></script>
   <script src="modules/scheduled-tasks.js"></script>
-  <script src="modules/onboarding.js"></script>
   <script src="app.js"></script>
   <div class="overlay" id="mcpManagerOverlay" style="display:none;">
     <div class="overlay__dialog mcp-manager" role="dialog" aria-modal="true" aria-labelledby="mcpManagerTitle">
