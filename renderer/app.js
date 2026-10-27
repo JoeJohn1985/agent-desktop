@@ -766,12 +766,17 @@ function convertHtmlToMarkdown(html) {
  * Handles slash-command detection, input history, skill/agent prefix
  * injection, provider tool permissions, and UI state updates.
  */
-async function sendMessage() {
+async function sendMessage(answerRequest) {
+  const choice = answerRequest?.questionEl ? answerRequest : null;
+  const sendTabId = choice ? choice.tabId : activeTabId;
+  if (sendTabId == null || sendTabId !== activeTabId) return;
   const input = document.getElementById('chatInput');
   const richInput = document.getElementById('chatInputRich');
   let text;
 
-  if (richTextMode) {
+  if (choice) {
+    text = choice.text;
+  } else if (richTextMode) {
     const html = richInput.innerHTML.trim();
     if (!html || html === '<br>') return;
     text = convertHtmlToMarkdown(html).trim();
@@ -790,10 +795,12 @@ async function sendMessage() {
   historyIndex = -1;
   historySavedInput = '';
 
-  const tab = tabs.get(activeTabId);
+  const tab = tabs.get(sendTabId);
   if (!tab) return;
 
   if (tab.isProcessing) return;
+  if (choice && (!choice.questionEl.isConnected || choice.questionEl._question?.reply !== undefined ||
+      !choice.questionEl._question?.parsed.options.includes(text))) return;
 
   const tabProvider = getTabProvider(tab);
   // Recheck the real native configuration at send time, including changes
@@ -806,7 +813,7 @@ async function sendMessage() {
       showNotification(`Skill-Status konnte nicht geprüft werden: ${error.message}`, 'error');
       return;
     }
-    if (tabs.get(activeTabId) !== tab || tab.isProcessing) return;
+    if (tabs.get(sendTabId) !== tab || activeTabId !== sendTabId || tab.isProcessing) return;
   }
   // Guard: a Copilot model that the CLI no longer offers (removed from the
   // dynamic list) can't be used — tell the user instead of failing opaquely.
@@ -816,6 +823,7 @@ async function sendMessage() {
   }
 
   // Show user message in stream
+  window.chatQuestions?.answer(tab, text);
   const inputEl = document.createElement('div');
   inputEl.className = 'stream-input';
   inputEl.textContent = text;
@@ -890,8 +898,8 @@ async function sendMessage() {
   tab.statusEl.textContent = '● Thinking…';
   tab.statusEl.style.display = 'block';
   tab.isProcessing = true;
-  setTabStatus(activeTabId, 'working');
-  startInactivityMonitor(activeTabId);
+  setTabStatus(sendTabId, 'working');
+  startInactivityMonitor(sendTabId);
 
   // Send to Copilot via JSON API
   const settings = getSettings();
@@ -899,12 +907,11 @@ async function sendMessage() {
     ? getReasoningForModel(tab, tab.selectedModel)
     : null;
 
-  const sendTabId = activeTabId;
   // Freeze the model this prompt actually runs on. The token delta measured after
   // completion must be priced at THIS model — not tab.selectedModel, which the
   // user may switch (for the next prompt) before /usage is read.
   tab._billingModel = tab.selectedModel || DEFAULT_MODEL_ID;
-  desktop.chat.send(activeTabId, agentPrefix + skillPrefix + text, {
+  desktop.chat.send(sendTabId, agentPrefix + skillPrefix + text, {
     sessionId: tab.sessionId || undefined,
     autoApprove: true,
     allowedTools: [],
@@ -930,16 +937,18 @@ async function sendMessage() {
   if (tab.sessionId) touchSession(tab.sessionId);
 
   // Clear input
-  if (richTextMode) {
+  if (!choice && richTextMode) {
     richInput.innerHTML = '';
-  } else {
+  } else if (!choice) {
     input.value = '';
     input.style.height = 'auto';
   }
 
   // Clear tab input state
-  tab.inputText = '';
-  tab.inputRichHtml = '';
+  if (!choice) {
+    tab.inputText = '';
+    tab.inputRichHtml = '';
+  }
 
   scrollToBottom(tab.streamEl);
 }

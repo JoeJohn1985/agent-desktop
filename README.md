@@ -30,7 +30,7 @@ See [runtime validation and limits](specs/changes/claude-runtime-im-app-release/
 - 📝 **Markdown Rendering** — Full markdown support including code blocks with syntax highlighting
 - 📂 **File Drag & Drop** — Drop files directly into the chat
 - 🔎 **Chat Search** — Search through conversation history
-- 📋 **Session Resume** — Reopening a session restores its full history in the tab
+- 📋 **Session Resume** — Reopening a session restores user/assistant text in normal live-message styling, without historical tool calls, results, or reasoning blocks. Mixed messages retain their text; native session data/model context and live tool displays remain unchanged. Older messages load lazily. Applies to saved app tabs, Copilot, local Claude Code previews, and direct-API histories; Claude Code over SSH still has no history preview.
 
 ### Providers & Models
 - 🔌 **Multiple Providers per Tab** — GitHub Copilot CLI plus direct APIs (Anthropic, Gemini, OpenAI, GLM, Ollama); the provider is fixed per tab and chosen when creating it
@@ -140,3 +140,10 @@ agent-desktop/
 ## License
 
 Apache 2.0
+# Antwortoptionen im Chat
+
+Explizite Modellfragen können nach Abschluss der Antwort als Single-Select-Buttons
+erscheinen. Ein Klick sendet den Antworttext über den normalen Chat-Sendeweg;
+Freitext bleibt möglich. Jede folgende Nutzerantwort sperrt die alten Optionen,
+eine passende Auswahl wird markiert. Normale Listen werden nicht umgewandelt.
+Siehe [Ausgabevertrag und Providerwirkung](docs/USER-GUIDE.md#chat-antwortoptionen).

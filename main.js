@@ -643,7 +643,7 @@ async function runAgentPrompt(tabId, prompt, options, started) {
 
   if (provider === 'copilot') client.__mcpRevision = appMcp.revision;
 
-  // No app-side context injection for ACP providers. Both Copilot and Claude
+  // No skills/agents context injection for ACP providers. Both Copilot and Claude
   // Code discover their own skills and agents from their native folders (see
   // src/context-paths.js for the exact locations) — injecting an index here
   // would load the same files a second time and waste context.
@@ -654,9 +654,12 @@ async function runAgentPrompt(tabId, prompt, options, started) {
   // onto a provider that reads `.claude/` — the folder it actually discovers
   // by itself, and which the sidebar now shows instead.
 
+  // Only the small app-owned output contract is sent via the existing context
+  // block, on every prompt so loaded/already-running native sessions see it too.
+  // Native instruction files remain untouched.
   // Send prompt (async — events stream to renderer via AcpClient)
   started();
-  return client.prompt(prompt).then(result => {
+  return client.prompt(prompt, require('./src/chat-question').instruction).then(result => {
     client.__model = client.model;
     return result;
   }).catch((err) => {

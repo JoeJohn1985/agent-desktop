@@ -1429,6 +1429,7 @@ mark.chat-search-highlight--active {
 }
 .stream-output--active { display: block; }
 .stream-input {
+  line-height: 1.4;
   margin: 18px 0 8px;
   margin-left: auto;
   padding: 10px 14px;
@@ -1490,7 +1491,8 @@ mark.chat-search-highlight--active {
 .stream-response {
   margin: 16px 0;
   padding: 10px 14px;
-  line-height: 1.55;
+  line-height: 1.4;
+  white-space: normal;
   width: fit-content;
   max-width: 80%;
   background: var(--bg-surface);
@@ -1502,14 +1504,14 @@ mark.chat-search-highlight--active {
 }
 
 /* ── Markdown inside responses ──────────────────────── */
-.stream-response.markdown-body p { margin: 0.4em 0; }
-.stream-response.markdown-body p:first-child { margin-top: 0; }
-.stream-response.markdown-body p:last-child { margin-bottom: 0; }
+.stream-response.markdown-body p { margin: 0.9em 0; }
 .stream-response.markdown-body h1,
 .stream-response.markdown-body h2,
 .stream-response.markdown-body h3,
-.stream-response.markdown-body h4 {
-  margin: 0.8em 0 0.4em;
+.stream-response.markdown-body h4,
+.stream-response.markdown-body h5,
+.stream-response.markdown-body h6 {
+  margin: 0.9em 0 0.45em;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -1518,10 +1520,13 @@ mark.chat-search-highlight--active {
 .stream-response.markdown-body h3 { font-size: 1.05em; }
 .stream-response.markdown-body ul,
 .stream-response.markdown-body ol {
-  margin: 0.4em 0;
+  margin: 0.9em 0;
   padding-left: 1.5em;
 }
-.stream-response.markdown-body li { margin: 0.2em 0; }
+.stream-response.markdown-body li { margin: 0.15em 0; }
+.stream-response.markdown-body li > p { margin: 0.4em 0; }
+.stream-response.markdown-body li > ul,
+.stream-response.markdown-body li > ol { margin: 0.25em 0; }
 .stream-response.markdown-body code {
   font-family: 'Consolas', 'Fira Code', monospace;
   background: var(--bg-overlay);
@@ -1531,7 +1536,8 @@ mark.chat-search-highlight--active {
   word-break: break-all;
 }
 .stream-response.markdown-body pre {
-  margin: 0.6em 0;
+  margin: 0.9em 0;
+  white-space: pre;
   padding: 12px;
   background: #1e1e2e;
   border-radius: var(--radius);
@@ -1544,9 +1550,11 @@ mark.chat-search-highlight--active {
   color: #cdd6f4;
   font-size: 14px;
   line-height: 1.5;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .stream-response.markdown-body blockquote {
-  margin: 0.4em 0;
+  margin: 0.9em 0;
   padding: 4px 12px;
   border-left: 3px solid var(--accent);
   color: var(--text-secondary);
@@ -1554,17 +1562,18 @@ mark.chat-search-highlight--active {
   border-radius: 0 4px 4px 0;
 }
 .stream-response.markdown-body a {
+  overflow-wrap: anywhere;
   color: var(--accent);
   text-decoration: underline;
 }
 .stream-response.markdown-body hr {
   border: none;
   border-top: 1px solid var(--bg-overlay);
-  margin: 0.8em 0;
+  margin: 0.9em 0;
 }
 .stream-response.markdown-body table {
   border-collapse: collapse;
-  margin: 0.6em 0;
+  margin: 0.9em 0;
   width: 100%;
   display: block;
   overflow-x: auto;
@@ -1579,6 +1588,12 @@ mark.chat-search-highlight--active {
   background: var(--bg-overlay);
   font-weight: 600;
 }
+/* Trim actual block containers, not every descendant's first/last paragraph. */
+.stream-response.markdown-body > :first-child,
+.stream-response.markdown-body blockquote > :first-child,
+.stream-response.markdown-body li > p:first-child { margin-top: 0; }
+.stream-response.markdown-body > :last-child,
+.stream-response.markdown-body :is(li, blockquote) > :last-child { margin-bottom: 0; }
 .stream-status-line {
   font-size: 15px;
   color: var(--text-muted);
@@ -1868,21 +1883,6 @@ mark.chat-search-highlight--active {
   font-size: 12px;
   color: var(--text-muted);
   font-style: italic;
-}
-
-/* History bubbles — same shape as real messages, but slightly dimmed */
-.stream-input--history {
-  opacity: 0.65;
-}
-.stream-response--history {
-  opacity: 0.65;
-}
-.stream-tool--history {
-  opacity: 0.6;
-  font-size: 12px;
-  font-family: monospace;
-  color: var(--text-muted);
-  padding: 2px 0 2px 12px;
 }
 
 /* Session actions and input form one dock below the independently scrolling chat. */
@@ -4196,3 +4196,32 @@ button.section-menu__item:focus-visible { outline: 2px solid var(--accent); outl
 .session-skills__toggle[aria-checked="true"] .skill-card__toggle::after { transform: translateX(14px); background: #fff; }
 .session-skills__toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .session-skills__status { padding: 12px; overflow-wrap: anywhere; }
+.chat-question {
+  margin-top: 1em;
+  padding: 0.8em 1em;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+.chat-question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin-top: 0.65em;
+}
+.chat-question button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4em 0.75em;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-question button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-question button:hover:not(:disabled) { background: var(--bg-hover); }
+.chat-question button:disabled { opacity: 0.6; cursor: default; }
+.chat-question button[aria-pressed="true"] { opacity: 1; border-color: var(--accent); background: var(--accent-subtle); font-weight: 600; }

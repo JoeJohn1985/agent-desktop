@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.28.0] - 2026-10-28
+
+### Added
+- Interaktive Antwortoptionen für strukturierte Auswahlfragen mit passenden
+  Modell-Instructions und abgesichertem Versand im zugehörigen Chat.
+
+### Changed
+- Geladene Chatverläufe zeigen Nachrichten ohne Abdunklung und ohne historische
+  Toolaufrufe; Live-Toolanzeigen und gespeicherte Sessiondaten bleiben erhalten.
+- Einheitliche Chattypografie mit kompakterem Zeilenabstand sowie verbesserten
+  Absatzabständen und Listeneinrückungen.
+
 ## [1.27.1] - 2026-10-27
 
 ### Fixed

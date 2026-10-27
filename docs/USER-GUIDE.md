@@ -2,6 +2,15 @@
 
 **Version 1.0.0** · Electron-based desktop app for multiple LLM providers
 
+### Lesefluss im Chat
+
+Neue und geladene Nachrichten verwenden dieselben Textabstände: Zeilenhöhe
+1.5, klar getrennte Markdownabsätze und kompakte Listen mit hängendem Umbruch.
+Die gewählte Schriftgröße bleibt erhalten. Nutzertext behält eingegebene
+Zeilenumbrüche; Markdown, Codeeinrückungen und Tabellen bleiben unverändert
+interpretierbar. Lange Links umbrechen, Codeblöcke und Tabellen bleiben bei
+Bedarf horizontal scrollbar.
+
 ### Claude Code: mitgelieferte Runtime
 
 Die App liefert Claude ACP **0.97.0**, Agent SDK **0.3.310** und die passende
@@ -792,3 +801,45 @@ die Skills-Verwaltung unter Funktionen bleibt synchron.
 Während des Ladens oder bei Fehlern werden keine veralteten Skills angehängt.
 Das Menü ist scrollbar: Tab oder Pfeiltasten navigieren, Enter/Leertaste
 schalten um, Escape schließt und setzt den Fokus zurück. Außenklick schließt ebenfalls.
+## Chat-Antwortoptionen
+
+Nach einer vollständig abgeschlossenen Antwort kann das Modell eine hervorgehobene
+Frage mit 2–6 Antwortbuttons zeigen. Klick oder Tastaturaktivierung sendet exakt
+den Optionstext als normale Nachricht im Ursprungschat (inklusive vorhandener
+Provider-/Skill-/Agent-Einstellungen). Ein vorhandener Eingabeentwurf bleibt beim
+Buttonklick erhalten. Freitextantworten sind weiterhin möglich. Nach einer Antwort
+sind alte Optionen deaktiviert; die passende Option bleibt markiert.
+
+Der explizite Modellvertrag lautet:
+
+````text
+```agent-desktop-question
+{"question":"Wie möchtest du fortfahren?","options":["Umsetzen","Zuerst erklären"]}
+```
+````
+
+Genau ein eigenständiger Block am Ende der finalen Assistentenantwort, nur diese
+beiden Felder, Frage maximal 500 Zeichen, 2–6 eindeutige nichtleere Optionen
+je maximal 300 Zeichen, keine Steuerzeichen. Fehlerhafte/unvollständige Blöcke
+bleiben lesbarer Text; gewöhnliche Listen bleiben unverändert. Während Streaming
+und nach Abbruch werden keine Antwortbuttons freigeschaltet. Modelltext wird
+nicht als Skript oder Button-HTML ausgeführt.
+
+**Instructions:** Der kleine App-eigene Vertrag wird Copilot und Claude Code
+(einschließlich SSH) über den bestehenden ACP-Kontextblock bei jedem normalen
+Prompt mitgegeben. Dadurch gilt er auch in laufenden/resumierten Sessions ab dem
+nächsten Prompt, ohne native Skills/Agents erneut einzubetten oder globale Dateien
+zu ändern. Bei Anthropic, OpenAI-kompatiblen Providern (OpenAI/Ollama/GLM) und Gemini
+liegt er im Systemtext; auch ältere wiederhergestellte OpenAI-Systemtexte werden
+in der Laufzeitkopie ergänzt. Native `ask_user`-Tools haben Vorrang; deren Fragen
+und Permission-Freigaben werden nicht zusätzlich als diese Buttons erzeugt.
+
+**Verlauf und Grenzen:** Die Anzeige rekonstruiert Frage und beantworteten Zustand
+aus vorhandenem Assistenten-/Nutzertext (einschließlich App-Skill-/Agentpräfixen),
+ohne native Sessiondaten zu bearbeiten. Ältere Fragen werden nicht wieder aktiv.
+Nicht verfügbare oder verdichtete Textverläufe können keine verschwundenen
+Optionen rekonstruieren; für Claude-Code-SSH gibt es weiterhin keine lokale
+Historienvorschau. Das Modell muss den Vertrag befolgen; ohne passenden Block
+bleibt die normale Textantwort. Es werden keine zusätzlichen LLM-Anfragen benötigt.
+Die neue Software muss regulär geladen werden; diese Änderung startet oder beendet
+keine laufende Nutzer-App.

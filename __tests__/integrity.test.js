@@ -12,6 +12,8 @@ const ROOT = path.resolve(__dirname, '..');
 const HTML_PATH = path.join(ROOT, 'renderer', 'index.html');
 const CSS_PATH = path.join(ROOT, 'renderer', 'styles.css');
 const MAIN_JS_PATH = path.join(ROOT, 'main.js');
+const mainRequire = require('module').createRequire(MAIN_JS_PATH);
+const { instruction: questionInstruction } = mainRequire('./src/chat-question');
 const PRELOAD_PATH = path.join(ROOT, 'preload.js');
 const IPC_DIR = path.join(ROOT, 'src', 'ipc');
 
@@ -58,6 +60,7 @@ describe('Copilot ACP MCP configuration', () => {
       newSession: jest.fn(), prompt: jest.fn().mockResolvedValue(),
     };
     const send = vm.runInNewContext(`(${promptSource})`, {
+      require: mainRequire,
       scheduledTabs: new Map(),
       backends: new Map([['tab', backend]]),
       appMcp: { revision: 2, getCopilotMcpConfig: jest.fn().mockResolvedValue(bridgeConfig) },
@@ -72,7 +75,7 @@ describe('Copilot ACP MCP configuration', () => {
     if (changed) expect(backend.loadSession).toHaveBeenCalledWith('native-session', 'C:\\project');
     expect(backend.newSession).not.toHaveBeenCalled();
     expect(backend.__mcpRevision).toBe(2);
-    expect(backend.prompt).toHaveBeenCalledWith('hello');
+    expect(backend.prompt).toHaveBeenCalledWith('hello', questionInstruction);
   });
 
   test.each([null, 'existing-session'])('does not resend native MCP config for session %s', async (sessionId) => {
@@ -88,6 +91,7 @@ describe('Copilot ACP MCP configuration', () => {
     const getAcpMcpServers = jest.fn().mockResolvedValue([{ name: 'native-server' }]);
     const backends = new Map();
     const sendAgentPrompt = vm.runInNewContext(`(${promptSource})`, {
+      require: mainRequire,
       scheduledTabs: new Map(),
       AcpClient,
       getAcpMcpServers,
@@ -120,7 +124,7 @@ describe('Copilot ACP MCP configuration', () => {
       expect(backend.newSession).toHaveBeenCalledWith('C:\\project');
       expect(backend.loadSession).not.toHaveBeenCalled();
     }
-    expect(backend.prompt).toHaveBeenCalledWith('hello');
+    expect(backend.prompt).toHaveBeenCalledWith('hello', questionInstruction);
   });
 });
 
@@ -166,7 +170,9 @@ describe('Tabbezogene Tool-Konfiguration entfernt', () => {
     const denySource = rendererJs.match(/^function getDeniedTools\b[\s\S]*?^\}/m)[0];
     const listSkills = nativeFailure ? jest.fn().mockRejectedValue(new Error('CLI failure')) : jest.fn().mockResolvedValue([]);
     const showNotification = jest.fn();
+    const answer = jest.fn();
     const sendMessage = vm.runInNewContext(`(${sendSource})`, {
+      window: { chatQuestions: { answer } },
       document: {
         getElementById: () => input,
         createElement: () => ({ dataset: {} }),
@@ -204,11 +210,13 @@ describe('Tabbezogene Tool-Konfiguration entfernt', () => {
     if (selectedSkill) expect(listSkills).toHaveBeenCalledWith('copilot', null);
     if (nativeFailure) {
       expect(send).not.toHaveBeenCalled();
+      expect(answer).not.toHaveBeenCalled();
       expect(input.value).toBe('hello');
       expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('CLI failure'), 'error');
       return;
     }
 
+    expect(answer).toHaveBeenCalledWith(tab, 'hello');
     expect(send).toHaveBeenCalledWith('tab-1', 'hello', expect.objectContaining({
       deniedTools: settings.deniedToolsByProvider[provider],
       manualApproval: true,

@@ -39,6 +39,7 @@ function finalizeResponseBubble(tab) {
   if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
   if (tab._responseEl && tab._responseRaw) {
     tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+    tab._responseEl._questionRaw = tab._responseRaw;
   }
   tab._responseEl = null;
   tab._responseRaw = '';
@@ -155,6 +156,7 @@ function initAgentIPC() {
             }
           }
           tab._responseRaw += delta;
+          tab._responseEl._questionCommentary = false;
         }
         // Throttled markdown render — fast/no-highlight variant (see preload.js)
         // since this reruns on the whole growing response every ~100ms; the
@@ -185,10 +187,18 @@ function initAgentIPC() {
 
       case 'assistant.message': {
         // Final complete message — render full markdown
-        if (tab._responseEl && event.data.content) {
+        const content = event.data.content || tab._responseRaw;
+        if (!tab._responseEl && content) {
+          tab._responseEl = document.createElement('div');
+          tab._responseEl.className = 'stream-response markdown-body';
+          tab._responseEl.dataset.time = formatMessageTime(Date.now());
+          tab.streamEl.insertBefore(tab._responseEl, tab.statusEl);
+        }
+        if (tab._responseEl && content) {
           // Clear any pending throttle timer
           if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
-          tab._responseEl.innerHTML = window.markdown.render(event.data.content);
+          tab._responseEl.innerHTML = window.markdown.render(content);
+          tab._responseEl._questionRaw = content;
         }
         tab._responseEl = null;
         tab._responseRaw = '';
@@ -201,6 +211,8 @@ function initAgentIPC() {
       // ── Tool execution ────────────────────────────────────
       case 'tool.execution_start': {
         tab.lastActivityAt = Date.now();
+        const precedingResponse = tab._responseEl || [...tab.streamEl.querySelectorAll('.stream-response')].at(-1);
+        if (precedingResponse) precedingResponse._questionCommentary = true;
         // A tool call interrupts the assistant's text/reasoning stream. Mark a
         // pending break so the next delta doesn't glue onto the previous text —
         // report_intent keeps the same bubble, so without this the sentences merge.
@@ -585,9 +597,11 @@ function initAgentIPC() {
     if (tab._mdTimer) { clearTimeout(tab._mdTimer); tab._mdTimer = null; }
     if (tab._responseEl && tab._responseRaw) {
       tab._responseEl.innerHTML = window.markdown.render(tab._responseRaw);
+      tab._responseEl._questionRaw = tab._responseRaw;
     }
     tab._responseEl = null;
     tab._responseRaw = '';
+    window.chatQuestions?.complete(tab, code);
     tab._thinkingEl = null;
     tab._thinkingDetails = null;
     tab.statusEl.style.display = 'none';

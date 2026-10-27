@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const root = path.resolve(__dirname, '..');
+const mainRequire = require('module').createRequire(path.join(root, 'main.js'));
+const { instruction: questionInstruction } = mainRequire('./src/chat-question');
 
 test('background tab allocation preserves active tab and draft and forces no new IPC ID', async () => {
   const source = fs.readFileSync(path.join(root, 'renderer', 'modules', 'tabs.js'), 'utf8');
@@ -76,6 +78,7 @@ test('scheduled ACP prompts reuse MCP but cannot enable auto-approval or crash r
     updateOptions: jest.fn(), prompt: jest.fn().mockResolvedValue(),
   };
   const send = vm.runInNewContext(`(${prompt})`, {
+    require: mainRequire,
     scheduledTabs: new Map([[7, { id: 'run' }]]), backends: new Map([[7, client]]),
     appMcp: { revision: 1, getCopilotMcpConfig: jest.fn().mockResolvedValue('app-mcp.json') },
     COPILOT_CWD: 'C:\\project', COPILOT_BIN: 'copilot',
@@ -85,5 +88,5 @@ test('scheduled ACP prompts reuse MCP but cannot enable auto-approval or crash r
     allowAll: false, autoApprovePermissions: false, autoRestart: false,
     additionalMcpConfig: 'app-mcp.json', model: 'copilot-model', cwd: 'C:\\project',
   }));
-  expect(client.prompt).toHaveBeenCalledWith('Prompt');
+  expect(client.prompt).toHaveBeenCalledWith('Prompt', questionInstruction);
 });

@@ -32,6 +32,7 @@ function toAnthropicTools(defs) {
 }
 
 function buildSystemPrompt(cwd, extraContext) {
+  extraContext = [require('../chat-question').instruction, extraContext].filter(Boolean).join('\n\n');
   const base = [
     'You are a capable software engineering agent embedded in a desktop app.',
     'You can read and write files and run shell commands via the provided tools.',

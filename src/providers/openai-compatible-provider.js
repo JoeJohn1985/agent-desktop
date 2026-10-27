@@ -23,6 +23,7 @@ function toOpenAITools(defs) {
 }
 
 function buildSystemPrompt(cwd, extra) {
+  extra = [require('../chat-question').instruction, extra].filter(Boolean).join('\n\n');
   const lines = [
     'You are a helpful coding and research assistant embedded in a desktop app.',
     'You can run shell commands and read/write files via the provided tools.',
@@ -178,7 +179,16 @@ class OpenAICompatibleProvider extends ApiAgentClient {
   }
 
   _serializeHistory() { return this.#messages; }
-  _restoreHistory(arr) { this.#messages = Array.isArray(arr) && arr.length ? arr : []; }
+  _restoreHistory(arr) {
+    this.#messages = Array.isArray(arr) ? arr.map(message => ({ ...message })) : [];
+    const instruction = require('../chat-question').instruction;
+    const system = this.#messages.find(message => message.role === 'system');
+    if (system) {
+      if (!String(system.content).includes(instruction)) system.content = `${system.content}\n\n${instruction}`;
+    } else {
+      this.#messages.unshift({ role: 'system', content: buildSystemPrompt(this.options.cwd || process.cwd(), this.options.systemContext) });
+    }
+  }
 
   async _compact() {
     if (this.#messages.length <= 1) return;

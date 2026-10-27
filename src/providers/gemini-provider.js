@@ -103,6 +103,7 @@ function buildSystemPrompt(cwd, mode, combined) {
   lines.push(`Working directory: ${cwd}`);
   lines.push(`Operating system: ${os.platform()} (${os.release()})`);
   lines.push('Lead with the outcome; keep explanations concise.');
+  lines.push(require('../chat-question').instruction);
   return lines.join('\n');
 }
 

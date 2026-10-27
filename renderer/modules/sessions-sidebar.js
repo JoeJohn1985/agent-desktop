@@ -486,7 +486,7 @@ const HISTORY_LIVE_TAIL_MESSAGES = 20;
 
 /**
  * Inserts history "groups" (one BUILDER FUNCTION per source message — a
- * message can produce 0-N elements: a bubble plus tool-call lines) into the
+ * message can produce 0-N text bubbles) into the
  * DOM, but only builds+attaches the most recent HISTORY_LIVE_TAIL_MESSAGES.
  * Older builders go UNBUILT into tab._prunedNodes, so a long resumed session
  * pays neither DOM cost nor markdown-parse cost for its backlog on open —
@@ -517,14 +517,20 @@ function insertHistoryGroups(groups, insertBefore, tab) {
  */
 function renderSimpleHistory(messages, insertBefore, tab) {
   if (!Array.isArray(messages)) return;
-  const groups = messages.map(msg => () => {
+  const groups = messages.filter(msg =>
+    (msg.role === 'user' || msg.role === 'assistant') &&
+    typeof msg.content === 'string' && msg.content.trim()
+  ).map((msg, index, visible) => () => {
     const el = document.createElement('div');
     if (msg.role === 'user') {
-      el.className = 'stream-input stream-input--history';
-      el.textContent = msg.content;
+      el.className = 'stream-input';
+      el.textContent = window.ChatQuestion?.displayReply(msg.content) ?? msg.content;
     } else {
-      el.className = 'stream-response markdown-body stream-response--history';
+      el.className = 'stream-response markdown-body';
       el.innerHTML = window.markdown ? window.markdown.render(msg.content) : escapeHtml(msg.content);
+      const rawReply = visible.slice(index + 1).find(item => item.role === 'user')?.content;
+      const reply = window.ChatQuestion?.displayReply(rawReply) ?? rawReply;
+      window.chatQuestions?.render(el, msg.content, tab, reply, index === visible.length - 1);
     }
     // Timestamp restored history too, so a long-idle tab still prunes it
     // 30 minutes after being displayed — see pruneOldMessages().
@@ -536,8 +542,8 @@ function renderSimpleHistory(messages, insertBefore, tab) {
 
 /**
  * Render a persisted direct-API conversation (Anthropic-native messages) as
- * history bubbles + tool-call lines. Tool-result messages (internal to the
- * agent loop) and thinking blocks are skipped.
+ * text bubbles. Tool calls, tool results and thinking blocks are skipped
+ * only in this display projection, never in the provider's history.
  * @param {Array} messages - Provider-native message history.
  * @param {(el: HTMLElement) => void} insertBefore - Inserts an element into the stream.
  * @param {Object} tab
@@ -545,14 +551,18 @@ function renderSimpleHistory(messages, insertBefore, tab) {
 function renderApiHistory(messages, insertBefore, tab) {
   if (!Array.isArray(messages)) return;
 
-  // One builder per source message (a message can yield a bubble plus several
-  // tool-call lines) — element creation incl. markdown parse happens only
+  // One builder per source message — element creation incl. markdown parse happens only
   // when the builder runs (live tail now; staged backlog on scroll-up).
-  const buildMessageEls = (msg) => {
+  const historyText = msg => {
+    if (Array.isArray(msg.parts)) return msg.parts.filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('\n').trim();
+    if (typeof msg.content === 'string') return msg.content;
+    return (msg.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  };
+  const buildMessageEls = (msg, index) => {
     const out = [];
     const userBubble = (text) => {
       const el = document.createElement('div');
-      el.className = 'stream-input stream-input--history';
+      el.className = 'stream-input';
       el.textContent = text;
       // Timestamp restored history too, so a long-idle tab still prunes it
       // 30 minutes after being displayed — see pruneOldMessages().
@@ -561,54 +571,39 @@ function renderApiHistory(messages, insertBefore, tab) {
     };
     const assistantBubble = (text) => {
       const el = document.createElement('div');
-      el.className = 'stream-response markdown-body stream-response--history';
+      el.className = 'stream-response markdown-body';
       el.innerHTML = window.markdown ? window.markdown.render(text) : escapeHtml(text);
+      const reply = messages.slice(index + 1).find(item => item.role === 'user' && historyText(item));
+      window.chatQuestions?.render(el, text, tab, reply ? historyText(reply) : undefined,
+        !messages.slice(index + 1).some(item => historyText(item)));
       el.dataset.ts = String(Date.now());
-      out.push(el);
-    };
-    const toolLine = (name, input) => {
-      const el = document.createElement('div');
-      el.className = 'stream-tool--history';
-      let args = '';
-      try { args = typeof formatToolArgs === 'function' ? formatToolArgs(input) : ''; } catch (_) { /* ignore */ }
-      if (!args && input) { try { args = JSON.stringify(input).slice(0, 120); } catch (_) { /* ignore */ } }
-      el.textContent = `🔧 ${name}${args ? ' — ' + args : ''}`;
       out.push(el);
     };
 
     if (Array.isArray(msg.parts)) {
       // Gemini shape: { role: 'user' | 'model', parts: [{text}|{functionCall}|{functionResponse}] }
-      const text = msg.parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+      const text = msg.parts.filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('\n').trim();
       if (msg.role === 'model') {
         if (text) assistantBubble(text);
-        for (const p of msg.parts) {
-          if (p.functionCall) toolLine(p.functionCall.name, p.functionCall.args);
-        }
       } else if (text) {
         userBubble(text); // functionResponse parts (internal) skipped
       }
     } else if (msg.role === 'user') {
       // Anthropic shape
       if (typeof msg.content === 'string' && msg.content.trim()) userBubble(msg.content);
-      // array content = tool_result blocks (internal) → skip
+      if (Array.isArray(msg.content)) {
+        const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+        if (text) userBubble(text);
+      }
     } else if (msg.role === 'assistant') {
       const blocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content || '') }];
       const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       if (text) assistantBubble(text);
-      for (const b of blocks) {
-        if (b.type === 'tool_use') toolLine(b.name, b.input);
-      }
-      // OpenAI-compatible shape: tool calls live on msg.tool_calls.
-      for (const tc of msg.tool_calls || []) {
-        let input = {};
-        try { input = JSON.parse(tc.function?.arguments || '{}'); } catch (_) { /* ignore */ }
-        toolLine(tc.function?.name || 'tool', input);
-      }
     }
     return out;
   };
 
-  insertHistoryGroups(messages.map(msg => () => buildMessageEls(msg)), insertBefore, tab);
+  insertHistoryGroups(messages.map((msg, index) => () => buildMessageEls(msg, index)), insertBefore, tab);
 }
 
 // ── Delete Session ────────────────────────────────────────────
