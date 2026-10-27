@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.27.1] - 2026-10-27
+
+### Fixed
+- Copilot behält Long Context beim Start, Wiederaufnehmen und Modellwechsel.
+- Automatische Komprimierung wird nach abgeschlossenen Anfragen nicht mehr
+  durch Antworttexte, vorherige Freigaben oder einzelne Werkzeugfehler gesperrt.
+- Kontextmenü und Detailanzeige öffnen oberhalb des Buttons innerhalb des Fensters.
+
+### Added
+- Diagnoseprotokoll für Auslösung und Ausstiegsgründe der Autokomprimierung.
+
 ## [1.27.0] - 2026-10-27
 
 ### Added
