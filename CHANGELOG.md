@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.28.1] - 2026-10-28
+
+### Fixed
+- App-Updates installieren Abhängigkeiten auch bei unverändertem Git-Stand
+  erneut und prüfen diese vor einem erfolgreichen Abschluss.
+- Fehlgeschlagene Updates verhindern den automatischen Neustart; die
+  Oberfläche bietet eine erneute Reparatur an.
+
 ## [1.28.0] - 2026-10-28
 
 ### Added
