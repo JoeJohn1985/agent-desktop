@@ -843,3 +843,38 @@ Historienvorschau. Das Modell muss den Vertrag befolgen; ohne passenden Block
 bleibt die normale Textantwort. Es werden keine zusätzlichen LLM-Anfragen benötigt.
 Die neue Software muss regulär geladen werden; diese Änderung startet oder beendet
 keine laufende Nutzer-App.
+
+## Update-Recovery
+
+Updates benötigen einen sauberen Git-Checkout und einen Fast-Forward-Pull.
+Jedes explizite Update bzw. jede Reparatur führt anschließend
+`npm install --include=dev --include=optional --no-save --no-audit --no-fund`
+aus, auch wenn keine neuen Commits vorliegen. Über den manuellen Updatecheck
+ist bei aktuellem Code die Aktion „Reparieren“ erreichbar.
+
+Bei npm- oder Prüfungsfehlern wird nicht automatisch neu gestartet. Der aktuelle
+Code liegt nach erfolgreichem Pull bereits lokal vor; die App bis zur erfolgreichen
+Reparatur nicht neu starten. npm-Ausgaben helfen bei Netzwerk-/Installationsfehlern.
+Es gibt keinen automatischen Git-Reset, Stash oder Rollback; eigene Änderungen
+bleiben geschützt. Sessions und Anwendungsdaten werden nicht verändert.
+
+Startet die App schon nicht mehr (z. B. „Cannot find module“), kann ihre
+Updatefunktion nicht helfen. In einer normalen PowerShell im Checkout:
+
+```powershell
+Set-Location 'C:\Pfad\zum\copilot-desktop'
+npm install --include=dev --include=optional --no-save --no-audit --no-fund
+npm ls --all --include=dev --omit=optional
+```
+
+Alternativ ist die vorhandene `.\setup.ps1` der Setup-/Recovery-Einstieg
+(prüft auch das Electron-Binary und erneuert die Desktop-Verknüpfung).
+Bei Fehlern nicht weiter starten, sondern npm-Ausgabe und Netzwerk-/Proxyzugang
+prüfen. Keine Quelldateien löschen oder zurücksetzen; keine Administratorrechte
+oder globalen npm-Installationen erforderlich.
+
+Die Update-Nachprüfung prüft erforderliche installierte Paketversionen und
+transitive Abhängigkeiten mit npm sowie statische externe Runtime-Imports
+ohne deren Ausführung. Das ist keine vollständige Prüfsummenprüfung aller
+Paketdateien, kein Test dynamisch berechneter Imports und keine Garantie,
+dass jeder Provider oder native Bestandteil zur Laufzeit funktioniert.

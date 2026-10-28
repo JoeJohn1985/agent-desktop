@@ -11,7 +11,6 @@
 
 const { execFileSync } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { checkForUpdate, applyUpdate } = require('../src/updater');
 
@@ -20,7 +19,7 @@ function sh(cwd, args) {
 }
 
 function mkTmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'agentdesk-updater-'));
+  return fs.mkdtempSync(path.join(__dirname, '.updater-fixture-'));
 }
 
 function commitVersion(dir, version, message) {
@@ -80,17 +79,21 @@ describe('updater: checkForUpdate (echte Git-Repos)', () => {
     expect(result.updateAvailable).toBe(false);
   });
 
-  it('ist kein Git-Checkout außerhalb eines Repos', async () => {
+  it('ist kein Git-Checkout bei nicht vorhandenem Arbeitsverzeichnis', async () => {
     const outside = mkTmp();
-    const result = await checkForUpdate(outside);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('not-a-git-checkout');
-    fs.rmSync(outside, { recursive: true, force: true });
+    try {
+      const result = await checkForUpdate(path.join(outside, 'missing'));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe('not-a-git-checkout');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 
 describe('updater: applyUpdate (echte Git-Repos)', () => {
   let root, originDir, localDir;
+  let npmRun;
 
   beforeEach(() => {
     root = mkTmp();
@@ -98,6 +101,7 @@ describe('updater: applyUpdate (echte Git-Repos)', () => {
     localDir = path.join(root, 'local');
     initRepoWithVersion(originDir, '1.0.0');
     sh(root, ['clone', '--quiet', originDir, localDir]);
+    npmRun = jest.fn().mockResolvedValue({ ok: true, stdout: '{}', stderr: '' });
   });
 
   afterEach(() => {
@@ -107,14 +111,67 @@ describe('updater: applyUpdate (echte Git-Repos)', () => {
   it('pullt neue Commits fast-forward und liefert die neue Version', async () => {
     commitVersion(originDir, '1.1.0', 'bump');
 
-    const result = await applyUpdate(localDir);
+    const result = await applyUpdate(localDir, { npmRun });
     expect(result.ok).toBe(true);
     expect(result.newVersion).toBe('1.1.0');
+    expect(npmRun.mock.calls[0][1]).toContain('install');
+    expect(npmRun.mock.calls[1][1]).toContain('ls');
+  });
+
+  it('installiert nach npm-Fehler bei gleichem HEAD erneut; gibt stdout und stderr aus', async () => {
+    commitVersion(originDir, '1.1.0', 'bump');
+    npmRun.mockResolvedValueOnce({ ok: false, stdout: 'install output', stderr: 'network error' });
+    const failed = await applyUpdate(localDir, { npmRun });
+    expect(failed).toMatchObject({ ok: false, reason: 'npm-install-failed', codeUpdated: true });
+    expect(failed.error).toContain('install output');
+    expect(failed.error).toContain('network error');
+    const head = sh(localDir, ['rev-parse', 'HEAD']);
+    expect((await applyUpdate(localDir, { npmRun })).ok).toBe(true);
+    expect(sh(localDir, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(npmRun.mock.calls.filter(([, args]) => args[0] === 'install')).toHaveLength(2);
+  });
+
+  it('repariert fehlende Runtime-Imports auch ohne neue Remoteversion', async () => {
+    fs.writeFileSync(path.join(originDir, 'main.js'), "require('fixture-runtime/entry.js');");
+    sh(originDir, ['add', '.']);
+    sh(originDir, ['commit', '--quiet', '-m', 'runtime']);
+    sh(localDir, ['pull', '--ff-only']);
+    expect(fs.existsSync(path.join(localDir, 'node_modules', 'fixture-runtime'))).toBe(false);
+    npmRun.mockImplementation(async (_cmd, args) => {
+      if (args[0] === 'install') {
+        const dep = path.join(localDir, 'node_modules', 'fixture-runtime');
+        fs.mkdirSync(dep, { recursive: true });
+        fs.writeFileSync(path.join(dep, 'entry.js'), 'throw new Error("must not execute");');
+      }
+      return { ok: true, stdout: '{}', stderr: '' };
+    });
+    expect((await applyUpdate(localDir, { npmRun })).ok).toBe(true);
+  });
+
+  it('meldet non-ok, wenn npm ls nach erfolgreichem install fehlschlägt', async () => {
+    npmRun.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, stderr: 'missing transitive dependency' });
+    expect(await applyUpdate(localDir, { npmRun })).toMatchObject({ ok: false, reason: 'dependency-validation-failed' });
+  });
+
+  it('meldet non-ok bei fehlender Importdatei trotz erfolgreichem npm ls', async () => {
+    fs.writeFileSync(path.join(originDir, 'main.js'), "require('definitely-missing-runtime/entry.js');");
+    sh(originDir, ['add', '.']);
+    sh(originDir, ['commit', '--quiet', '-m', 'runtime']);
+    expect(await applyUpdate(localDir, { npmRun })).toMatchObject({ ok: false, reason: 'dependency-validation-failed' });
+  });
+
+  it('behält ff-only Schutz bei divergiertem Verlauf', async () => {
+    sh(localDir, ['config', 'user.email', 'test@test.local']);
+    sh(localDir, ['config', 'user.name', 'Test']);
+    commitVersion(localDir, '2.0.0', 'local');
+    commitVersion(originDir, '3.0.0', 'remote');
+    expect(await applyUpdate(localDir, { npmRun })).toMatchObject({ ok: false, reason: 'pull-failed' });
+    expect(npmRun).not.toHaveBeenCalled();
   });
 
   it('bricht bei unsauberem Arbeitsverzeichnis ab', async () => {
     fs.writeFileSync(path.join(localDir, 'dirty.txt'), 'x');
-    const result = await applyUpdate(localDir);
+    const result = await applyUpdate(localDir, { npmRun });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('dirty-working-tree');
   });

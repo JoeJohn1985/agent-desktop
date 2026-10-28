@@ -1257,8 +1257,8 @@ ipcMain.handle('updates:check', async () => {
 });
 
 /**
- * @ipc updates:apply — Pulls the latest `main`, runs npm install if deps
- * changed, then relaunches the app. Blocks on a dirty working tree.
+ * @ipc updates:apply — Pulls the latest `main`, always installs and validates
+ * dependencies, then relaunches only on success. Blocks on a dirty working tree.
  * @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>}
  */
 ipcMain.handle('updates:apply', async () => {

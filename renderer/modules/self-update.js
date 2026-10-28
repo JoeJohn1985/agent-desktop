@@ -41,7 +41,8 @@ async function checkForUpdates({ silent = true } = {}) {
     } else if (!silent) {
       if (res.ok) {
         if (statusEl) statusEl.textContent = `Aktuell (v${res.currentVersion}).`;
-        showNotification(`Du nutzt bereits die neueste Version (v${res.currentVersion}).`, 'success');
+        showUpdateBanner(res.currentVersion, res.latestVersion, true);
+        showNotification(`Code aktuell (v${res.currentVersion}). Abhängigkeiten können über „Reparieren“ neu installiert werden.`, 'info');
       } else {
         const msg = updateReasonText(res.reason, res.error);
         if (statusEl) statusEl.textContent = msg;
@@ -63,6 +64,7 @@ function updateReasonText(reason, error) {
     case 'dirty-working-tree': return 'Lokale, nicht gespeicherte Änderungen vorhanden — bitte committen oder verwerfen.';
     case 'pull-failed': return 'git pull fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
     case 'npm-install-failed': return 'npm install fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
+    case 'dependency-validation-failed': return 'Abhängigkeitsprüfung fehlgeschlagen' + (error ? ` (${error})` : '') + '.';
     default: return error || 'Unbekannter Fehler.';
   }
 }
@@ -122,22 +124,22 @@ function wireBannerAutoCollapse(bar, dismissBtnId, iconId, tooltipText, reopen, 
 }
 
 /** Show the top update banner (idempotent — replaces any existing one). */
-function showUpdateBanner(currentVersion, latestVersion) {
+function showUpdateBanner(currentVersion, latestVersion, repair = false) {
   document.getElementById('updateBanner')?.remove();
   document.getElementById('updateBannerIcon')?.remove();
   const bar = document.createElement('div');
   bar.id = 'updateBanner';
   bar.className = 'update-banner';
   bar.innerHTML = `
-    <span class="update-banner__text">🔄 Neue Version <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).</span>
-    <button class="update-banner__btn" id="btnApplyUpdate">Herunterladen & Neustarten</button>
+    <span class="update-banner__text">${repair ? 'Abhängigkeiten erneut installieren und prüfen.' : `🔄 Neue Version <strong>v${escapeHtml(latestVersion)}</strong> verfügbar (aktuell v${escapeHtml(currentVersion)}).`}</span>
+    <button class="update-banner__btn" id="btnApplyUpdate">${repair ? 'Reparieren & danach neu starten' : 'Herunterladen & Neustarten'}</button>
     <button class="update-banner__close" id="btnDismissUpdate" aria-label="Schließen">✕</button>`;
   document.body.appendChild(bar);
   document.getElementById('btnApplyUpdate').addEventListener('click', () => applyUpdate(bar));
   wireBannerAutoCollapse(
     bar, 'btnDismissUpdate', 'updateBannerIcon',
     `App-Update verfügbar: v${latestVersion} (aktuell v${currentVersion})`,
-    () => showUpdateBanner(currentVersion, latestVersion),
+    () => showUpdateBanner(currentVersion, latestVersion, repair),
     () => { _dismissedUpdateVersion = latestVersion; }, // don't re-nag on background checks
   );
 }
@@ -157,11 +159,15 @@ async function applyUpdate(bar) {
     } else {
       const msg = updateReasonText(res.reason, res.error);
       showNotification('Update fehlgeschlagen: ' + msg, 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+      if (res.codeUpdated) {
+        const text = bar.querySelector('.update-banner__text');
+        if (text) text.textContent = 'Aktueller Code liegt bereits vor, Abhängigkeiten sind nicht bestätigt. App nicht neu starten, bis Reparatur erfolgreich ist. ' + msg;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Reparatur erneut versuchen'; }
     }
   } catch (e) {
     showNotification('Update fehlgeschlagen: ' + (e?.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen & Neustarten'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Erneut versuchen'; }
   } finally {
     _updateBusy = false;
   }

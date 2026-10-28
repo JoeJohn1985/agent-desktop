@@ -17,6 +17,7 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { createRequire, isBuiltin } = require('module');
 
 const UPDATE_BRANCH = 'main';
 const GIT_TIMEOUT_MS = 30_000;
@@ -33,6 +34,46 @@ function run(cmd, args, opts = {}) {
 }
 
 const git = (repoDir, args, opts) => run('git', args, { cwd: repoDir, ...opts });
+
+function commandError(result) {
+  return [result.stdout, result.stderr, result.error?.message].filter(Boolean).join('\n').trim();
+}
+
+async function validateDependencies(repoDir, npmRun = run) {
+  const tree = await npmRun(process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    ['ls', '--all', '--include=dev', '--omit=optional', '--json'],
+    { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: process.platform === 'win32' });
+  if (!tree.ok) return { ok: false, error: commandError(tree) };
+  // Resolve actual static runtime imports, without evaluating package code.
+  // npm ls alone does not notice deleted entry files inside an installed package.
+  const files = ['main.js', 'preload.js'].map(file => path.join(repoDir, file));
+  function collect(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) collect(file);
+      else if (entry.name.endsWith('.js')) files.push(file);
+    }
+  }
+  collect(path.join(repoDir, 'src'));
+  try {
+    for (const file of files) {
+      if (!fs.existsSync(file)) continue;
+      const source = fs.readFileSync(file, 'utf8');
+      const imports = source.matchAll(/(?:\brequire\s*\(\s*|\bimport\s*\(\s*|\bfrom\s*)['"]([^'"]+)['"]/g);
+      for (const [, specifier] of imports) {
+        if (specifier.startsWith('.') || path.isAbsolute(specifier) || isBuiltin(specifier)) continue;
+        if (specifier === 'electron' && process.versions.electron) continue;
+        const resolved = createRequire(file).resolve(specifier);
+        if (!fs.statSync(resolved).isFile()) throw new Error(`Runtime-Import ist keine Datei: ${specifier}`);
+      }
+    }
+    return { ok: true };
+  } catch (error) {
+    console.warn('[updater:dependencies]', error.message);
+    return { ok: false, error: error.message };
+  }
+}
 
 /** True if repoDir is inside a Git working tree. */
 async function isGitRepo(repoDir) {
@@ -98,48 +139,35 @@ async function checkForUpdate(repoDir) {
 
 /**
  * Apply the update: requires a clean working tree, pulls `main`, and runs
- * `npm install` if the dependency manifests changed. Does NOT restart — the
+ * `npm install` on every explicit update/repair, then validates dependencies. Does NOT restart — the
  * caller relaunches the app on success.
  * @param {string} repoDir
  * @returns {Promise<{ok:boolean, reason?:string, depsInstalled?:boolean, newVersion?:string, error?:string}>}
  */
-async function applyUpdate(repoDir) {
+async function applyUpdate(repoDir, { npmRun = run } = {}) {
   if (!(await isGitRepo(repoDir))) return { ok: false, reason: 'not-a-git-checkout' };
   if (!(await isWorkingTreeClean(repoDir))) return { ok: false, reason: 'dirty-working-tree' };
-
-  const before = await git(repoDir, ['rev-parse', 'HEAD']);
-  const headBefore = before.stdout.trim();
 
   const pull = await git(repoDir, ['pull', '--ff-only', 'origin', UPDATE_BRANCH]);
   if (!pull.ok) {
     return { ok: false, reason: 'pull-failed', error: (pull.stderr || pull.error?.message || '').trim() };
   }
 
-  const after = await git(repoDir, ['rev-parse', 'HEAD']);
-  const headAfter = after.stdout.trim();
-
-  // Did dependency manifests change between the old and new HEAD?
-  let depsInstalled = false;
-  if (headBefore && headAfter && headBefore !== headAfter) {
-    const diff = await git(repoDir, ['diff', '--name-only', headBefore, headAfter]);
-    const changed = diff.stdout.split('\n').map(s => s.trim());
-    if (changed.includes('package.json') || changed.includes('package-lock.json')) {
-      // npm ships as npm.cmd on Windows — a batch file, which Node's spawn/
-      // execFile refuses to run directly (throws EINVAL) without shell: true,
-      // regardless of the shell option's docs suggesting otherwise. Same
-      // reasoning as npx's shell:true in acp-client.js. Fixed args below, no
-      // untrusted input, so shell:true here carries no injection risk.
-      const isWindows = process.platform === 'win32';
-      const npmCmd = isWindows ? 'npm.cmd' : 'npm';
-      const install = await run(npmCmd, ['install', '--include=optional', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: isWindows });
-      if (!install.ok) {
-        return { ok: false, reason: 'npm-install-failed', error: (install.stderr || install.error?.message || '').trim() };
-      }
-      depsInstalled = true;
-    }
+  // npm.cmd requires a shell on Windows; all arguments are fixed.
+  const isWindows = process.platform === 'win32';
+  const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+  const install = await npmRun(npmCmd, ['install', '--include=dev', '--include=optional', '--no-save', '--no-audit', '--no-fund'], { cwd: repoDir, timeout: NPM_TIMEOUT_MS, shell: isWindows });
+  if (!install.ok) {
+    console.warn('[updater:install]', commandError(install));
+    return { ok: false, reason: 'npm-install-failed', error: commandError(install), codeUpdated: true };
+  }
+  const validation = await validateDependencies(repoDir, npmRun);
+  if (!validation.ok) {
+    console.warn('[updater:validation]', validation.error);
+    return { ok: false, reason: 'dependency-validation-failed', error: validation.error, codeUpdated: true };
   }
 
-  return { ok: true, depsInstalled, newVersion: readLocalVersion(repoDir) };
+  return { ok: true, depsInstalled: true, newVersion: readLocalVersion(repoDir) };
 }
 
 module.exports = {
@@ -148,5 +176,6 @@ module.exports = {
   readLocalVersion,
   checkForUpdate,
   applyUpdate,
+  validateDependencies,
   UPDATE_BRANCH,
 };

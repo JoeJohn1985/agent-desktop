@@ -101,7 +101,7 @@ describe('release packaging contract', () => {
       expect((await updater.applyUpdate(path.join(__dirname, '..'))).depsInstalled).toBe(true);
       expect(exec).toHaveBeenCalledWith(
         expect.stringMatching(/^npm(?:\.cmd)?$/),
-        ['install', '--include=optional', '--no-audit', '--no-fund'],
+        ['install', '--include=dev', '--include=optional', '--no-save', '--no-audit', '--no-fund'],
         expect.any(Object), expect.any(Function),
       );
     } finally {

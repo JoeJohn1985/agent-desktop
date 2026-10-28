@@ -1,5 +1,15 @@
 # Agent Desktop
 
+## Updates und Reparatur
+
+Explizite App-Updates installieren Abhängigkeiten immer neu – auch ohne neue
+Commits. Erst nach erfolgreichem npm install, Dependencygraph-Prüfung und
+seiteneffektfreier Auflösung statischer Runtime-Imports wird neu gestartet.
+Ein manueller Updatecheck bietet bei aktuellem Code „Reparieren“ an.
+Bei Installationsfehlern liegt der gepullte Code bereits vor: nicht neu starten,
+bis die Reparatur erfolgreich war. Kein automatischer Git-Rollback.
+Siehe [Recovery-Anleitung](docs/USER-GUIDE.md#update-recovery).
+
 > Electron desktop app for multiple LLM providers (GitHub Copilot CLI, Anthropic, Gemini, OpenAI, GLM, Ollama) in one polished chat UI — named sessions, skills & agents, markdown, drag & drop, dynamic model discovery, USD cost tracking.
 
 > **Version 1.0** — first stable release.
